@@ -1,6 +1,57 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
+// Default autoplay settings - will be overridden by user preferences when available
+const defaultAutoplaySettings = {
+  interval: 5,
+  loop: true,
+  startFromFirst: true,
+  skipBlankLines: true,
+};
+
+// Default max setlist files - will be overridden by user preferences when available
+let maxSetlistFilesLimit = 50;
+
+
+// Function to load preferences from main process (called after app init)
+export async function loadPreferencesIntoStore(store) {
+  try {
+    if (window.electronAPI?.preferences?.getAutoplayDefaults) {
+      const result = await window.electronAPI.preferences.getAutoplayDefaults();
+      if (result.success && result.defaults) {
+        store.getState().setAutoplaySettings(result.defaults);
+      }
+    }
+    
+    if (window.electronAPI?.preferences?.getFileHandling) {
+      const result = await window.electronAPI.preferences.getFileHandling();
+      if (result.success && result.settings) {
+        maxSetlistFilesLimit = result.settings.maxSetlistFiles ?? 50;
+        // Trigger a re-render by updating a dummy state
+        store.getState().updateMaxSetlistFiles(maxSetlistFilesLimit);
+      }
+    }
+
+    // Load tooltip visibility preference
+    if (window.electronAPI?.preferences?.get) {
+      const result = await window.electronAPI.preferences.get('general.showTooltips');
+      if (result.success && typeof result.value === 'boolean') {
+        store.getState().setShowTooltips(result.value);
+      }
+    }
+
+    // Load toast sounds muted preference
+    if (window.electronAPI?.preferences?.get) {
+      const result = await window.electronAPI.preferences.get('general.toastSoundsMuted');
+      if (result.success && typeof result.value === 'boolean') {
+        store.getState().setToastSoundsMuted(result.value);
+      }
+    }
+  } catch (error) {
+    console.warn('[LyricsStore] Failed to load preferences:', error);
+  }
+}
+
 export const defaultOutput1Settings = {
   fontStyle: 'Bebas Neue',
   bold: false,
@@ -180,7 +231,10 @@ const useLyricsStore = create(
       },
       lyricsTimestamps: [],
       hasSeenIntelligentAutoplayInfo: false,
+      showTooltips: true,
+      toastSoundsMuted: false,
       pendingSavedVersion: null,
+      maxSetlistFilesVersion: 0,
 
       setLyrics: (lines) => set({ lyrics: lines }),
       setLyricsSections: (sections) => set({ lyricsSections: Array.isArray(sections) ? sections : [] }),
@@ -200,6 +254,8 @@ const useLyricsStore = create(
       setSongMetadata: (metadata) => set({ songMetadata: metadata }),
       setAutoplaySettings: (settings) => set({ autoplaySettings: settings }),
       setLyricsTimestamps: (timestamps) => set({ lyricsTimestamps: timestamps }),
+      setShowTooltips: (show) => set({ showTooltips: show }),
+      setToastSoundsMuted: (muted) => set({ toastSoundsMuted: muted }),
       setHasSeenIntelligentAutoplayInfo: (seen) => set({ hasSeenIntelligentAutoplayInfo: seen }),
       setPendingSavedVersion: (payload) => set({ pendingSavedVersion: payload || null }),
       clearPendingSavedVersion: () => set({ pendingSavedVersion: null }),
@@ -218,12 +274,19 @@ const useLyricsStore = create(
 
       isSetlistFull: () => {
         const state = get();
-        return state.setlistFiles.length >= 50;
+        return state.setlistFiles.length >= maxSetlistFilesLimit;
       },
 
       getAvailableSetlistSlots: () => {
         const state = get();
-        return Math.max(0, 50 - state.setlistFiles.length);
+        return Math.max(0, maxSetlistFilesLimit - state.setlistFiles.length);
+      },
+      
+      getMaxSetlistFiles: () => maxSetlistFilesLimit,
+
+      updateMaxSetlistFiles: (newLimit) => {
+        maxSetlistFilesLimit = newLimit;
+        set((state) => ({ maxSetlistFilesVersion: state.maxSetlistFilesVersion + 1 }));
       },
 
       output1Settings: defaultOutput1Settings,

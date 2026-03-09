@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { RefreshCw, FolderOpen, FileText, FilePlusCorner, Edit, ListMusic, Globe, Plus, Info, FileMusic, Play, ChevronDown, Square, Sparkles, Volume2, VolumeX, Moon, Sun, Settings } from 'lucide-react';
+import { RefreshCw, FolderOpen, FileText, FilePlusCorner, Edit, ListMusic, Globe, Plus, Info, FileMusic, Play, ChevronDown, Square, Sparkles, Moon, Sun, Settings } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useLyricsState, useOutputState, useOutput1Settings, useOutput2Settings, useStageSettings, useDarkModeState, useSetlistState, useIsDesktopApp, useAutoplaySettings, useIntelligentAutoplayState } from '../hooks/useStoreSelectors';
 import { useControlSocket } from '../context/ControlSocketProvider';
@@ -36,6 +36,7 @@ import { useKeyboardShortcuts } from '../hooks/LyricDisplayApp/useKeyboardShortc
 import { useElectronListeners } from '../hooks/LyricDisplayApp/useElectronListeners';
 import { useResponsiveWidth } from '../hooks/LyricDisplayApp/useResponsiveWidth';
 import { useDragAndDrop } from '../hooks/LyricDisplayApp/useDragAndDrop';
+import { useExternalControl } from '../hooks/useExternalControl';
 
 const LyricDisplayApp = () => {
   const navigate = useNavigate();
@@ -46,8 +47,9 @@ const LyricDisplayApp = () => {
   const { settings: output2Settings, updateSettings: updateOutput2Settings } = useOutput2Settings();
   const { settings: stageSettings, updateSettings: updateStageSettings } = useStageSettings();
   const { darkMode, setDarkMode } = useDarkModeState();
-  const { setSetlistModalOpen, setlistFiles, setSetlistFiles } = useSetlistState();
+  const { setSetlistModalOpen, setlistFiles, setSetlistFiles, getMaxSetlistFiles } = useSetlistState();
   const isDesktopApp = useIsDesktopApp();
+  const maxSetlistFiles = getMaxSetlistFiles();
   const { settings: autoplaySettings, setSettings: setAutoplaySettings } = useAutoplaySettings();
   const { hasSeenIntelligentAutoplayInfo, setHasSeenIntelligentAutoplayInfo } = useIntelligentAutoplayState();
 
@@ -57,7 +59,7 @@ const LyricDisplayApp = () => {
   const scrollableSettingsRef = useRef(null);
   useMenuShortcuts(navigate, fileInputRef);
 
-  const { socket, emitOutputToggle, emitLineUpdate, emitLyricsLoad, emitStyleUpdate, emitSetlistAdd, emitSetlistClear, emitSetlistLoad, emitAutoplayStateUpdate, connectionStatus, authStatus, forceReconnect, refreshAuthToken, isConnected, isAuthenticated, ready } = useControlSocket();
+  const { socket, emitOutputToggle, emitIndividualOutputToggle, emitLineUpdate, emitLyricsLoad, emitStyleUpdate, emitSetlistAdd, emitSetlistClear, emitSetlistLoad, emitAutoplayStateUpdate, connectionStatus, authStatus, forceReconnect, refreshAuthToken, isConnected, isAuthenticated, ready } = useControlSocket();
 
   const handleFileUpload = useFileUpload();
   const handleMultipleFileUpload = useMultipleFileUpload();
@@ -109,7 +111,7 @@ const LyricDisplayApp = () => {
   }, [baseHandleSearch, trackAction]);
 
   const hasLyrics = lyrics && lyrics.length > 0;
-  const { showToast, muted, toggleMute } = useToast();
+  const { showToast } = useToast();
   const { showModal } = useModal();
 
   const { isDragging, dragFileCount, handleDragEnter, handleDragLeave, handleDragOver, handleDrop } = useDragAndDrop({
@@ -410,6 +412,19 @@ const LyricDisplayApp = () => {
     }
   }, [hasLyrics, setlistFiles, lyricsFileName, emitSetlistLoad, showToast]);
 
+  const handleOpenPreferences = React.useCallback(() => {
+    showModal({
+      title: 'Preferences',
+      headerDescription: 'Configure application settings and preferences',
+      component: 'UserPreferences',
+      variant: 'info',
+      size: 'lg',
+      actions: [],
+      allowBackdropClose: false,
+      customLayout: true
+    });
+  }, [showModal]);
+
   const handleNavigateSetlistNext = React.useCallback(() => {
     if (!hasLyrics || setlistFiles.length === 0) {
       showToast({
@@ -460,7 +475,29 @@ const LyricDisplayApp = () => {
     handleEditLyrics,
     handleAddToSetlist,
     handleNavigateSetlistPrevious,
-    handleNavigateSetlistNext
+    handleNavigateSetlistNext,
+    handleOpenPreferences
+  });
+
+  // External control (MIDI/OSC) integration
+  useExternalControl({
+    lyrics,
+    selectedLine,
+    isOutputOn,
+    autoplayActive,
+    selectLine,
+    setIsOutputOn,
+    emitLineUpdate,
+    emitOutputToggle,
+    emitOutput1Toggle: (enabled) => emitIndividualOutputToggle({ output: 'output1', enabled }),
+    emitOutput2Toggle: (enabled) => emitIndividualOutputToggle({ output: 'output2', enabled }),
+    emitStageToggle: (enabled) => emitIndividualOutputToggle({ output: 'stage', enabled }),
+    handleAutoplayToggle,
+    handleSetlistNext: handleNavigateSetlistNext,
+    handleSetlistPrev: handleNavigateSetlistPrevious,
+    handleSyncOutputs,
+    showToast,
+    enabled: isDesktopApp
   });
 
   const iconButtonClass = (disabled = false) => {
@@ -485,8 +522,8 @@ const LyricDisplayApp = () => {
           {/* Fixed Header Section */}
           <div className={`flex-shrink-0 p-6 pb-0 ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>
             {/* Header */}
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center gap-2">
+            <div className="flex items-center mb-6">
+              <div className="flex items-center gap-2 w-full">
                 {/* Online Lyrics Search Button */}
                 <Tooltip content={<span>Search and import lyrics from online providers - <strong>Ctrl+Shift+O</strong></span>} side="bottom">
                   <button
@@ -498,7 +535,7 @@ const LyricDisplayApp = () => {
                 </Tooltip>
 
                 {/* Setlist Button */}
-                <Tooltip content={<span>View and manage your song setlist (up to 50 songs) - <strong>Ctrl+Shift+S</strong></span>} side="bottom">
+                <Tooltip content={<span>View and manage your song setlist (up to {maxSetlistFiles} songs) - <strong>Ctrl+Shift+S</strong></span>} side="bottom">
                   <button
                     className={iconButtonClass(false)}
                     onClick={handleOpenSetlist}
@@ -518,16 +555,6 @@ const LyricDisplayApp = () => {
                   </button>
                 </Tooltip>
 
-                {/* Mute Toast Sounds Button */}
-                <Tooltip content={muted ? "Unmute toast sounds" : "Mute toast sounds"} side="bottom">
-                  <button
-                    className={iconButtonClass(false)}
-                    onClick={toggleMute}
-                  >
-                    {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-                  </button>
-                </Tooltip>
-
                 {/* Dark Mode Toggle Button */}
                 <Tooltip content={darkMode ? "Switch to light mode" : "Switch to dark mode"} side="bottom">
                   <button
@@ -544,14 +571,19 @@ const LyricDisplayApp = () => {
                 </Tooltip>
 
                 {/* User Preferences Button */}
-                <Tooltip content="User preferences" side="bottom">
+                <Tooltip content="Application preferences and settings" side="bottom">
                   <button
                     className={iconButtonClass(false)}
                     onClick={() => {
-                      showToast({
-                        title: 'User Preferences',
-                        message: 'User preferences panel coming soon!',
-                        variant: 'info'
+                      showModal({
+                        title: 'Preferences',
+                        headerDescription: 'Configure application settings and preferences',
+                        component: 'UserPreferences',
+                        variant: 'info',
+                        size: 'lg',
+                        actions: [],
+                        allowBackdropClose: false,
+                        customLayout: true
                       });
                     }}
                   >
@@ -585,7 +617,7 @@ const LyricDisplayApp = () => {
                 <button
                   className={`h-[52px] w-[52px] rounded-xl font-medium transition-all duration-200 flex items-center justify-center ${darkMode
                     ? 'bg-gray-700 hover:bg-gray-600 text-gray-200'
-                    : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
+                    : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
                     }`}
                   onClick={handleCreateNewSong}
                 >

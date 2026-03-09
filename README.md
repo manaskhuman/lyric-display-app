@@ -33,6 +33,7 @@ LyricDisplay is a comprehensive Electron-based application designed for use in p
 - **Full Screen Mode**:    Fill colour/media background options for full screen lyrics display
 
 ### Professional Features
+- **NDI® Output**: Broadcast lyrics over NDI for use in OBS, vMix, and other production software — with transparency and per-output resolution control
 - **Auto-Updates**: Seamless background updates via GitHub releases
 - **Dark Mode**: System-integrated dark/light theme switching
 - **Keyboard Shortcuts**: Full menu-driven workflow
@@ -165,7 +166,23 @@ LyricDisplay accepts plain text (.txt) and lyrics (.lrc) files
 ### Project Structure
 ```
 lyric-display-app/
+├── lyricdisplay-ndi/                       # LyricDisplay NDI Companion (Separate repo but needed here for development)
 ├── main/                                   # Electron main script modules
+|   ├── ipc/                                # IPC handlers
+|   |   ├── index.js                        # Main registration point
+|   |   ├── app.js                          # App-level handlers (version, dark mode)
+|   |   ├── window.js                       # Window controls (minimize, maximize, close, etc.)
+|   |   ├── files.js                        # File operations (load, save, parse lyrics)
+|   |   ├── recents.js                      # Recent files management
+|   |   ├── auth.js                         # Authentication (admin key, JWT, join code, tokens)
+|   |   ├── lyrics.js                       # Lyrics providers (search, fetch, API keys)
+|   |   ├── easyworship.js                  # EasyWorship import handlers
+|   |   ├── setlist.js                      # Setlist operations (save, load, browse, export)
+|   |   ├── display.js                      # Display management (assignments, output windows)
+|   |   ├── updater.js                      # App updater controls
+|   |   ├── templates.js                    # User templates handlers
+|   |   ├── preferences.js                  # User preferences handlers
+|   |   └── misc.js                         # Miscellaneous (fonts, IP address, browser)
 │   ├── lyricsProviders/
 |   |   ├── providers/
 |   |   |   ├── chartlyrics.js              # ChartLyrics lyrics provider definitions
@@ -184,12 +201,16 @@ lyric-display-app/
 |   ├── displayDetection.js                 # External display detection in main process
 |   ├── displayManager.js                   # External assignment and management module
 |   ├── easyWorship.js                      # EasyWorship song lyric files conversion module
+|   ├── externalControl.js                  # External control module for MIDI and OSC
 |   ├── fileHandler.js                      # Main process file processing handler
 |   ├── inAppBrowser.js                     # In-App browser window configuration and styling
-|   ├── ipc.js                              # IPC handlers
+|   ├── ipc.js                              # IPC handlers import (Backward compatibility)
 |   ├── loadingWindow.js                    # Loading process window
 |   ├── menuBridge.js                       # Renderer/menu bridge (dark mode, undo/redo state)
+|   ├── midiController.js                   # MIDI main controller module
 |   ├── modalBridge.js                      # Global modal bridge for electron main process
+|   ├── modalBridge.js                      # Global modal bridge for electron main process
+|   ├── ndiManager.js                       # Main NDI manager module for main app
 |   ├── paths.js                            # Production paths resolver
 |   ├── presentation.js                     # Presentation file import and conversion engine
 |   ├── progressWindow.js                   # App updater dialog window configuration and styling
@@ -201,8 +222,9 @@ lyric-display-app/
 |   ├── startup.js                          # Main app startup processes
 |   ├── systemFonts.js                      # Helper module for loading system installed fonts
 |   ├── themePreferences.js                 # Theme manager for main process dark mode sync
-|   ├── userTemplates.js                    # Backend manager for user-stored output settings template system
 |   ├── updater.js                          # Module to manage app updates
+|   ├── userPreferences.js                  # User preferences and app settings manager
+|   ├── userTemplates.js                    # Backend manager for user-stored output settings template system
 |   ├── utils.js                            # Utility file to get local IP address
 |   └── windows.js                          # Main window builder
 ├── public/                                 # Static assets
@@ -250,6 +272,7 @@ lyric-display-app/
 |   |   ├── LyricDisplayApp.jsx             # Main control panel UI
 |   |   ├── LyricsList.jsx                  # Control panel lyrics list UI
 |   |   ├── MobileLayout.jsx                # Minified control panel UI for secondary connected clients
+|   |   ├── NdiOutputSettingsModal.jsx      # NDI output settings modal for each output
 |   |   ├── NewSongCanvas.jsx               # New/edit song text editor
 |   |   ├── OnlineLyricsSearchModal.jsx     # Online Lyrics Search modal
 |   |   ├── OnlineLyricsWelcomeSplash.jsx   # Online Lyrics Search welcome and help modal component
@@ -270,6 +293,7 @@ lyric-display-app/
 |   |   ├── StageTemplatesModal.jsx         # Stage settings templates modal
 |   |   ├── SupportDevelopmentBridge.jsx    # Support development modal bridge
 |   |   ├── SupportDevelopmentModal.jsx     # Support development modal
+|   |   └── UserPreferencesModal.jsx        # User preferences UI
 |   |   └── WelcomeSplash.jsx               # Welcome splash modal for first time install
 │   ├── constants/
 |   |   ├── easyWorship.js                  # Some EasyWorship constants
@@ -327,6 +351,7 @@ lyric-display-app/
 |   |   ├── useContextMenuPosition.js       # Hook for space-aware context menu positioning
 |   |   ├── useContextSubmenus.js           # Context submenus definitions and logic
 |   |   ├── useDarkModeSync.js              # Hook for global dark mode sync
+|   |   ├── useExternalControl.js           # Hook for external control (MIDI, OSC, etc.)
 |   |   ├── useFileUpload.js                # Custom React hook for file uploads
 |   |   ├── useModal.js                     # Global modal hook
 |   |   ├── useMultipleFileUpload.js        # Multiple file upload handler
@@ -420,6 +445,9 @@ All lyrics, metadata, and related content displayed through these services remai
 - **Vagalume** — © Vagalume Media Group. Lyrics and artist data are provided through the official Vagalume API.  
 - **Hymnary.org** — © Hymnary.org / Christian Classics Ethereal Library (CCEL). Content is provided for educational and liturgical purposes.  
 - **Open Hymnal Project** — Public domain hymn texts and music as compiled by the Open Hymnal Project.
+
+### NDI® Trademark Notice
+NDI® is a registered trademark of Vizrt NDI AB. LyricDisplay uses the NDI SDK via the open-source [grandi](https://www.npmjs.com/package/grandi) module for video output over IP networks. This project is not affiliated with or endorsed by Vizrt NDI AB. For more information about NDI, visit [ndi.video](https://ndi.video).
 
 ### Logos & Trademarks
 Logos and brand marks of the above providers are displayed in LyricDisplay **for identification and attribution purposes only**.  

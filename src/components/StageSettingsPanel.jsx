@@ -244,7 +244,7 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <h3 className={`text-sm font-medium uppercase tracking-wide ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-          STAGE DISPLAY SETTINGS
+          Stage Settings
         </h3>
 
         <div className="flex items-center gap-2">
@@ -262,6 +262,55 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
                 }`}
             >
               <Power className="w-4 h-4" />
+            </button>
+          </Tooltip>
+
+          {/* NDI Button */}
+          <Tooltip content="NDI Broadcasting" side="bottom">
+            <button
+              onClick={async () => {
+                const status = await window.electronAPI?.ndi?.checkInstalled();
+                if (!status?.installed) {
+                  showToast({
+                    title: 'NDI Unavailable',
+                    message: 'Download the NDI companion to enable broadcasting.',
+                    variant: 'info',
+                    duration: 8000,
+                    actions: [{
+                      label: 'Download',
+                      onClick: () => {
+                        showModal({
+                          title: 'Preferences',
+                          component: 'UserPreferences',
+                          variant: 'info',
+                          size: 'lg',
+                          customLayout: true,
+                          initialCategory: 'ndi',
+                          actions: []
+                        });
+                      }
+                    }]
+                  });
+                  return;
+                }
+                showModal({
+                  title: 'NDI Output Settings',
+                  headerDescription: 'Configure NDI broadcast for Stage Display',
+                  component: 'NdiOutputSettings',
+                  variant: 'info',
+                  size: 'lg',
+                  outputKey: 'stage',
+                  customLayout: true,
+                  dismissLabel: 'Close',
+                });
+              }}
+              className={`px-1.5 rounded-lg transition-colors text-[12px] leading-none ${darkMode
+                ? 'hover:bg-gray-700 text-gray-400 hover:text-gray-200'
+                : 'hover:bg-gray-100 text-gray-500 hover:text-gray-700'
+                }`}
+              style={{ fontFamily: 'Inter, sans-serif', fontWeight: 700, height: 28 }}
+            >
+              NDI
             </button>
           </Tooltip>
 
