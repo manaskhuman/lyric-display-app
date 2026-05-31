@@ -65,6 +65,7 @@ const FontSelect = ({
   const [searchTerm, setSearchTerm] = React.useState('');
   const [installedFonts, setInstalledFonts] = React.useState([]);
   const [loadingFonts, setLoadingFonts] = React.useState(false);
+  const [fontsLoaded, setFontsLoaded] = React.useState(false);
   const [menuState, setMenuState] = React.useState('closed');
   const searchInputRef = React.useRef(null);
   const containerRef = React.useRef(null);
@@ -144,24 +145,30 @@ const FontSelect = ({
   const normalizedValue = normalizeFontName(value);
 
   React.useEffect(() => {
-    if (!isDesktopApp) return undefined;
+    if (!isDesktopApp || !isMenuVisible || fontsLoaded) return undefined;
 
     let mounted = true;
     setLoadingFonts(true);
 
     loadSystemFonts()
       .then((fonts) => {
-        if (mounted) setInstalledFonts(fonts || []);
+        if (mounted) {
+          setInstalledFonts(fonts || []);
+          setFontsLoaded(true);
+        }
       })
       .catch(() => {
-        if (mounted) setInstalledFonts([]);
+        if (mounted) {
+          setInstalledFonts([]);
+          setFontsLoaded(true);
+        }
       })
       .finally(() => {
         if (mounted) setLoadingFonts(false);
       });
 
     return () => { mounted = false; };
-  }, [isDesktopApp]);
+  }, [fontsLoaded, isDesktopApp, isMenuVisible]);
 
   const filterFonts = React.useCallback((list) => {
     if (!searchTerm.trim()) return list;
@@ -597,7 +604,7 @@ const FontSelect = ({
         type="button"
         onClick={handleToggleMenu}
         className={cn(
-          'flex h-9 items-center justify-between whitespace-nowrap rounded-md border px-3 py-2 text-sm shadow-sm truncate',
+          'flex h-9 min-w-0 items-center justify-between whitespace-nowrap rounded-md border px-3 py-2 text-sm shadow-sm',
           triggerClassName || 'w-full',
           darkMode
             ? 'border-gray-600 bg-gray-700 text-gray-200'
@@ -607,8 +614,8 @@ const FontSelect = ({
         style={{ outline: 'none' }}
         ref={triggerRef}
       >
-        <span className="truncate">{value || placeholder}</span>
-        <ChevronDown className="h-4 w-4 opacity-60" />
+        <span className="min-w-0 flex-1 truncate text-left" title={value || placeholder}>{value || placeholder}</span>
+        <ChevronDown className="h-4 w-4 flex-shrink-0 opacity-60" />
       </button>
 
       {isMenuVisible && createPortal(

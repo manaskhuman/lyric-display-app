@@ -13,11 +13,17 @@ import { performStartupSequence } from './main/startup.js';
 import { performCleanup } from './main/cleanup.js';
 import { createLoadingWindow } from './main/loadingWindow.js';
 import * as userPreferences from './main/userPreferences.js';
+import { initFileLogging } from './main/logging.js';
 
 if (!isDev && process.env.FORCE_COMPATIBILITY) {
   app.commandLine.appendSwitch('--disable-gpu-sandbox');
   app.commandLine.appendSwitch('--disable-software-rasterizer');
   app.commandLine.appendSwitch('--disable-features', 'VizDisplayCompositor');
+}
+
+const disableHwAccel = userPreferences.getPreference('advanced.disableHardwareAcceleration') ?? false;
+if (disableHwAccel) {
+  app.disableHardwareAcceleration();
 }
 
 let mainWindow = null;
@@ -43,6 +49,8 @@ const hasLock = setupSingleInstanceLock((commandLine) => {
 if (!hasLock) {
   process.exit(0);
 }
+
+initFileLogging();
 
 if (process.platform === 'win32' && process.argv.length >= 2) {
   const filePath = extractFilePathFromArgs(process.argv);
@@ -101,11 +109,9 @@ app.whenReady().then(async () => {
         return;
       }
 
-      // Check if confirmOnClose is enabled in user preferences
       const confirmOnClose = userPreferences.getPreference('general.confirmOnClose') ?? true;
-      
+
       if (!confirmOnClose) {
-        // Skip confirmation, just close
         app.isQuitting = true;
         try {
           const windows = BrowserWindow.getAllWindows();

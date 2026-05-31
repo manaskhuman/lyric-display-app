@@ -12,7 +12,7 @@
  * - easyworship: EasyWorship import handlers
  * - presentation: Presentation import handlers
  * - setlist: Setlist operations (save, load, browse, export)
- * - display: Display management (assignments, output windows)
+ * - display: Display and projection management
  * - updater: App updater controls
  * - templates: User templates handlers
  * - preferences: User preferences handlers
@@ -33,6 +33,7 @@ import { registerUpdaterHandlers } from './updater.js';
 import { registerTemplatesHandlers } from './templates.js';
 import { registerPreferencesHandlers } from './preferences.js';
 import { registerMiscHandlers } from './misc.js';
+import { registerSecurityHandlers } from './security.js';
 
 /**
  * Register all IPC handlers
@@ -60,4 +61,5 @@ export function registerIpcHandlers(context) {
   registerTemplatesHandlers(context);
   registerPreferencesHandlers(context);
   registerMiscHandlers(context);
+  registerSecurityHandlers(context);
 }

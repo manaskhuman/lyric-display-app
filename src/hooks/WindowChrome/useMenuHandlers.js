@@ -97,35 +97,23 @@ const useMenuHandlers = (closeMenu) => {
             value: 'canvas',
             onSelect: async () => {
               try {
-                const fs = await import('fs/promises');
-                const content = await fs.readFile(filePath, 'utf8');
-
-                window.dispatchEvent(new CustomEvent('load-into-canvas', {
-                  detail: {
-                    content,
-                    fileName,
-                    filePath
-                  }
-                }));
-              } catch (error) {
-                if (window?.electronAPI?.parseLyricsFile) {
-                  try {
-                    const result = await window.electronAPI.parseLyricsFile({ path: filePath });
-                    if (result?.success && result.payload?.rawText) {
-                      window.dispatchEvent(new CustomEvent('load-into-canvas', {
-                        detail: {
-                          content: result.payload.rawText,
-                          fileName,
-                          filePath
-                        }
-                      }));
-                      return;
-                    }
-                  } catch (parseError) {
-                    console.error('Parse error:', parseError);
-                  }
+                if (!window?.electronAPI?.parseLyricsFile) {
+                  throw new Error('File reading API not available');
                 }
-
+                const result = await window.electronAPI.parseLyricsFile({ path: filePath });
+                if (result?.success && result.payload?.rawText) {
+                  window.dispatchEvent(new CustomEvent('load-into-canvas', {
+                    detail: {
+                      content: result.payload.rawText,
+                      fileName,
+                      filePath
+                    }
+                  }));
+                } else {
+                  throw new Error(result?.error || 'Failed to read file');
+                }
+              } catch (error) {
+                console.error('Failed to open recent file:', error);
                 showToast({
                   title: 'Could not open recent file',
                   message: 'File may have been moved or deleted.',
@@ -195,6 +183,15 @@ const useMenuHandlers = (closeMenu) => {
     window.dispatchEvent(new Event('open-qr-dialog'));
   }, [closeMenu]);
 
+  const handleOpenObsSourceCreator = useCallback(() => {
+    closeMenu();
+    try {
+      window.electronAPI?.display?.openObsSourceCreatorWindow?.();
+    } catch (error) {
+      console.warn('Failed to open OBS Source Creator window:', error);
+    }
+  }, [closeMenu]);
+
   const handleEasyWorship = useCallback(() => {
     closeMenu();
     window.dispatchEvent(new Event('open-easyworship-import'));
@@ -254,6 +251,7 @@ const useMenuHandlers = (closeMenu) => {
     if (setThemeMode) {
       setThemeMode(nextMode);
     }
+    window.electronAPI?.preferences?.set?.('appearance.themeMode', nextMode);
     window.electronAPI?.syncNativeThemeSource?.(nextMode);
     window.electronAPI?.setDarkMode?.(next);
   }, [closeMenu, darkMode, setDarkMode]);
@@ -307,27 +305,21 @@ const useMenuHandlers = (closeMenu) => {
 
   const handleDisplaySettings = useCallback(async () => {
     closeMenu();
-    try {
-      const result = await window.electronAPI?.displaySettings?.openModal?.();
-      if (result?.success === false) {
-        showToast({
-          title: 'No external displays',
-          message: result.error || 'Connect an external display to configure projection.',
-          variant: 'info'
-        });
-      }
-    } catch (error) {
-      showToast({
-        title: 'Could not open display settings',
-        message: error?.message || 'Unknown error',
-        variant: 'error'
-      });
-    }
-  }, [closeMenu, showToast]);
+    await showModal({
+      title: 'Project to Display',
+      headerDescription: 'Choose what to show and where it should appear.',
+      component: 'ProjectOutput',
+      variant: 'info',
+      size: 'lg',
+      className: 'max-w-4xl',
+      actions: [],
+      customLayout: true
+    });
+  }, [closeMenu, showModal]);
 
   const handleDocs = useCallback(() => {
     closeMenu();
-    window.open('https://github.com/PeterAlaks/lyric-display-app#readme', '_blank', 'noopener,noreferrer');
+    window.open('https://lyricdisplay.app/documentation', '_blank', 'noopener,noreferrer');
   }, [closeMenu]);
 
   const handleRepo = useCallback(() => {
@@ -350,7 +342,7 @@ const useMenuHandlers = (closeMenu) => {
     closeMenu();
     showModal({
       title: 'Streaming Software Integration',
-      headerDescription: 'Connect LyricDisplay to OBS, vMix, or Wirecast',
+      headerDescription: 'Connect LyricDisplay to OBS, vMix or Wirecast',
       component: 'IntegrationInstructions',
       variant: 'info',
       size: 'lg',
@@ -407,6 +399,7 @@ const useMenuHandlers = (closeMenu) => {
     handleOpenRecent,
     handleClearRecents,
     handleConnectMobile,
+    handleOpenObsSourceCreator,
     handleEasyWorship,
     handlePresentationImport,
     handlePreviewOutputs,

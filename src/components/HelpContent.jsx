@@ -1,5 +1,5 @@
 import React from 'react';
-import { Globe, List, RefreshCw, Shield, FolderOpen, FileText, Type, PaintBucket, AlignVerticalSpaceAround, Scissors, Copy, ClipboardPaste, Wand2, Bold, ScreenShare, Search, Timer, Hand } from 'lucide-react';
+import { Globe, List, RefreshCw, Shield, FolderOpen, FileText, Type, PaintBucket, AlignVerticalSpaceAround, Scissors, Copy, ClipboardPaste, Wand2, Bold, ScreenShare, Search, Timer, Hand, Network, PlugZap, Key, Settings } from 'lucide-react';
 
 const HelpSection = ({ icon: Icon, title, description, darkMode }) => (
     <div className={`flex gap-3 p-3 rounded-lg ${darkMode ? 'bg-gray-800' : 'bg-gray-50'}`}>
@@ -23,7 +23,7 @@ export const ControlPanelHelp = ({ darkMode }) => (
         <HelpSection
             icon={Globe}
             title="Search Online Lyrics"
-            description="Search multiple lyrics databases simultaneously. Find songs from LRCLIB, ChartLyrics, Lyrics.ovh, Vagalume, Hymnary.org, and more. Results include synced LRC files when available."
+            description="Search multiple lyrics databases simultaneously. Find songs from LRCLIB, ChartLyrics, Lyrics.ovh, Open Hymnal, and more. Results include synced LRC files when available."
             darkMode={darkMode}
         />
 
@@ -137,7 +137,7 @@ export const OutputSettingsHelp = ({ darkMode }) => (
 
         <div className={`mt-4 p-4 rounded-lg ${darkMode ? 'bg-purple-900/20 border border-purple-700/30' : 'bg-purple-50 border border-purple-200'}`}>
             <p className={`text-sm font-medium ${darkMode ? 'text-purple-300' : 'text-purple-800'}`}>
-                💡 <strong>Pro Tip:</strong> Output 1 and Output 2 have completely independent settings. Use one for in-house displays and another for broadcast overlays with different styling and positioning.
+                💡 <strong>Pro Tip:</strong> Every output tab has independent settings, including Output 1/2 and custom outputs (Output 3-6). Use different outputs for in-house displays, broadcast overlays, and alternate screen layouts.
             </p>
         </div>
     </div>
@@ -221,14 +221,14 @@ export const StageDisplayHelp = ({ darkMode }) => (
         <HelpSection
             icon={ScreenShare}
             title="Stage Display Overview"
-            description="The Stage Display is designed for performers, worship leaders, and musicians on stage. It shows the current lyric line, upcoming line, and previous line simultaneously, helping performers stay ahead and never miss a cue."
+            description="The Stage Display is designed for performers, worship leaders, and musicians on stage. You can show the current lyric line alongside optional upcoming and previous lines, helping performers stay ahead and never miss a cue."
             darkMode={darkMode}
         />
 
         <HelpSection
             icon={Type}
             title="Live, Next & Previous Lines"
-            description="Customize font size, color, alignment, and emphasis (bold, italic, underline, ALL CAPS) independently for each line type. The current line is typically largest and brightest, with upcoming and previous lines styled for quick reference."
+            description="Customize font size, color, alignment, and emphasis (bold, italic, underline, ALL CAPS) independently for each line type. Toggle Next and Previous lines separately; when either is off, its settings are disabled and the current line uses the extra space."
             darkMode={darkMode}
         />
 
@@ -287,7 +287,7 @@ export const MobileControllerHelp = ({ darkMode }) => (
         <HelpSection
             icon={ScreenShare}
             title="Display Output Switch"
-            description="Control the visibility of lyrics on all connected output displays. Toggle ON to show lyrics on Output 1, Output 2, and Stage displays. Toggle OFF to hide lyrics while keeping the connection active."
+            description="Control the visibility of lyrics on all connected output displays. Toggle ON to show lyrics on Output 1/2, any enabled custom outputs (Output 3-6), and Stage. Toggle OFF to hide lyrics while keeping the connection active."
             darkMode={darkMode}
         />
 
@@ -348,4 +348,49 @@ export const MobileControllerHelp = ({ darkMode }) => (
     </div>
 );
 
-export default { ControlPanelHelp, OutputSettingsHelp, SongCanvasHelp, StageDisplayHelp, MobileControllerHelp };
+export const ObsWebSocketHelp = ({ darkMode }) => (
+    <div className="space-y-3">
+        <HelpSection
+            icon={PlugZap}
+            title="Enable WebSocket Server"
+            description="In OBS Studio, open Tools menu and select WebSocket Server Settings. Toggle the WebSocket server on to enable remote connections from LyricDisplay."
+            darkMode={darkMode}
+        />
+
+        <HelpSection
+            icon={Network}
+            title="Check the Port"
+            description="The default WebSocket server port is 4455, but if you change it in OBS, make sure it matches the port number entered in the LyricDisplay OBS Source Creator."
+            darkMode={darkMode}
+        />
+
+        <HelpSection
+            icon={Key}
+            title="WebSocket Server Password"
+            description="If you enable authentication in OBS WebSocket Server Settings, you'll receive a server password. Copy this password and paste it into the Password field in the OBS Source Creator to authenticate the connection."
+            darkMode={darkMode}
+        />
+
+        <HelpSection
+            icon={Settings}
+            title="Network Setup Considerations"
+            description="If OBS is on the same computer, use Host: 127.0.0.1. For OBS on a different computer in your network, use its IP address (e.g., 192.168.1.x) and select 'Use LAN' for the source base URL."
+            darkMode={darkMode}
+        />
+
+        <HelpSection
+            icon={Globe}
+            title="Test Connection"
+            description="Once configured, click 'Connect to OBS' in the OBS Source Creator. If successful, you'll see confirmation along with your OBS base canvas resolution. You can then select scenes and create the browser source."
+            darkMode={darkMode}
+        />
+
+        <div className={`mt-4 p-4 rounded-lg ${darkMode ? 'bg-amber-900/20 border border-amber-700/30' : 'bg-amber-50 border border-amber-200'}`}>
+            <p className={`text-sm font-medium ${darkMode ? 'text-amber-300' : 'text-amber-800'}`}>
+                💡 <strong>Tip:</strong> If you can't connect, verify that OBS WebSocket Server is enabled, use the correct IP address and port, and check that your firewall allows the connection.
+            </p>
+        </div>
+    </div>
+);
+
+export default { ControlPanelHelp, OutputSettingsHelp, SongCanvasHelp, StageDisplayHelp, MobileControllerHelp, ObsWebSocketHelp };

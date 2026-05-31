@@ -1,25 +1,30 @@
 import React from 'react';
-import { useDarkModeState, useOutput1Settings, useOutput2Settings, useStageSettings, useIndividualOutputState } from '../hooks/useStoreSelectors';
+import { useDarkModeState, useOutput1Settings, useOutput2Settings, useOutputSettings as useOutputSettingsSelector, useStageSettings, useIndividualOutputState, useOutputEnabled, useSetOutputEnabledAction } from '../hooks/useStoreSelectors';
 import { useControlSocket } from '../context/ControlSocketProvider';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
 import { Tooltip } from '@/components/ui/tooltip';
 import { ColorPicker } from "@/components/ui/color-picker";
 import useToast from '../hooks/useToast';
 import useModal from '../hooks/useModal';
-import useAuth from '../hooks/useAuth';
 import useOutputToggle from '../hooks/OutputSettingsPanel/useOutputToggle';
 import useFullscreenBackground from '../hooks/OutputSettingsPanel/useFullscreenBackground';
 import useAdvancedSectionPersistence from '../hooks/OutputSettingsPanel/useAdvancedSectionPersistence';
 import useTypographyAndBands from '../hooks/OutputSettingsPanel/useTypographyAndBands';
 import useFullscreenModeState from '../hooks/OutputSettingsPanel/useFullscreenModeState';
-import { Type, PaintBucket, Contrast, TextCursorInput, Square, Frame, Move, AlignVerticalSpaceAround, ScreenShare, ListStart, ArrowUpDown, Rows3, MoveHorizontal, MoveVertical, Sparkles, Languages, Palette, Power, TextAlignJustify, SquareMenu, ArrowRightLeft, Save, BetweenVerticalEnd } from 'lucide-react';
+import useFullscreenElementMedia from '../hooks/OutputSettingsPanel/useFullscreenElementMedia';
+import useFullscreenAdvancedAutoExpand from '../hooks/OutputSettingsPanel/useFullscreenAdvancedAutoExpand';
+import { Type, PaintBucket, Square, Move, AlignVerticalSpaceAround, TextAlignJustify, SquareMenu } from 'lucide-react';
 import FontSelect from './FontSelect';
 import StageSettingsPanel from './StageSettingsPanel';
+import BackgroundBandSettingsSection from './OutputSettingsPanel/BackgroundBandSettingsSection';
+import DropShadowSettingsSection from './OutputSettingsPanel/DropShadowSettingsSection';
+import FontSizeSettingsSection from './OutputSettingsPanel/FontSizeSettingsSection';
+import FullscreenSettingsSection from './OutputSettingsPanel/FullscreenSettingsSection';
+import PanelHeaderActions from './OutputSettingsPanel/PanelHeaderActions';
+import TransitionSettingsSection from './OutputSettingsPanel/TransitionSettingsSection';
+import TypographySpacingSection from './OutputSettingsPanel/TypographySpacingSection';
 import { blurInputOnEnter, AdvancedToggle, LabelWithIcon, EmphasisRow, AlignmentRow } from './OutputSettingsShared';
-import { Slider } from '@/components/ui/slider';
 import { sanitizeIntegerInput, sanitizeNumberInput } from '../utils/numberInput';
 
 const SettingRow = ({ icon, label, tooltip, children, rightClassName = 'flex items-center gap-2 justify-end', justifyEnd = true, darkMode }) => (
@@ -115,51 +120,6 @@ const FontColorSection = ({
       onChange={onChange}
       darkMode={darkMode}
       className={darkMode ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300'}
-    />
-  </SettingRow>
-);
-
-const DropShadowSection = ({
-  darkMode,
-  settings,
-  update,
-  dropShadowAdvancedExpanded,
-  setDropShadowAdvancedExpanded
-}) => (
-  <SettingRow
-    icon={Contrast}
-    label="Drop Shadow"
-    tooltip="Add shadow behind text for depth (0-10 opacity)"
-    rightClassName="flex items-center gap-2 justify-end w-full"
-    darkMode={darkMode}
-  >
-    <Tooltip content={dropShadowAdvancedExpanded ? "Hide advanced settings" : "Show advanced settings"} side="top">
-      <AdvancedToggle
-        expanded={dropShadowAdvancedExpanded}
-        onToggle={() => setDropShadowAdvancedExpanded(!dropShadowAdvancedExpanded)}
-        darkMode={darkMode}
-        ariaLabel="Toggle drop shadow advanced settings"
-      />
-    </Tooltip>
-    <ColorPicker
-      value={settings.dropShadowColor}
-      onChange={(val) => update('dropShadowColor', val)}
-      darkMode={darkMode}
-      className={darkMode ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300'}
-    />
-    <Input
-      type="number"
-      value={settings.dropShadowOpacity}
-      onChange={(e) => update(
-        'dropShadowOpacity',
-        sanitizeIntegerInput(e.target.value, settings.dropShadowOpacity ?? 0, { min: 0, max: 10 })
-      )}
-      min="0"
-      max="10"
-      className={`w-20 ${darkMode
-        ? 'bg-gray-700 border-gray-600 text-gray-200'
-        : 'bg-white border-gray-300'
-        }`}
     />
   </SettingRow>
 );
@@ -281,76 +241,31 @@ const MarginsSection = ({ darkMode, settings, update }) => (
   </SettingRow>
 );
 
-const TransitionSection = ({
-  darkMode,
-  settings,
-  update,
-  transitionAdvancedExpanded,
-  setTransitionAdvancedExpanded
-}) => (
-  <SettingRow
-    icon={ArrowRightLeft}
-    label="Transition Style"
-    tooltip="Choose animation style when lyrics change on display"
-    rightClassName="flex items-center gap-2 justify-end w-full"
-    darkMode={darkMode}
-  >
-    <Tooltip content={transitionAdvancedExpanded ? "Hide advanced settings" : "Show advanced settings"} side="top">
-      <AdvancedToggle
-        expanded={transitionAdvancedExpanded}
-        onToggle={() => setTransitionAdvancedExpanded(!transitionAdvancedExpanded)}
-        darkMode={darkMode}
-        ariaLabel="Toggle transition advanced settings"
-      />
-    </Tooltip>
-    <Select
-      value={settings.transitionAnimation ?? 'none'}
-      onValueChange={(val) => update('transitionAnimation', val)}
-    >
-      <SelectTrigger
-        className={`w-[140px] ${darkMode
-          ? 'bg-gray-700 border-gray-600 text-gray-200'
-          : 'bg-white border-gray-300'
-          }`}
-      >
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent className={darkMode ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300'}>
-        <SelectItem value="none">None</SelectItem>
-        <SelectItem value="fade">Fade</SelectItem>
-        <SelectItem value="scale">Scale</SelectItem>
-        <SelectItem value="slide">Slide</SelectItem>
-        <SelectItem value="blur">Blur</SelectItem>
-      </SelectContent>
-    </Select>
-  </SettingRow>
-);
-
-const OutputSettingsPanel = ({ outputKey }) => {
+const OutputSettingsPanel = ({ outputKey, onDeleteOutput }) => {
   const { darkMode } = useDarkModeState();
+  const globalSetOutputEnabled = useSetOutputEnabledAction();
   const { emitStyleUpdate, emitIndividualOutputToggle } = useControlSocket();
   const { showToast } = useToast();
   const { showModal } = useModal();
-  const { ensureValidToken } = useAuth();
 
   const { output1Enabled, output2Enabled, stageEnabled, setOutput1Enabled, setOutput2Enabled, setStageEnabled } = useIndividualOutputState();
 
   const stageSettingsHook = useStageSettings();
+  const genericOutputHook = useOutputSettingsSelector(outputKey);
 
   const { settings, updateSettings } =
     outputKey === 'stage'
       ? stageSettingsHook
-      : outputKey === 'output1'
-        ? useOutput1Settings()
-        : useOutput2Settings();
+      : genericOutputHook;
 
-  const isOutputEnabled = outputKey === 'output1' ? output1Enabled
-    : outputKey === 'output2' ? output2Enabled
-      : stageEnabled;
+  const outputEnabledFromStore = useOutputEnabled(outputKey);
+
+  const isOutputEnabled = outputKey === 'stage' ? stageEnabled : (outputEnabledFromStore ?? true);
 
   const setOutputEnabled = outputKey === 'output1' ? setOutput1Enabled
     : outputKey === 'output2' ? setOutput2Enabled
-      : setStageEnabled;
+      : outputKey === 'stage' ? setStageEnabled
+        : (enabled) => globalSetOutputEnabled(outputKey, enabled);
 
   const { handleToggleOutput } = useOutputToggle({
     outputKey,
@@ -395,9 +310,7 @@ const OutputSettingsPanel = ({ outputKey }) => {
   }, [applySettings]);
 
   const {
-    fileInputRef,
-    handleMediaSelection,
-    triggerFileDialog,
+    openMediaLibrary,
     hasBackgroundMedia,
     uploadedMediaName,
     validateExistingMedia
@@ -405,7 +318,7 @@ const OutputSettingsPanel = ({ outputKey }) => {
     outputKey,
     settings,
     applySettings,
-    ensureValidToken,
+    showModal,
     showToast
   });
 
@@ -468,81 +381,30 @@ const OutputSettingsPanel = ({ outputKey }) => {
     handleTranslationFontSizeChange
   } = useTypographyAndBands({ settings, applySettings });
 
-  const prevFullScreenRef = React.useRef(fullScreenModeChecked);
-  const fullScreenAdvancedRef = React.useRef(null);
-  const prevFullScreenAdvancedExpandedRef = React.useRef(fullScreenAdvancedExpanded);
+  const {
+    fullScreenElementMediaName,
+    handleFullScreenElementToggle,
+    hasFullScreenElementMedia,
+    openFullScreenElementMediaLibrary,
+  } = useFullscreenElementMedia({
+    applySettings,
+    outputKey,
+    settings,
+    showModal,
+    showToast,
+  });
 
-  React.useEffect(() => {
-    const wasFullScreen = prevFullScreenRef.current;
-    if (!wasFullScreen && fullScreenModeChecked) {
-      setFullScreenAdvancedExpanded(true);
-    }
-    prevFullScreenRef.current = fullScreenModeChecked;
-  }, [fullScreenModeChecked, setFullScreenAdvancedExpanded]);
-
-  const fullScreenAdvancedVisible = fullScreenAdvancedExpanded;
-  const fullScreenControlsDisabled = !fullScreenModeChecked && fullScreenAdvancedExpanded;
-
-  React.useEffect(() => {
-    const wasExpanded = prevFullScreenAdvancedExpandedRef.current;
-    const isNowExpanded = fullScreenAdvancedVisible;
-
-    if (!wasExpanded && isNowExpanded) {
-      const scrollTarget = fullScreenAdvancedRef.current;
-      if (!scrollTarget) {
-        prevFullScreenAdvancedExpandedRef.current = isNowExpanded;
-        return;
-      }
-
-      const findScrollableParent = (node) => {
-        let current = node?.parentElement;
-        while (current) {
-          const style = window.getComputedStyle(current);
-          const canScroll = current.scrollHeight > current.clientHeight &&
-            /(auto|scroll|overlay)/i.test(style.overflowY || '');
-          if (canScroll) return current;
-          current = current.parentElement;
-        }
-        return null;
-      };
-
-      const scrollToReveal = () => {
-        const container = findScrollableParent(scrollTarget);
-        const padding = 24;
-        if (container) {
-          const containerRect = container.getBoundingClientRect();
-          const targetRect = scrollTarget.getBoundingClientRect();
-          const overflowBottom = targetRect.bottom - containerRect.bottom + padding;
-          if (overflowBottom > 0) {
-            container.scrollTo({
-              top: container.scrollTop + overflowBottom,
-              behavior: 'smooth'
-            });
-          }
-          return;
-        }
-
-        const targetRect = scrollTarget.getBoundingClientRect();
-        const overflowWindow = targetRect.bottom - window.innerHeight + padding;
-        if (overflowWindow > 0) {
-          window.scrollBy({ top: overflowWindow, behavior: 'smooth' });
-        }
-      };
-
-      const timeout = window.setTimeout(scrollToReveal, 120);
-      prevFullScreenAdvancedExpandedRef.current = isNowExpanded;
-      return () => window.clearTimeout(timeout);
-    }
-
-    prevFullScreenAdvancedExpandedRef.current = isNowExpanded;
-  }, [fullScreenAdvancedVisible]);
-
-  const handleFullScreenToggleWithExpand = React.useCallback((checked) => {
-    handleFullScreenToggle(checked);
-    if (checked) {
-      setFullScreenAdvancedExpanded(true);
-    }
-  }, [handleFullScreenToggle, setFullScreenAdvancedExpanded]);
+  const {
+    fullScreenAdvancedRef,
+    fullScreenAdvancedVisible,
+    fullScreenControlsDisabled,
+    handleFullScreenToggleWithExpand,
+  } = useFullscreenAdvancedAutoExpand({
+    fullScreenAdvancedExpanded,
+    fullScreenModeChecked,
+    handleFullScreenToggle,
+    setFullScreenAdvancedExpanded,
+  });
 
   const SettingRow = ({ icon, label, tooltip, children, rightClassName = 'flex items-center gap-2 justify-end', justifyEnd = true }) => (
     <div className="flex items-center justify-between gap-4">
@@ -557,174 +419,17 @@ const OutputSettingsPanel = ({ outputKey }) => {
 
   return (
     <div className="space-y-4" onKeyDown={blurInputOnEnter}>
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <h3 className={`text-sm font-medium uppercase tracking-wide ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-          {outputKey.toUpperCase()} SETTINGS
-        </h3>
-
-        <div className="flex items-center gap-2">
-          {/* Toggle Output Button */}
-          <Tooltip content={isOutputEnabled
-            ? `Turn off ${outputKey === 'output1' ? 'Output 1' : 'Output 2'}`
-            : `Turn on ${outputKey === 'output1' ? 'Output 1' : 'Output 2'}`}
-            side="bottom">
-            <button
-              onClick={handleToggleOutput}
-              className={`p-1.5 rounded-lg transition-colors ${!isOutputEnabled
-                ? darkMode
-                  ? 'bg-red-600/80 text-white hover:bg-red-600'
-                  : 'bg-red-500 text-white hover:bg-red-600'
-                : darkMode
-                  ? 'hover:bg-gray-700 text-gray-400 hover:text-gray-200'
-                  : 'hover:bg-gray-100 text-gray-500 hover:text-gray-700'
-                }`}
-            >
-              <Power className="w-4 h-4" />
-            </button>
-          </Tooltip>
-
-          {/* NDI Button */}
-          <Tooltip content="NDI Broadcasting" side="bottom">
-            <button
-              onClick={async () => {
-                const status = await window.electronAPI?.ndi?.checkInstalled();
-                if (!status?.installed) {
-                  showToast({
-                    title: 'NDI Unavailable',
-                    message: 'Download the NDI companion to enable broadcasting.',
-                    variant: 'info',
-                    duration: 8000,
-                    actions: [{
-                      label: 'Download',
-                      onClick: () => {
-                        showModal({
-                          title: 'Preferences',
-                          component: 'UserPreferences',
-                          variant: 'info',
-                          size: 'lg',
-                          customLayout: true,
-                          initialCategory: 'ndi',
-                          actions: []
-                        });
-                      }
-                    }]
-                  });
-                  return;
-                }
-                showModal({
-                  title: 'NDI Output Settings',
-                  headerDescription: `Configure NDI broadcast for ${outputKey === 'output1' ? 'Output 1' : 'Output 2'}`,
-                  component: 'NdiOutputSettings',
-                  variant: 'info',
-                  size: 'lg',
-                  outputKey: outputKey,
-                  customLayout: true,
-                  dismissLabel: 'Close',
-                });
-              }}
-              className={`px-1.5 rounded-lg transition-colors text-[12px] leading-none ${darkMode
-                ? 'hover:bg-gray-700 text-gray-400 hover:text-gray-200'
-                : 'hover:bg-gray-100 text-gray-500 hover:text-gray-700'
-                }`}
-              style={{ fontFamily: 'Inter, sans-serif', fontWeight: 700, height: 28 }}
-            >
-              NDI
-            </button>
-          </Tooltip>
-
-          {/* Save as Template button */}
-          <Tooltip content="Save current settings as a reusable template" side="bottom">
-            <button
-              onClick={() => {
-                showModal({
-                  title: 'Save as Template',
-                  headerDescription: 'Save your current output settings as a reusable template',
-                  component: 'SaveTemplate',
-                  variant: 'info',
-                  size: 'sm',
-                  actions: [],
-                  templateType: 'output',
-                  settings: settings,
-                  onSave: (template) => {
-                    showToast({
-                      title: 'Template Saved',
-                      message: `"${template.name}" has been saved successfully`,
-                      variant: 'success',
-                    });
-                  }
-                });
-              }}
-              className={`p-1.5 rounded-lg transition-colors ${darkMode
-                ? 'hover:bg-gray-700 text-gray-400 hover:text-gray-200'
-                : 'hover:bg-gray-100 text-gray-500 hover:text-gray-700'
-                }`}
-            >
-              <Save className="w-4 h-4" />
-            </button>
-          </Tooltip>
-
-          {/* Templates trigger button */}
-          <Tooltip content="Choose from professionally designed output templates" side="bottom">
-            <button
-              onClick={() => {
-                showModal({
-                  title: 'Output Templates',
-                  headerDescription: 'Choose from professionally designed output presets',
-                  component: 'OutputTemplates',
-                  variant: 'info',
-                  size: 'large',
-                  scrollBehavior: 'scroll',
-                  dismissLabel: 'Close',
-                  outputKey: outputKey,
-                  onApplyTemplate: (template) => {
-                    const templateSettings = template.getSettings
-                      ? template.getSettings(outputKey)
-                      : template.settings;
-                    applySettings(templateSettings);
-                    showToast({
-                      title: 'Template Applied',
-                      message: `${template.title} template has been applied successfully`,
-                      variant: 'success',
-                    });
-                  }
-                });
-              }}
-              className={`p-1.5 rounded-lg transition-colors ${darkMode
-                ? 'hover:bg-gray-700 text-gray-400 hover:text-gray-200'
-                : 'hover:bg-gray-100 text-gray-500 hover:text-gray-700'
-                }`}
-            >
-              <Palette className="w-4 h-4" />
-            </button>
-          </Tooltip>
-
-          {/* Help trigger button */}
-          <Tooltip content="Settings Panel Help" side="bottom">
-            <button
-              onClick={() => {
-                showModal({
-                  title: 'Output Settings Help',
-                  headerDescription: 'Customize every aspect of your lyric display appearance',
-                  component: 'OutputSettingsHelp',
-                  variant: 'info',
-                  size: 'large',
-                  dismissLabel: 'Got it'
-                });
-              }}
-              className={`p-1.5 rounded-lg transition-colors ${darkMode
-                ? 'hover:bg-gray-700 text-gray-400 hover:text-gray-200'
-                : 'hover:bg-gray-100 text-gray-500 hover:text-gray-700'
-                }`}
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </button>
-          </Tooltip>
-        </div>
-      </div>
-
+      <PanelHeaderActions
+        applySettings={applySettings}
+        darkMode={darkMode}
+        handleToggleOutput={handleToggleOutput}
+        isOutputEnabled={isOutputEnabled}
+        onDeleteOutput={onDeleteOutput}
+        outputKey={outputKey}
+        settings={settings}
+        showModal={showModal}
+        showToast={showToast}
+      />
       {/* Lyrics Position */}
       <LyricsPositionSection
         darkMode={darkMode}
@@ -740,278 +445,19 @@ const OutputSettingsPanel = ({ outputKey }) => {
         onChange={(val) => update('fontStyle', val)}
       />
 
-      {/* Font Size */}
-      <div className="flex items-center justify-between gap-4">
-        <Tooltip content="Adjust text size in pixels (24-100)" side="right">
-          <LabelWithIcon icon={TextCursorInput} text="Font Size" darkMode={darkMode} />
-        </Tooltip>
-        <div className="flex items-center gap-2 justify-end w-full">
-          <Tooltip content={fontSizeAdvancedExpanded ? "Hide advanced settings" : "Show advanced settings"} side="top">
-            <AdvancedToggle
-              expanded={fontSizeAdvancedExpanded}
-              onToggle={() => setFontSizeAdvancedExpanded(!fontSizeAdvancedExpanded)}
-              darkMode={darkMode}
-              ariaLabel="Toggle font size advanced settings"
-            />
-          </Tooltip>
-          {(() => {
-            const baseFont = Number.isFinite(settings.fontSize) ? settings.fontSize : 24;
-            const instanceCount = settings.instanceCount || 0;
-            const hasMultipleInstances = instanceCount > 1;
-            const allInstances = settings.allInstances || [];
-
-            let anyInstanceResizing = false;
-            let primaryAdjustedSize = null;
-
-            if (settings.maxLinesEnabled && instanceCount > 0) {
-              if (hasMultipleInstances && allInstances.length > 0) {
-                anyInstanceResizing = allInstances.some(inst => inst.autosizerActive === true);
-                const primaryInstance = allInstances.reduce((largest, current) => {
-                  if (!largest) return current;
-                  const largestArea = (largest.viewportWidth || 0) * (largest.viewportHeight || 0);
-                  const currentArea = (current.viewportWidth || 0) * (current.viewportHeight || 0);
-                  return currentArea > largestArea ? current : largest;
-                }, null);
-                primaryAdjustedSize = primaryInstance?.adjustedFontSize ?? null;
-              } else if (allInstances.length > 0) {
-                const singleInstance = allInstances[0];
-                anyInstanceResizing = Boolean(singleInstance?.autosizerActive);
-                primaryAdjustedSize = singleInstance?.adjustedFontSize ?? null;
-              } else if (settings.autosizerActive) {
-                anyInstanceResizing = true;
-                primaryAdjustedSize = null;
-              }
-            }
-
-            const primaryInstanceResizing = anyInstanceResizing && primaryAdjustedSize !== null && primaryAdjustedSize !== baseFont;
-            const displayFontSize = primaryInstanceResizing ? primaryAdjustedSize : baseFont;
-
-            const primaryViewport = settings.primaryViewportWidth && settings.primaryViewportHeight
-              ? `${settings.primaryViewportWidth}×${settings.primaryViewportHeight}`
-              : null;
-
-            let inputDisplayValue = displayFontSize;
-            if (hasMultipleInstances && anyInstanceResizing && allInstances.length > 0) {
-              const primaryValue = displayFontSize;
-              const otherResizingInstance = allInstances.find(inst =>
-                inst.autosizerActive === true &&
-                inst.adjustedFontSize !== primaryValue
-              );
-
-              if (otherResizingInstance) {
-                const otherValue = otherResizingInstance.adjustedFontSize ?? baseFont;
-                inputDisplayValue = allInstances.length > 2
-                  ? `${primaryValue}, ${otherValue}…`
-                  : `${primaryValue}, ${otherValue}`;
-              } else if (allInstances.length > 1) {
-                inputDisplayValue = `${primaryValue}…`;
-              }
-            }
-
-            let tooltipText = '';
-            if (anyInstanceResizing) {
-              if (hasMultipleInstances) {
-                tooltipText = `Auto-resizing active on ${instanceCount} displays\n\nPrimary (${primaryViewport}): ${displayFontSize}px`;
-                if (allInstances.length > 0) {
-                  allInstances.forEach((inst, idx) => {
-                    const viewport = `${inst.viewportWidth}×${inst.viewportHeight}`;
-                    const size = inst.adjustedFontSize ?? baseFont;
-                    tooltipText += `\nDisplay ${idx + 1} (${viewport}): ${size}px`;
-                  });
-                }
-                tooltipText += `\n\nPreferred size: ${settings.fontSize}px`;
-              } else {
-                tooltipText = `Auto-resizing active: ${displayFontSize}px (preferred: ${settings.fontSize}px)`;
-              }
-            } else {
-              tooltipText = 'Set the preferred font size in pixels';
-            }
-
-            const innerClassBase = `${darkMode ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300'}`;
-
-            return (
-              <div className={`flex items-center ${anyInstanceResizing ? 'gap-2' : ''}`} aria-live={anyInstanceResizing ? 'polite' : undefined}>
-                {anyInstanceResizing && (
-                  <span
-                    className="inline-flex items-center justify-center"
-                    title={tooltipText}
-                    aria-hidden="true"
-                  >
-                    {/* Sparkles icon */}
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="shrink-0">
-                      <defs>
-                        <linearGradient id="spark-grad" x1="0" y1="0" x2="1" y2="1">
-                          <stop offset="0%" stopColor="#60A5FA" />
-                          <stop offset="100%" stopColor="#8B5CF6" />
-                        </linearGradient>
-                      </defs>
-                      <path d="M12 2l2.2 4.8L19 9l-4.8 2.2L12 16l-2.2-4.8L5 9l4.8-2.2L12 2zm7 11l1.1 2.4L23 16l-2.4 1.1L19 19l-1.1-2.4L15 16l2.4-1.1L19 13zM3 13l1.1 2.4L6 16l-2.4 1.1L3 19l-1.1-2.4L0 16l2.4-1.1L3 13z" fill="url(#spark-grad)" />
-                    </svg>
-                  </span>
-                )}
-                <div className="relative flex-1">
-                  {hasMultipleInstances && anyInstanceResizing && primaryInstanceResizing ? (
-                    <div
-                      className={`w-24 h-9 px-3 flex items-center justify-start text-sm rounded-md border cursor-not-allowed ${darkMode
-                        ? 'bg-gray-700 border-gray-600 text-gray-500'
-                        : 'bg-gray-50 border-gray-300 text-gray-500'
-                        }`}
-                      style={{ fontWeight: 400 }}
-                      title={tooltipText}
-                    >
-                      {inputDisplayValue}
-                    </div>
-                  ) : (
-                    <Input
-                      type="number"
-                      value={Number.isFinite(displayFontSize) ? displayFontSize : 24}
-                      onChange={(e) => {
-                        const next = sanitizeIntegerInput(
-                          e.target.value,
-                          settings.fontSize ?? 24,
-                          { min: 24, max: 100, clampMin: false }
-                        );
-                        update('fontSize', next);
-                      }}
-                      min="24"
-                      max="100"
-                      disabled={primaryInstanceResizing}
-                      className={`w-24 ${innerClassBase} ${primaryInstanceResizing ? 'opacity-80 cursor-not-allowed' : ''}`}
-                      title={tooltipText}
-                    />
-                  )}
-                </div>
-              </div>
-            );
-          })()}
-          <Tooltip content="Enable adaptive text fitting with max lines limit" side="top">
-            <Button
-              size="icon"
-              variant="outline"
-              onClick={() => update('maxLinesEnabled', !settings.maxLinesEnabled)}
-              className={
-                settings.maxLinesEnabled
-                  ? darkMode
-                    ? '!bg-white !text-gray-900 hover:!bg-white !border-gray-300'
-                    : '!bg-black !text-white hover:!bg-black !border-gray-300'
-                  : darkMode
-                    ? '!bg-transparent !border-gray-600 !text-gray-200 hover:!bg-gray-700'
-                    : '!bg-transparent !border-gray-300 !text-gray-700 hover:!bg-gray-100'
-              }
-            >
-              <ListStart className="w-4 h-4" />
-            </Button>
-          </Tooltip>
-        </div>
-      </div>
-
-      {/* Font Size Advanced Settings Row */}
-      <div
-        className={`overflow-hidden transition-[max-height,opacity,transform] duration-300 ease-out ${fontSizeAdvancedExpanded
-          ? 'max-h-48 opacity-100 translate-y-0 pointer-events-auto mt-1'
-          : 'max-h-0 opacity-0 -translate-y-2 pointer-events-none m-0 p-0'
-          }`}
-        aria-hidden={!fontSizeAdvancedExpanded}
-        style={{ marginTop: fontSizeAdvancedExpanded ? undefined : 0 }}
-      >
-        {/* Max Lines Settings Row */}
-        <div className="flex items-center justify-between gap-4 mb-4">
-          <div className="flex items-center gap-2">
-            <label className={`text-sm ${darkMode ? 'text-gray-200' : 'text-gray-700'} ${!maxLinesEnabled ? 'opacity-50' : ''}`}>
-              Max Lines
-            </label>
-            <Input
-              type="number"
-              value={settings.maxLines ?? 3}
-              onChange={(e) => update(
-                'maxLines',
-                sanitizeIntegerInput(e.target.value, settings.maxLines ?? 3, { min: 1, max: 10 })
-              )}
-              min="1"
-              max="10"
-              disabled={!maxLinesEnabled}
-              className={`w-16 ${darkMode
-                ? 'bg-gray-700 border-gray-600 text-gray-200'
-                : 'bg-white border-gray-300'
-                } ${!maxLinesEnabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <label className={`text-sm ${darkMode ? 'text-gray-200' : 'text-gray-700'} ${!maxLinesEnabled ? 'opacity-50' : ''}`}>
-              Min Font Size
-            </label>
-            <Input
-              type="number"
-              value={settings.minFontSize ?? 24}
-              onChange={(e) => update(
-                'minFontSize',
-                sanitizeIntegerInput(
-                  e.target.value,
-                  settings.minFontSize ?? 24,
-                  { min: 12, max: 100, clampMin: false }
-                )
-              )}
-              min="12"
-              max="100"
-              disabled={!maxLinesEnabled}
-              className={`w-16 ${darkMode
-                ? 'bg-gray-700 border-gray-600 text-gray-200'
-                : 'bg-white border-gray-300'
-                } ${!maxLinesEnabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-            />
-          </div>
-        </div>
-
-        {/* Translation Font Size Row */}
-        <div className="flex items-center justify-between w-full">
-          {/* Translation Label */}
-          <label className={`text-sm whitespace-nowrap ${darkMode ? 'text-gray-200' : 'text-gray-700'}`}>
-            Translation Size
-          </label>
-
-          {/* Translation Mode and Custom Size */}
-          <div className="flex items-center gap-2">
-            <Select
-              value={translationFontSizeMode}
-              onValueChange={handleTranslationFontSizeModeChange}
-            >
-              <SelectTrigger
-                className={`w-[120px] ${darkMode
-                  ? 'bg-gray-700 border-gray-600 text-gray-200'
-                  : 'bg-white border-gray-300'
-                  }`}
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className={darkMode ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300'}>
-                <SelectItem value="bound">Bound</SelectItem>
-                <SelectItem value="custom">Custom</SelectItem>
-              </SelectContent>
-            </Select>
-
-            {/* Translation Custom Size */}
-            {translationFontSizeMode === 'custom' && (
-              <Tooltip content={`Translation font size (max: ${currentFontSize}px)`} side="top">
-                <div className="flex items-center gap-2">
-                  <Languages className={`w-4 h-4 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`} />
-                  <Input
-                    type="number"
-                    value={translationFontSize}
-                    onChange={(e) => handleTranslationFontSizeChange(e.target.value)}
-                    min="12"
-                    max={currentFontSize}
-                    className={`w-16 ${darkMode
-                      ? 'bg-gray-700 border-gray-600 text-gray-200'
-                      : 'bg-white border-gray-300'
-                      }`}
-                  />
-                </div>
-              </Tooltip>
-            )}
-          </div>
-        </div>
-      </div>
-
+      <FontSizeSettingsSection
+        currentFontSize={currentFontSize}
+        darkMode={darkMode}
+        fontSizeAdvancedExpanded={fontSizeAdvancedExpanded}
+        handleTranslationFontSizeChange={handleTranslationFontSizeChange}
+        handleTranslationFontSizeModeChange={handleTranslationFontSizeModeChange}
+        maxLinesEnabled={maxLinesEnabled}
+        setFontSizeAdvancedExpanded={setFontSizeAdvancedExpanded}
+        settings={settings}
+        translationFontSize={translationFontSize}
+        translationFontSizeMode={translationFontSizeMode}
+        update={update}
+      />
       {/* Font Color */}
       <FontColorSection
         darkMode={darkMode}
@@ -1066,151 +512,21 @@ const OutputSettingsPanel = ({ outputKey }) => {
         tooltip="Text alignment for lyrics display"
       />
 
-      {/* Letter Spacing */}
-      <div className="flex items-center justify-between gap-4">
-        <Tooltip content="Adjust letter spacing (-5 to 20 pixels)" side="right">
-          <LabelWithIcon icon={BetweenVerticalEnd} text="Letter Spacing" darkMode={darkMode} />
-        </Tooltip>
-        <div className="flex items-center gap-2">
-          <Slider
-            min={-5}
-            max={20}
-            step={0.5}
-            value={[settings.letterSpacing ?? 0]}
-            onValueChange={([val]) => update('letterSpacing', val)}
-            className="w-24"
-          />
-          <Input
-            type="number"
-            value={settings.letterSpacing ?? 0}
-            onChange={(e) => {
-              const val = parseFloat(e.target.value);
-              if (!isNaN(val)) {
-                update('letterSpacing', Math.min(20, Math.max(-5, val)));
-              }
-            }}
-            onKeyDown={blurInputOnEnter}
-            min="-5"
-            max="20"
-            step="0.5"
-            className={`w-20 ${darkMode ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300'}`}
-          />
-        </div>
-      </div>
-
-      {/* Text Border */}
-      <div className="flex items-center justify-between gap-4">
-        <Tooltip content="Add an outline around text for better visibility (0-10px)" side="right">
-          <LabelWithIcon icon={Frame} text="Text Border" darkMode={darkMode} />
-        </Tooltip>
-        <div className="flex gap-2 items-center">
-          <ColorPicker
-            value={settings.borderColor ?? '#000000'}
-            onChange={(val) => update('borderColor', val)}
-            darkMode={darkMode}
-            className={darkMode ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300'}
-          />
-          <Input
-            type="number"
-            value={settings.borderSize ?? 0}
-            onChange={(e) => update(
-              'borderSize',
-              sanitizeIntegerInput(e.target.value, settings.borderSize ?? 0, { min: 0, max: 10 })
-            )}
-            min="0"
-            max="10"
-            className={`w-20 ${darkMode
-              ? 'bg-gray-700 border-gray-600 text-gray-200'
-              : 'bg-white border-gray-300'
-              }`}
-          />
-        </div>
-      </div>
-
-      {/* Drop Shadow */}
-      <DropShadowSection
+      <TypographySpacingSection
         darkMode={darkMode}
         settings={settings}
         update={update}
-        dropShadowAdvancedExpanded={dropShadowAdvancedExpanded}
-        setDropShadowAdvancedExpanded={setDropShadowAdvancedExpanded}
       />
-
-      {/* Drop Shadow Advanced Settings Row */}
-      <div
-        className={`overflow-hidden transition-[max-height,opacity,transform] duration-300 ease-out ${dropShadowAdvancedExpanded
-          ? 'max-h-32 opacity-100 translate-y-0 pointer-events-auto mt-1'
-          : 'max-h-0 opacity-0 -translate-y-2 pointer-events-none m-0 p-0'
-          }`}
-        aria-hidden={!dropShadowAdvancedExpanded}
-        style={{ marginTop: dropShadowAdvancedExpanded ? undefined : 0 }}
-      >
-        <div className="flex items-center justify-between w-full">
-          {/* Horizontal Offset (X) */}
-          <Tooltip content="Horizontal shadow offset in pixels (negative = left, positive = right)" side="top">
-            <div className="flex items-center gap-2">
-              <MoveHorizontal className={`w-4 h-4 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`} />
-              <Input
-                type="number"
-                value={dropShadowOffsetX}
-                onChange={(e) => update(
-                  'dropShadowOffsetX',
-                  sanitizeIntegerInput(e.target.value, settings.dropShadowOffsetX ?? 0, { min: -50, max: 50 })
-                )}
-                min="-50"
-                max="50"
-                className={`w-16 ${darkMode
-                  ? 'bg-gray-700 border-gray-600 text-gray-200'
-                  : 'bg-white border-gray-300'
-                  }`}
-              />
-            </div>
-          </Tooltip>
-
-          {/* Vertical Offset (Y) */}
-          <Tooltip content="Vertical shadow offset in pixels (negative = up, positive = down)" side="top">
-            <div className="flex items-center gap-2">
-              <MoveVertical className={`w-4 h-4 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`} />
-              <Input
-                type="number"
-                value={dropShadowOffsetY}
-                onChange={(e) => update(
-                  'dropShadowOffsetY',
-                  sanitizeIntegerInput(e.target.value, settings.dropShadowOffsetY ?? 8, { min: -50, max: 50 })
-                )}
-                min="-50"
-                max="50"
-                className={`w-16 ${darkMode
-                  ? 'bg-gray-700 border-gray-600 text-gray-200'
-                  : 'bg-white border-gray-300'
-                  }`}
-              />
-            </div>
-          </Tooltip>
-
-          {/* Blur Radius */}
-          <Tooltip content="Shadow blur radius in pixels (0 = sharp, higher = softer)" side="top">
-            <div className="flex items-center gap-2">
-              <Sparkles className={`w-4 h-4 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`} />
-              <Input
-                type="number"
-                value={dropShadowBlur}
-                onChange={(e) => update(
-                  'dropShadowBlur',
-                  sanitizeIntegerInput(e.target.value, settings.dropShadowBlur ?? 10, { min: 0, max: 50 })
-                )}
-                min="0"
-                max="50"
-                className={`w-16 ${darkMode
-                  ? 'bg-gray-700 border-gray-600 text-gray-200'
-                  : 'bg-white border-gray-300'
-                  }`}
-              />
-            </div>
-          </Tooltip>
-        </div>
-      </div>
-
+      <DropShadowSettingsSection
+        darkMode={darkMode}
+        dropShadowAdvancedExpanded={dropShadowAdvancedExpanded}
+        dropShadowBlur={dropShadowBlur}
+        dropShadowOffsetX={dropShadowOffsetX}
+        dropShadowOffsetY={dropShadowOffsetY}
+        setDropShadowAdvancedExpanded={setDropShadowAdvancedExpanded}
+        settings={settings}
+        update={update}
+      />
       {/* Background */}
       <BackgroundSection
         darkMode={darkMode}
@@ -1222,121 +538,22 @@ const OutputSettingsPanel = ({ outputKey }) => {
         backgroundDisabledTooltip={backgroundDisabledTooltip}
       />
 
-      {/* Background Advanced Settings Row */}
-      <div
-        className={`overflow-hidden transition-[max-height,opacity,transform] duration-300 ease-out ${backgroundAdvancedExpanded && !fullScreenModeChecked
-          ? 'max-h-32 opacity-100 translate-y-0 pointer-events-auto mt-1'
-          : 'max-h-0 opacity-0 -translate-y-2 pointer-events-none m-0 p-0'
-          }`}
-        aria-hidden={!backgroundAdvancedExpanded || fullScreenModeChecked}
-        style={{ marginTop: (backgroundAdvancedExpanded && !fullScreenModeChecked) ? undefined : 0 }}
-      >
-        <div className="flex items-center justify-between w-full">
-          {/* Height Mode */}
-          <div className="flex items-center gap-2">
-            <label className={`text-sm whitespace-nowrap ${darkMode ? 'text-gray-200' : 'text-gray-700'}`}>
-              Mode
-            </label>
-            <Select
-              value={backgroundBandHeightMode}
-              onValueChange={handleBackgroundHeightModeChange}
-            >
-              <SelectTrigger
-                className={`w-[110px] ${darkMode
-                  ? 'bg-gray-700 border-gray-600 text-gray-200'
-                  : 'bg-white border-gray-300'
-                  }`}
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className={darkMode ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300'}>
-                <SelectItem value="adaptive">Adaptive</SelectItem>
-                <SelectItem value="custom">Custom</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Custom Lines */}
-          {backgroundBandHeightMode === 'custom' && (
-            <Tooltip content={
-              !maxLinesEnabled
-                ? "Number of lines for band height"
-                : backgroundBandLockedToMaxLines
-                  ? `Locked to Max Lines (${maxLinesValue}). Click to unlock`
-                  : `Click to lock to Max Lines (${maxLinesValue})`
-            } side="top">
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => {
-                    if (maxLinesEnabled) {
-                      applySettings({
-                        backgroundBandLockedToMaxLines: !backgroundBandLockedToMaxLines,
-                        backgroundBandCustomLines: !backgroundBandLockedToMaxLines ? maxLinesValue : backgroundBandCustomLines
-                      });
-                    }
-                  }}
-                  disabled={!maxLinesEnabled}
-                  className={`p-1 rounded transition-all ${maxLinesEnabled
-                    ? `cursor-pointer ${backgroundBandLockedToMaxLines
-                      ? darkMode
-                        ? 'bg-blue-600 hover:bg-blue-700'
-                        : 'bg-blue-500 hover:bg-blue-600'
-                      : darkMode
-                        ? 'hover:bg-gray-700'
-                        : 'hover:bg-gray-200'
-                    }`
-                    : 'cursor-default opacity-50'
-                    }`}
-                  aria-label={maxLinesEnabled ? (backgroundBandLockedToMaxLines ? "Unlock from max lines" : "Lock to max lines") : undefined}
-                >
-                  <Rows3 className={`w-4 h-4 ${backgroundBandLockedToMaxLines && maxLinesEnabled
-                    ? 'text-white'
-                    : darkMode ? 'text-gray-400' : 'text-gray-500'
-                    }`} />
-                </button>
-                <Input
-                  type="number"
-                  value={backgroundBandCustomLines}
-                  onChange={(e) => handleCustomLinesChange(e.target.value)}
-                  min="1"
-                  max={maxLinesEnabled ? maxLinesValue : 10}
-                  disabled={backgroundBandLockedToMaxLines && maxLinesEnabled}
-                  className={`w-16 ${darkMode
-                    ? 'bg-gray-700 border-gray-600 text-gray-200'
-                    : 'bg-white border-gray-300'
-                    } ${backgroundBandLockedToMaxLines && maxLinesEnabled ? 'opacity-60 cursor-not-allowed' : ''}`}
-                />
-              </div>
-            </Tooltip>
-          )}
-
-          {/* Vertical Padding */}
-          <Tooltip content="Vertical padding for background band (in pixels)" side="top">
-            <div className="flex items-center gap-2">
-              <ArrowUpDown className={`w-4 h-4 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`} />
-              <Input
-                type="number"
-                value={backgroundBandVerticalPadding}
-                onChange={(e) => update(
-                  'backgroundBandVerticalPadding',
-                  sanitizeIntegerInput(
-                    e.target.value,
-                    settings.backgroundBandVerticalPadding ?? 20,
-                    { min: 0, max: 100 }
-                  )
-                )}
-                min="0"
-                max="100"
-                className={`w-16 ${darkMode
-                  ? 'bg-gray-700 border-gray-600 text-gray-200'
-                  : 'bg-white border-gray-300'
-                  }`}
-              />
-            </div>
-          </Tooltip>
-        </div>
-      </div>
-
+      <BackgroundBandSettingsSection
+        applySettings={applySettings}
+        backgroundAdvancedExpanded={backgroundAdvancedExpanded}
+        backgroundBandCustomLines={backgroundBandCustomLines}
+        backgroundBandHeightMode={backgroundBandHeightMode}
+        backgroundBandLockedToMaxLines={backgroundBandLockedToMaxLines}
+        backgroundBandVerticalPadding={backgroundBandVerticalPadding}
+        darkMode={darkMode}
+        fullScreenModeChecked={fullScreenModeChecked}
+        handleBackgroundHeightModeChange={handleBackgroundHeightModeChange}
+        handleCustomLinesChange={handleCustomLinesChange}
+        maxLinesEnabled={maxLinesEnabled}
+        maxLinesValue={maxLinesValue}
+        settings={settings}
+        update={update}
+      />
       {/* X and Y Margins */}
       <MarginsSection
         darkMode={darkMode}
@@ -1344,165 +561,37 @@ const OutputSettingsPanel = ({ outputKey }) => {
         update={update}
       />
 
-      {/* Transition Style */}
-      <TransitionSection
+      <TransitionSettingsSection
         darkMode={darkMode}
+        setTransitionAdvancedExpanded={setTransitionAdvancedExpanded}
+        settings={settings}
+        transitionAdvancedExpanded={transitionAdvancedExpanded}
+        update={update}
+      />
+      <FullscreenSettingsSection
+        darkMode={darkMode}
+        fullScreenAdvancedExpanded={fullScreenAdvancedExpanded}
+        setFullScreenAdvancedExpanded={setFullScreenAdvancedExpanded}
+        fullScreenModeChecked={fullScreenModeChecked}
+        handleFullScreenToggleWithExpand={handleFullScreenToggleWithExpand}
+        fullScreenAdvancedRef={fullScreenAdvancedRef}
+        fullScreenOptionsWrapperClass={fullScreenOptionsWrapperClass}
+        fullScreenAdvancedVisible={fullScreenAdvancedVisible}
+        fullScreenControlsDisabled={fullScreenControlsDisabled}
+        fullScreenBackgroundTypeValue={fullScreenBackgroundTypeValue}
+        handleFullScreenBackgroundTypeChange={handleFullScreenBackgroundTypeChange}
+        fullScreenBackgroundColorValue={fullScreenBackgroundColorValue}
+        handleFullScreenColorChange={handleFullScreenColorChange}
+        openMediaLibrary={openMediaLibrary}
+        hasBackgroundMedia={hasBackgroundMedia}
+        uploadedMediaName={uploadedMediaName}
         settings={settings}
         update={update}
-        transitionAdvancedExpanded={transitionAdvancedExpanded}
-        setTransitionAdvancedExpanded={setTransitionAdvancedExpanded}
+        openFullScreenElementMediaLibrary={openFullScreenElementMediaLibrary}
+        hasFullScreenElementMedia={hasFullScreenElementMedia}
+        fullScreenElementMediaName={fullScreenElementMediaName}
+        handleFullScreenElementToggle={handleFullScreenElementToggle}
       />
-
-      {/* Transition Style Advanced Settings Row */}
-      <div
-        className={`overflow-hidden transition-[max-height,opacity,transform] duration-300 ease-out ${transitionAdvancedExpanded
-          ? 'max-h-20 opacity-100 translate-y-0 pointer-events-auto mt-1'
-          : 'max-h-0 opacity-0 -translate-y-2 pointer-events-none m-0 p-0'
-          }`}
-        aria-hidden={!transitionAdvancedExpanded}
-        style={{ marginTop: transitionAdvancedExpanded ? undefined : 0 }}
-      >
-        <div className="flex items-center justify-between w-full">
-          <label className={`text-sm whitespace-nowrap ${darkMode ? 'text-gray-200' : 'text-gray-700'} ${(settings.transitionAnimation ?? 'none') === 'none' ? 'opacity-50' : ''}`}>
-            Transition Speed (ms)
-          </label>
-          <Input
-            type="number"
-            value={settings.transitionSpeed ?? 150}
-            onChange={(e) => update(
-              'transitionSpeed',
-              sanitizeIntegerInput(
-                e.target.value,
-                settings.transitionSpeed ?? 150,
-                { min: 100, max: 2000, clampMin: false }
-              )
-            )}
-            min="100"
-            max="2000"
-            step="50"
-            disabled={(settings.transitionAnimation ?? 'none') === 'none'}
-            className={`w-24 ${darkMode
-              ? 'bg-gray-700 border-gray-600 text-gray-200'
-              : 'bg-white border-gray-300'
-              } ${(settings.transitionAnimation ?? 'none') === 'none' ? 'opacity-50 cursor-not-allowed' : ''}`}
-          />
-        </div>
-      </div>
-
-      {/* Full Screen Mode */}
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-2">
-          <Tooltip content="Enable full screen display with custom background settings" side="right">
-            <LabelWithIcon icon={ScreenShare} text="Full Screen Mode" darkMode={darkMode} />
-          </Tooltip>
-          <Tooltip content={fullScreenAdvancedExpanded ? "Hide advanced settings" : "Show advanced settings"} side="top">
-            <AdvancedToggle
-              expanded={fullScreenAdvancedExpanded}
-              onToggle={() => setFullScreenAdvancedExpanded(!fullScreenAdvancedExpanded)}
-              darkMode={darkMode}
-              ariaLabel="Toggle full screen advanced settings"
-            />
-          </Tooltip>
-        </div>
-        <div className="flex items-center gap-3 justify-end w-full">
-          <span className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
-            {fullScreenModeChecked ? 'Enabled' : 'Disabled'}
-          </span>
-          <Switch
-            checked={fullScreenModeChecked}
-            onCheckedChange={handleFullScreenToggleWithExpand}
-            aria-label="Toggle full screen mode"
-            className={`!h-8 !w-16 !border-0 shadow-sm transition-colors ${darkMode
-              ? 'data-[state=checked]:bg-green-400 data-[state=unchecked]:bg-gray-600'
-              : 'data-[state=checked]:bg-black data-[state=unchecked]:bg-gray-300'
-              }`}
-            thumbClassName="!h-6 !w-7 data-[state=checked]:!translate-x-8 data-[state=unchecked]:!translate-x-1"
-          />
-        </div>
-      </div>
-
-      {/* Fullscreen Mode Settings Row */}
-      <div
-        ref={fullScreenAdvancedRef}
-        className={`overflow-hidden transition-[max-height,opacity,transform] duration-300 ease-out ${fullScreenOptionsWrapperClass}`}
-        aria-hidden={!fullScreenAdvancedVisible}
-        style={{ marginTop: fullScreenAdvancedVisible ? undefined : 0 }}
-      >
-        <div className={`flex items-center gap-3 justify-between w-full pt-2 ${fullScreenControlsDisabled ? 'opacity-60 pointer-events-none' : ''}`}>
-          <Select
-            value={fullScreenBackgroundTypeValue}
-            onValueChange={handleFullScreenBackgroundTypeChange}
-            disabled={fullScreenControlsDisabled}
-          >
-            <SelectTrigger
-              disabled={fullScreenControlsDisabled}
-              className={`w-[200px] ${darkMode
-                ? 'bg-gray-700 border-gray-600 text-gray-200'
-                : 'bg-white border-gray-300'
-                } ${fullScreenControlsDisabled ? 'opacity-70 cursor-not-allowed' : ''}`}
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent className={darkMode ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300'}>
-              <SelectItem value="color">Colour</SelectItem>
-              <SelectItem value="media">Image / Video</SelectItem>
-            </SelectContent>
-          </Select>
-
-          {fullScreenBackgroundTypeValue === 'color' ? (
-            <ColorPicker
-              value={fullScreenBackgroundColorValue}
-              onChange={handleFullScreenColorChange}
-              darkMode={darkMode}
-              disabled={fullScreenControlsDisabled}
-              className={`ml-auto ${darkMode ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300'} ${fullScreenControlsDisabled ? 'opacity-70 cursor-not-allowed' : ''}`}
-            />
-          ) : (
-            <div className="flex items-center gap-2 ml-auto min-w-0 max-w-full">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*,video/*"
-                className="hidden"
-                onChange={handleMediaSelection}
-                disabled={fullScreenControlsDisabled}
-              />
-              <Button
-                variant="outline"
-                onClick={triggerFileDialog}
-                disabled={fullScreenControlsDisabled}
-                className={`h-9 px-4 flex-shrink-0 ${darkMode ? 'border-gray-600 text-gray-200 hover:bg-gray-700' : ''} ${fullScreenControlsDisabled ? 'opacity-70 cursor-not-allowed' : ''}`}
-              >
-                {hasBackgroundMedia ? 'File Added' : 'Add File'}
-              </Button>
-              {hasBackgroundMedia && (
-                <span
-                  className={`text-sm max-w-[220px] min-w-0 truncate ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}
-                  title={uploadedMediaName}
-                >
-                  {uploadedMediaName}
-                </span>
-              )}
-            </div>
-          )}
-        </div>
-
-        <div className="flex items-center justify-between w-full pt-3">
-          <Tooltip content="Show fullscreen background even when the output is toggled off" side="right">
-            <label className={`text-sm ${darkMode ? 'text-gray-200' : 'text-gray-700'}`}>Always Show Background</label>
-          </Tooltip>
-          <Switch
-            checked={Boolean(settings.alwaysShowBackground)}
-            onCheckedChange={(checked) => update('alwaysShowBackground', checked)}
-            aria-label="Toggle always show background"
-            className={`!h-7 !w-14 !border-0 shadow-sm transition-colors ${darkMode
-              ? 'data-[state=checked]:bg-green-400 data-[state=unchecked]:bg-gray-600'
-              : 'data-[state=checked]:bg-black data-[state=unchecked]:bg-gray-300'
-              }`}
-            thumbClassName="!h-5 !w-6 data-[state=checked]:!translate-x-7 data-[state=unchecked]:!translate-x-1"
-          />
-        </div>
-      </div>
 
     </div>
   );

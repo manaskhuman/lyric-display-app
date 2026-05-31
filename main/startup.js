@@ -13,6 +13,9 @@ import { preloadSystemFonts } from './systemFonts.js';
 import { getSavedDarkMode } from './themePreferences.js';
 import { initializeExternalControl, registerExternalControlIPC } from './externalControl.js';
 import { initializeNdiManager, registerNdiIpcHandlers } from './ndiManager.js';
+import * as userPreferences from './userPreferences.js';
+
+const isOutputRoute = (url) => /(?:#\/|\/)(stage|time|output\d+)(?:\?|$)/i.test(String(url || ''));
 
 export async function handleMissingAdminKey() {
   const message = 'LyricDisplay requires the administrative key to unlock local access.';
@@ -60,14 +63,13 @@ export function setupMainWindowCloseHandler(mainWindow) {
     console.log('[Startup] Main window closing, shutting down output windows...');
     try {
       const windows = BrowserWindow.getAllWindows();
-      const outputRoutes = ['/stage', '/output1', '/output2'];
 
       windows.forEach(win => {
         if (!win || win.isDestroyed() || win.id === mainWindow.id) return;
 
         try {
           const url = win.webContents.getURL();
-          const isOutputWindow = outputRoutes.some(route => url.includes(route));
+          const isOutputWindow = isOutputRoute(url);
           if (isOutputWindow) {
             console.log('[Startup] Closing output window:', url);
             win.close();
@@ -173,6 +175,7 @@ export async function performStartupSequence({ menuAPI, requestRendererModal, ha
 
     updateLoadingStatus('Initializing NDI manager');
     registerNdiIpcHandlers();
+    registerExternalControlIPC();
 
     const mainWindow = createWindow('/');
 
@@ -186,7 +189,6 @@ export async function performStartupSequence({ menuAPI, requestRendererModal, ha
 
     // Initialize external control (MIDI/OSC)
     updateLoadingStatus('Initializing external control');
-    registerExternalControlIPC();
     initializeExternalControl({ getMainWindow: () => mainWindow }).catch(err => {
       console.warn('[Startup] External control initialization warning:', err.message);
     });
@@ -202,7 +204,8 @@ export async function performStartupSequence({ menuAPI, requestRendererModal, ha
     closeLoadingWindow();
 
     setTimeout(() => {
-      if (!isDev) checkForUpdates(false);
+      const autoCheck = userPreferences.getPreference('general.autoCheckForUpdates') ?? true;
+      if (!isDev && autoCheck) checkForUpdates(false);
     }, 2000);
 
     setTimeout(() => {

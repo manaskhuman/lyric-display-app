@@ -18,7 +18,7 @@ export const useControlSocket = () => {
 
 const LONG_BACKOFF_WARNING_MS = 4000;
 
-export const ControlSocketProvider = ({ children }) => {
+export const ControlSocketProvider = ({ children, role = 'control' }) => {
     const socketRef = useRef(null);
     const reconnectTimeoutRef = useRef(null);
     const heartbeatIntervalRef = useRef(null);
@@ -37,7 +37,7 @@ export const ControlSocketProvider = ({ children }) => {
         clearAuthToken,
     } = useAuth();
 
-    const { registerAuthenticatedHandlers } = useSocketEvents('control');
+    const { registerAuthenticatedHandlers } = useSocketEvents(role);
 
     const getClientType = useCallback(() => {
         if (window.electronAPI) return 'desktop';
@@ -352,6 +352,8 @@ export const ControlSocketProvider = ({ children }) => {
     const emitStageMessagesUpdate = useCallback(createEmitFunction('stageMessagesUpdate'), [createEmitFunction]);
     const emitSplitNormalGroup = useCallback(createEmitFunction('splitNormalGroup'), [createEmitFunction]);
     const emitAutoplayStateUpdate = useCallback(createEmitFunction('autoplayStateUpdate'), [createEmitFunction]);
+    const emitOutputRemove = useCallback(createEmitFunction('outputRemove'), [createEmitFunction]);
+    const emitOutputsRegister = useCallback(createEmitFunction('outputsRegister'), [createEmitFunction]);
 
     const forceReconnect = useCallback(() => {
         logDebug('Force reconnecting control socket...');
@@ -445,6 +447,8 @@ export const ControlSocketProvider = ({ children }) => {
         emitStageMessagesUpdate,
         emitSplitNormalGroup,
         emitAutoplayStateUpdate,
+        emitOutputRemove,
+        emitOutputsRegister,
         connectionStatus,
         authStatus,
         forceReconnect,

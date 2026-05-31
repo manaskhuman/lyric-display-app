@@ -17,11 +17,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getJoinCode: () => ipcRenderer.invoke('get-join-code'),
   getDesktopJWT: (payload) => ipcRenderer.invoke('get-desktop-jwt', payload),
   getConnectionDiagnostics: () => ipcRenderer.invoke('get-connection-diagnostics'),
+  security: {
+    getJwtStatus: () => ipcRenderer.invoke('security:get-jwt-status'),
+    rotateJwtAndRestart: () => ipcRenderer.invoke('security:rotate-jwt-and-restart')
+  },
   newLyricsFile: () => ipcRenderer.invoke('new-lyrics-file'),
   getLocalIP: () => ipcRenderer.invoke('get-local-ip'),
   getSystemFonts: () => ipcRenderer.invoke('fonts:list'),
   getPlatform: () => process.platform,
   getAppVersion: () => ipcRenderer.invoke('app:get-version'),
+  getLogPaths: () => ipcRenderer.invoke('app:get-log-paths'),
+  restartApp: () => ipcRenderer.invoke('app:relaunch'),
   windowControls: {
     minimize: () => ipcRenderer.invoke('window:minimize'),
     toggleMaximize: () => ipcRenderer.invoke('window:toggle-maximize'),
@@ -49,6 +55,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   onDarkModeToggle: (callback) => ipcRenderer.on('toggle-dark-mode', callback),
+  onThemeUpdated: (callback) => {
+    const channel = 'theme-updated';
+    const listener = (_event, payload) => callback?.(payload);
+    ipcRenderer.on(channel, listener);
+    return () => ipcRenderer.removeListener(channel, listener);
+  },
 
   showSaveDialog: (options) => ipcRenderer.invoke('show-save-dialog', options),
   writeFile: (filePath, content) => ipcRenderer.invoke('write-file', filePath, content),
@@ -114,9 +126,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   requestUpdateDownload: () => ipcRenderer.invoke('updater:download'),
   requestInstallAndRestart: () => ipcRenderer.invoke('updater:install'),
-  displaySettings: {
-    openModal: () => ipcRenderer.invoke('display:open-settings-modal')
-  },
 
   onOpenShortcutsHelp: (callback) => {
     const channel = 'open-shortcuts-help';
@@ -227,15 +236,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getUserHome: () => ipcRenderer.invoke('presentation:get-user-home')
   },
   display: {
+    getProjectionState: () => ipcRenderer.invoke('display:get-projection-state'),
+    projectOutput: (payload) => ipcRenderer.invoke('display:project-output', payload),
+    stopProjection: (payload) => ipcRenderer.invoke('display:stop-projection', payload),
+    openOutputWindow: (outputKey) => ipcRenderer.invoke('display:open-output-window', { outputKey }),
+    openTimerControlWindow: () => ipcRenderer.invoke('display:open-timer-control-window'),
+    openObsSourceCreatorWindow: () => ipcRenderer.invoke('display:open-obs-source-creator-window'),
     getAll: () => ipcRenderer.invoke('display:get-all'),
     getPrimary: () => ipcRenderer.invoke('display:get-primary'),
     getById: (displayId) => ipcRenderer.invoke('display:get-by-id', { displayId }),
-    saveAssignment: (displayId, outputKey) => ipcRenderer.invoke('display:save-assignment', { displayId, outputKey }),
-    getAssignment: (displayId) => ipcRenderer.invoke('display:get-assignment', { displayId }),
-    getAllAssignments: () => ipcRenderer.invoke('display:get-all-assignments'),
-    removeAssignment: (displayId) => ipcRenderer.invoke('display:remove-assignment', { displayId }),
-    openOutputOnDisplay: (outputKey, displayId) => ipcRenderer.invoke('display:open-output-on-display', { outputKey, displayId }),
-    closeOutputWindow: (outputKey) => ipcRenderer.invoke('display:close-output-window', { outputKey })
   },
   setlist: {
     save: (setlistData, defaultName) => ipcRenderer.invoke('setlist:save', { setlistData, defaultName }),
@@ -256,6 +265,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // External Control (MIDI/OSC)
   externalControl: {
     getStatus: () => ipcRenderer.invoke('external-control:get-status'),
+    updateState: (state) => ipcRenderer.invoke('external-control:update-state', state),
     onAction: (callback) => {
       const channel = 'external-control:action';
       ipcRenderer.removeAllListeners(channel);
@@ -325,6 +335,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     setResolution: (outputKey, resolution) => ipcRenderer.invoke('ndi:set-resolution', { outputKey, resolution }),
     setCustomResolution: (outputKey, width, height) => ipcRenderer.invoke('ndi:set-custom-resolution', { outputKey, width, height }),
     setFramerate: (outputKey, framerate) => ipcRenderer.invoke('ndi:set-framerate', { outputKey, framerate }),
+    registerOutputs: (outputs) => ipcRenderer.invoke('ndi:register-outputs', { outputs }),
     onCompanionStatus: (callback) => {
       const channel = 'ndi:companion-status';
       const listener = (_event, status) => callback(status);
@@ -345,6 +356,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
     getPendingUpdateInfo: () => ipcRenderer.invoke('ndi:get-pending-update-info'),
     clearPendingUpdateInfo: () => ipcRenderer.invoke('ndi:clear-pending-update-info'),
+    cancelDownload: () => ipcRenderer.invoke('ndi:cancel-download'),
   },
 
   // User Preferences

@@ -7,7 +7,7 @@
  */
 export async function showDisplayDetectionModal(displayOrDisplays, isStartupCheck, requestRendererModal, isManualOpen = false) {
 
-  const displaysArray = Array.isArray(displayOrDisplays) ? displayOrDisplays : [displayOrDisplays];
+  const displaysArray = (Array.isArray(displayOrDisplays) ? displayOrDisplays : [displayOrDisplays]).filter(Boolean);
 
   if (!displaysArray || displaysArray.length === 0) {
     console.warn('[DisplayDetection] No displays provided to showDisplayDetectionModal');
@@ -15,34 +15,7 @@ export async function showDisplayDetectionModal(displayOrDisplays, isStartupChec
   }
 
   try {
-    const { BrowserWindow } = await import('electron');
-    const { getDisplayAssignment } = await import('./displayManager.js');
-
-    const windows = BrowserWindow.getAllWindows();
-
     const displaysInfo = displaysArray.map((display, index) => {
-      const assignment = getDisplayAssignment(display.id);
-      let isProjecting = false;
-      let currentOutput = null;
-
-      if (assignment) {
-        const outputRoute = assignment.outputKey === 'stage' ? '/stage' :
-          assignment.outputKey === 'output1' ? '/output1' : '/output2';
-
-        for (const win of windows) {
-          if (!win || win.isDestroyed()) continue;
-          try {
-            const url = win.webContents.getURL();
-            if (url.includes(outputRoute)) {
-              isProjecting = true;
-              currentOutput = assignment.outputKey;
-              break;
-            }
-          } catch (err) {
-          }
-        }
-      }
-
       let displayName = display.name || display.label || 'External Display';
       if (displaysArray.length > 1) {
         displayName = `Display ${index + 1}`;
@@ -52,8 +25,6 @@ export async function showDisplayDetectionModal(displayOrDisplays, isStartupChec
         id: display.id,
         name: displayName,
         bounds: display.bounds,
-        isProjecting,
-        currentOutput
       };
     });
 
@@ -72,14 +43,19 @@ export async function showDisplayDetectionModal(displayOrDisplays, isStartupChec
       {
         title: title,
         headerDescription: headerDesc,
-        component: 'DisplayDetection',
+        component: 'ProjectOutput',
+        dedupeKey: 'component:ProjectOutput',
         variant: 'info',
         size: 'lg',
+        className: 'max-w-4xl',
         dismissible: true,
         actions: [],
+        customLayout: true,
         displays: displaysInfo,
         displayInfo: displaysInfo[0],
-        isManualOpen: isManualOpen
+        preferredDisplayId: displaysInfo[0]?.id,
+        detectedDisplays: displaysInfo,
+        triggerSource: isManualOpen ? 'manual' : (isStartupCheck ? 'startup' : 'hotplug'),
       },
       {
         timeout: 60000,
@@ -106,7 +82,15 @@ export async function handleDisplayChange(changeType, display, requestRendererMo
 
     await new Promise(resolve => setTimeout(resolve, 1000));
 
-    await showDisplayDetectionModal(display, false, requestRendererModal);
+    try {
+      const { getAllDisplays } = await import('./displayManager.js');
+      const allDisplays = getAllDisplays();
+      const externalDisplays = allDisplays.filter(d => !d.primary);
+      await showDisplayDetectionModal(externalDisplays.length > 0 ? externalDisplays : display, false, requestRendererModal);
+    } catch (error) {
+      console.warn('[DisplayDetection] Falling back to display event payload:', error);
+      await showDisplayDetectionModal(display, false, requestRendererModal);
+    }
   }
 }
 

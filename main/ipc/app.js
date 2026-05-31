@@ -1,5 +1,6 @@
-import { ipcMain, nativeTheme, app } from 'electron';
+import { BrowserWindow, ipcMain, nativeTheme, app } from 'electron';
 import { saveDarkModePreference } from '../themePreferences.js';
+import { getLogPaths } from '../logging.js';
 
 /**
  * Register app-level IPC handlers
@@ -11,9 +12,16 @@ export function registerAppHandlers({ updateDarkModeMenu }) {
     return false;
   });
 
-  ipcMain.handle('set-dark-mode', (_event, _isDark) => {
+  ipcMain.handle('set-dark-mode', (event, isDark) => {
     try {
       updateDarkModeMenu();
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win || win.isDestroyed()) continue;
+        if (event?.sender && win.webContents === event.sender) continue;
+        try {
+          win.webContents.send('theme-updated', { darkMode: Boolean(isDark) });
+        } catch { }
+      }
     } catch { }
     return true;
   });
@@ -42,6 +50,25 @@ export function registerAppHandlers({ updateDarkModeMenu }) {
     try {
       return { success: true, version: app.getVersion() };
     } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('app:get-log-paths', () => {
+    try {
+      return { success: true, ...getLogPaths() };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('app:relaunch', () => {
+    try {
+      app.relaunch();
+      app.exit(0);
+      return { success: true };
+    } catch (error) {
+      console.error('[App IPC] Failed to relaunch app:', error);
       return { success: false, error: error.message };
     }
   });

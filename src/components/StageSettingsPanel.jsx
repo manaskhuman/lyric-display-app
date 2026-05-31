@@ -6,12 +6,13 @@ import { Switch } from "@/components/ui/switch";
 import { Tooltip } from '@/components/ui/tooltip';
 import { ColorPicker } from "@/components/ui/color-picker";
 import useStageDisplayControls from '../hooks/OutputSettingsPanel/useStageDisplayControls';
-import { Type, PaintBucket, Square, ScreenShare, ListMusic, ChevronRight, Languages, Palette, Power, TextAlignJustify, SquareMenu, Timer, GalleryVerticalEnd, ArrowRightLeft, Gauge, Save, BetweenVerticalEnd } from 'lucide-react';
+import { Type, PaintBucket, Square, ScreenShare, ListMusic, ChevronRight, Languages, Palette, Power, TextAlignJustify, SquareMenu, Timer, GalleryVerticalEnd, ArrowRightLeft, Gauge, Save, BetweenVerticalEnd, ListIndentIncrease, Eye } from 'lucide-react';
 import FontSelect from './FontSelect';
 import { blurInputOnEnter, AdvancedToggle, FontSettingsRow, EmphasisRow, AlignmentRow, LabelWithIcon } from './OutputSettingsShared';
 import { Slider } from '@/components/ui/slider';
 import useToast from '../hooks/useToast';
 import { sanitizeIntegerInput } from '../utils/numberInput';
+import { MAX_STAGE_MESSAGES, MAX_STAGE_MESSAGE_LENGTH } from '../utils/stageMessages';
 
 const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showModal, isOutputEnabled, handleToggleOutput }) => {
   const { showToast } = useToast();
@@ -50,12 +51,45 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
     handleFullScreenToggle,
     handleAddMessage,
     handleRemoveMessage,
+    handleUpdateMessage,
+    handleClearMessages,
     handleStartTimer,
     handlePauseTimer,
     handleResumeTimer,
     handleStopTimer,
     handleTimerDurationChange
   } = handlers;
+
+  const [editingMessageId, setEditingMessageId] = React.useState(null);
+  const [editingMessageText, setEditingMessageText] = React.useState('');
+
+  React.useEffect(() => {
+    if (!editingMessageId) return;
+    const stillExists = customMessages.some((msg) => msg.id === editingMessageId);
+    if (!stillExists) {
+      setEditingMessageId(null);
+      setEditingMessageText('');
+    }
+  }, [customMessages, editingMessageId]);
+
+  const beginEditMessage = (message) => {
+    setEditingMessageId(message.id);
+    setEditingMessageText(message.text || '');
+  };
+
+  const cancelEditMessage = () => {
+    setEditingMessageId(null);
+    setEditingMessageText('');
+  };
+
+  const saveEditMessage = () => {
+    if (!editingMessageId) return;
+    const didSave = handleUpdateMessage(editingMessageId, editingMessageText);
+    if (didSave) {
+      setEditingMessageId(null);
+      setEditingMessageText('');
+    }
+  };
 
   const switchBaseClasses = `!h-8 !w-16 !border-0 shadow-sm transition-colors ${darkMode
     ? 'data-[state=checked]:bg-green-400 data-[state=unchecked]:bg-gray-600'
@@ -95,9 +129,10 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
       allCapsKey: 'liveAllCaps',
       alignKey: 'liveAlign',
       letterSpacingKey: 'liveLetterSpacing',
+      lineSpacingKey: 'liveLineSpacing',
       tooltip: 'Font size and color for current lyric line',
       alignTooltip: 'Text alignment for current line',
-      extra: (
+      extra: () => (
         <div className="flex items-center justify-between gap-4 mt-4">
           <Tooltip content="Color for translation lines in grouped lyrics" side="right">
             <LabelWithIcon icon={Languages} text="Translation Colour" darkMode={darkMode} />
@@ -113,6 +148,7 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
     },
     {
       title: 'Next Line (Upcoming)',
+      settingsToggleKey: 'showNextLine',
       sizeKey: 'nextFontSize',
       colorKey: 'nextColor',
       boldKey: 'nextBold',
@@ -121,30 +157,33 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
       allCapsKey: 'nextAllCaps',
       alignKey: 'nextAlign',
       letterSpacingKey: 'nextLetterSpacing',
+      lineSpacingKey: 'nextLineSpacing',
       tooltip: 'Font size and color for upcoming lyric line',
       alignTooltip: 'Text alignment for upcoming line',
-      extra: (
+      extra: ({ sectionDisabled }) => (
         <div className="flex items-center justify-between gap-4 mt-4">
           <Tooltip content="Show arrow indicator before upcoming line" side="right">
             <LabelWithIcon icon={ChevronRight} text="Arrow" darkMode={darkMode} />
           </Tooltip>
           <div className="flex items-center gap-2 justify-end w-full">
-            <span className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+            <span className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-600'} ${sectionDisabled ? 'opacity-50' : ''}`}>
               {settings.showNextArrow ? 'Enabled' : 'Disabled'}
             </span>
             <Switch
               checked={settings.showNextArrow}
               onCheckedChange={(checked) => update('showNextArrow', checked)}
+              disabled={sectionDisabled}
               aria-label="Toggle show arrow"
-              className={switchBaseClasses}
+              className={`${switchBaseClasses} ${sectionDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
               thumbClassName={switchThumbClass}
             />
             <PaintBucket className={`w-4 h-4 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`} />
             <ColorPicker
               value={settings.nextArrowColor}
               onChange={(val) => update('nextArrowColor', val)}
+              disabled={sectionDisabled}
               darkMode={darkMode}
-              className={darkMode ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300'}
+              className={`${darkMode ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300'} ${sectionDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
             />
           </div>
         </div>
@@ -152,6 +191,7 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
     },
     {
       title: 'Previous Line',
+      settingsToggleKey: 'showPrevLine',
       sizeKey: 'prevFontSize',
       colorKey: 'prevColor',
       boldKey: 'prevBold',
@@ -160,84 +200,161 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
       allCapsKey: 'prevAllCaps',
       alignKey: 'prevAlign',
       letterSpacingKey: 'prevLetterSpacing',
+      lineSpacingKey: 'prevLineSpacing',
       tooltip: 'Font size and color for previous lyric line',
       alignTooltip: 'Text alignment for previous line'
     }
   ];
 
-  const renderLineSection = (section) => (
-    <>
-      <h4 className={`text-sm font-semibold ${darkMode ? 'text-gray-300' : 'text-gray-700'} mt-2`}>{section.title}</h4>
+  const renderLineSection = (section) => {
+    const sectionEnabled = section.settingsToggleKey ? (settings[section.settingsToggleKey] ?? true) : true;
+    const sectionDisabled = Boolean(section.settingsToggleKey) && !sectionEnabled;
+    const extraContent = typeof section.extra === 'function'
+      ? section.extra({ sectionDisabled })
+      : section.extra;
 
-      <FontSettingsRow
-        darkMode={darkMode}
-        sizeValue={settings[section.sizeKey]}
-        colorValue={settings[section.colorKey]}
-        onSizeChange={(val) => update(section.sizeKey, val)}
-        onColorChange={(val) => update(section.colorKey, val)}
-        minSize={24}
-        maxSize={200}
-        tooltip={section.tooltip}
-      />
+    return (
+      <div className="space-y-4">
+        <h4 className={`text-sm font-semibold ${darkMode ? 'text-gray-300' : 'text-gray-700'} mt-2`}>{section.title}</h4>
 
-      <EmphasisRow
-        darkMode={darkMode}
-        LabelWithIcon={LabelWithIcon}
-        icon={SquareMenu}
-        boldValue={settings[section.boldKey]}
-        italicValue={settings[section.italicKey]}
-        underlineValue={settings[section.underlineKey]}
-        allCapsValue={settings[section.allCapsKey]}
-        onBoldChange={(val) => update(section.boldKey, val)}
-        onItalicChange={(val) => update(section.italicKey, val)}
-        onUnderlineChange={(val) => update(section.underlineKey, val)}
-        onAllCapsChange={(val) => update(section.allCapsKey, val)}
-      />
+        {section.settingsToggleKey && (
+          <div className="flex items-center justify-between gap-4">
+            <Tooltip
+              content={`Show or hide the ${section.title.toLowerCase()} and its styling on stage output`}
+              side="right"
+            >
+              <div className="flex items-center gap-2 min-w-[170px]">
+                <Eye className={`w-4 h-4 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`} />
+                <label className={`text-sm whitespace-nowrap ${darkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+                  {section.settingsToggleKey === 'showNextLine' ? 'Show Next Line' : 'Show Previous Line'}
+                </label>
+              </div>
+            </Tooltip>
+            <div className="flex items-center gap-3 justify-end w-full">
+              <span className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                {sectionEnabled ? 'Enabled' : 'Disabled'}
+              </span>
+              <Switch
+                checked={sectionEnabled}
+                onCheckedChange={(checked) => update(section.settingsToggleKey, checked)}
+                aria-label={`Toggle ${section.settingsToggleKey === 'showNextLine' ? 'next line' : 'previous line'} visibility`}
+                className={switchBaseClasses}
+                thumbClassName={switchThumbClass}
+              />
+            </div>
+          </div>
+        )}
 
-      <AlignmentRow
-        darkMode={darkMode}
-        LabelWithIcon={LabelWithIcon}
-        icon={TextAlignJustify}
-        value={settings[section.alignKey]}
-        onChange={(val) => update(section.alignKey, val)}
-        tooltip={section.alignTooltip || 'Text alignment'}
-      />
-
-      {/* Letter Spacing */}
-      <div className="flex items-center justify-between gap-4">
-        <Tooltip content="Adjust letter spacing (-5 to 20 pixels)" side="right">
-          <LabelWithIcon icon={BetweenVerticalEnd} text="Letter Spacing" darkMode={darkMode} />
-        </Tooltip>
-        <div className="flex items-center gap-2">
-          <Slider
-            min={-5}
-            max={20}
-            step={0.5}
-            value={[settings[section.letterSpacingKey] ?? 0]}
-            onValueChange={([val]) => update(section.letterSpacingKey, val)}
-            className="w-24"
+        <div className={`space-y-4 ${sectionDisabled ? 'opacity-50' : ''}`} aria-disabled={sectionDisabled}>
+          <FontSettingsRow
+            darkMode={darkMode}
+            sizeValue={settings[section.sizeKey]}
+            colorValue={settings[section.colorKey]}
+            onSizeChange={(val) => update(section.sizeKey, val)}
+            onColorChange={(val) => update(section.colorKey, val)}
+            minSize={24}
+            maxSize={200}
+            tooltip={section.tooltip}
+            disabled={sectionDisabled}
           />
-          <Input
-            type="number"
-            value={settings[section.letterSpacingKey] ?? 0}
-            onChange={(e) => {
-              const val = parseFloat(e.target.value);
-              if (!isNaN(val)) {
-                update(section.letterSpacingKey, Math.min(20, Math.max(-5, val)));
-              }
-            }}
-            onKeyDown={blurInputOnEnter}
-            min="-5"
-            max="20"
-            step="0.5"
-            className={`w-20 ${darkMode ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300'}`}
+
+          <EmphasisRow
+            darkMode={darkMode}
+            LabelWithIcon={LabelWithIcon}
+            icon={SquareMenu}
+            boldValue={settings[section.boldKey]}
+            italicValue={settings[section.italicKey]}
+            underlineValue={settings[section.underlineKey]}
+            allCapsValue={settings[section.allCapsKey]}
+            onBoldChange={(val) => update(section.boldKey, val)}
+            onItalicChange={(val) => update(section.italicKey, val)}
+            onUnderlineChange={(val) => update(section.underlineKey, val)}
+            onAllCapsChange={(val) => update(section.allCapsKey, val)}
+            disabled={sectionDisabled}
           />
+
+          <AlignmentRow
+            darkMode={darkMode}
+            LabelWithIcon={LabelWithIcon}
+            icon={TextAlignJustify}
+            value={settings[section.alignKey]}
+            onChange={(val) => update(section.alignKey, val)}
+            tooltip={section.alignTooltip || 'Text alignment'}
+            disabled={sectionDisabled}
+          />
+
+          {/* Letter Spacing */}
+          <div className="flex items-center justify-between gap-4">
+            <Tooltip content="Adjust letter spacing (-5 to 20 pixels)" side="right">
+              <LabelWithIcon icon={BetweenVerticalEnd} text="Letter Spacing" darkMode={darkMode} />
+            </Tooltip>
+            <div className="flex items-center gap-2">
+              <Slider
+                min={-5}
+                max={20}
+                step={0.5}
+                value={[settings[section.letterSpacingKey] ?? 0]}
+                onValueChange={([val]) => update(section.letterSpacingKey, val)}
+                disabled={sectionDisabled}
+                className="w-24"
+              />
+              <Input
+                type="number"
+                value={settings[section.letterSpacingKey] ?? 0}
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value);
+                  if (!isNaN(val)) {
+                    update(section.letterSpacingKey, Math.min(20, Math.max(-5, val)));
+                  }
+                }}
+                onKeyDown={blurInputOnEnter}
+                min="-5"
+                max="20"
+                step="0.5"
+                disabled={sectionDisabled}
+                className={`w-20 ${darkMode ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300'}`}
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-4">
+            <Tooltip content="Adjust line spacing (0.8 to 3.0)" side="right">
+              <LabelWithIcon icon={ListIndentIncrease} text="Line Spacing" darkMode={darkMode} />
+            </Tooltip>
+            <div className="flex items-center gap-2">
+              <Slider
+                min={0.8}
+                max={3}
+                step={0.01}
+                value={[settings[section.lineSpacingKey] ?? 1]}
+                onValueChange={([val]) => update(section.lineSpacingKey, val)}
+                disabled={sectionDisabled}
+                className="w-24"
+              />
+              <Input
+                type="number"
+                value={settings[section.lineSpacingKey] ?? 1}
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value);
+                  if (!isNaN(val)) {
+                    update(section.lineSpacingKey, Math.min(3, Math.max(0.8, val)));
+                  }
+                }}
+                onKeyDown={blurInputOnEnter}
+                min="0.8"
+                max="3"
+                step="0.1"
+                disabled={sectionDisabled}
+                className={`w-20 ${darkMode ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300'}`}
+              />
+            </div>
+          </div>
+
+          {extraContent}
         </div>
       </div>
-
-      {section.extra}
-    </>
-  );
+    );
+  };
 
   return (
     <div className="space-y-4" onKeyDown={blurInputOnEnter}>
@@ -247,7 +364,7 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
           Stage Settings
         </h3>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           {/* Toggle Output Button */}
           <Tooltip content={isOutputEnabled ? "Turn off Stage Display" : "Turn on Stage Display"} side="bottom">
             <button
@@ -741,30 +858,87 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
             type="text"
             value={newMessage}
             onChange={(e) => setNewMessage(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && handleAddMessage()}
+            onKeyDown={(e) => e.key === 'Enter' && handleAddMessage()}
             placeholder="Enter custom message..."
+            maxLength={MAX_STAGE_MESSAGE_LENGTH}
             className={`flex-1 ${darkMode ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300'}`}
           />
           <Button onClick={handleAddMessage} className={darkMode ? 'bg-blue-600 hover:bg-blue-700' : ''}>
             Add
           </Button>
+          <Button
+            variant="outline"
+            onClick={handleClearMessages}
+            disabled={customMessages.length === 0}
+            className={darkMode ? 'border-gray-600 text-gray-200 hover:bg-gray-700' : ''}
+          >
+            Clear
+          </Button>
+        </div>
+        <div className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+          {customMessages.length}/{MAX_STAGE_MESSAGES} messages | {newMessage.length}/{MAX_STAGE_MESSAGE_LENGTH} characters
         </div>
 
         {customMessages.length > 0 && (
           <div className={`space-y-2 max-h-40 overflow-y-auto p-2 rounded ${darkMode ? 'bg-gray-700' : 'bg-gray-50'}`}>
             {customMessages.map((msg) => (
               <div key={msg.id} className={`flex items-center justify-between p-2 rounded ${darkMode ? 'bg-gray-600' : 'bg-white'}`}>
-                <span className={`text-sm ${darkMode ? 'text-gray-200' : 'text-gray-700'}`}>
-                  {typeof msg === 'string' ? msg : msg.text}
-                </span>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => handleRemoveMessage(msg.id)}
-                  className={darkMode ? 'hover:bg-gray-500 text-gray-300' : ''}
-                >
-                  Remove
-                </Button>
+                {editingMessageId === msg.id ? (
+                  <>
+                    <Input
+                      type="text"
+                      value={editingMessageText}
+                      onChange={(e) => setEditingMessageText(e.target.value)}
+                      maxLength={MAX_STAGE_MESSAGE_LENGTH}
+                      className={`flex-1 mr-2 h-8 ${darkMode ? 'bg-gray-700 border-gray-500 text-gray-200' : 'bg-white border-gray-300'}`}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') saveEditMessage();
+                        if (e.key === 'Escape') cancelEditMessage();
+                      }}
+                    />
+                    <div className="flex items-center gap-1">
+                      <Button
+                        size="sm"
+                        onClick={saveEditMessage}
+                        className={darkMode ? 'bg-green-600 hover:bg-green-700 h-8 px-2' : 'h-8 px-2'}
+                      >
+                        Save
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={cancelEditMessage}
+                        className={darkMode ? 'border-gray-500 text-gray-200 hover:bg-gray-700 h-8 px-2' : 'h-8 px-2'}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <span className={`text-sm flex-1 truncate pr-2 ${darkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+                      {msg.text}
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => beginEditMessage(msg)}
+                        className={darkMode ? 'hover:bg-gray-500 text-gray-200 h-8 px-2' : 'h-8 px-2'}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => handleRemoveMessage(msg.id)}
+                        className={darkMode ? 'hover:bg-gray-500 text-gray-300 h-8 px-2' : 'h-8 px-2'}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  </>
+                )}
               </div>
             ))}
           </div>

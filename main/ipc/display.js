@@ -1,29 +1,417 @@
 import { ipcMain, BrowserWindow } from 'electron';
 import * as displayManager from '../displayManager.js';
 
+const resolveOutputRoute = (outputKey) => {
+  if (outputKey === 'stage') return '/stage';
+  if (outputKey === 'time') return '/time';
+  if (typeof outputKey === 'string' && /^output\d+$/.test(outputKey)) return `/${outputKey}`;
+  return null;
+};
+
+const resolveOutputKeyFromUrl = (url) => {
+  if (!url) return null;
+  const match = String(url).match(/(?:#\/|\/)(stage|time|output\d+)(?:\?|$)/i);
+  return match ? match[1].toLowerCase() : null;
+};
+
+const isProjectionUrl = (url) => /[?&]projection=(1|true)\b/i.test(String(url || ''));
+
+const normalizeOutputKey = (value) => (typeof value === 'string' ? value.toLowerCase() : '');
+
+const normalizeDisplayId = (value) => {
+  if (value === null || typeof value === 'undefined' || value === '') return null;
+  const numeric = Number(value);
+  return Number.isNaN(numeric) ? value : numeric;
+};
+
+const getProjectionLocationKey = (projection) => {
+  if (!projection) return null;
+  if (projection.targetType === 'desktop') return 'desktop';
+  if (projection.displayId === null || typeof projection.displayId === 'undefined') return null;
+  return `display:${String(projection.displayId)}`;
+};
+
+const waitForProjectionWindowClosed = async (win) => {
+  if (!win || win.isDestroyed()) return;
+
+  await new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+
+    const timeout = setTimeout(() => {
+      try {
+        if (!win.isDestroyed()) win.destroy();
+      } catch { }
+      finish();
+    }, 1200);
+    win.once('closed', () => {
+      clearTimeout(timeout);
+      finish();
+    });
+
+    try {
+      win.close();
+    } catch (error) {
+      clearTimeout(timeout);
+      console.warn('[IPC] Failed to close projection window:', error);
+      finish();
+    }
+  });
+};
+
+const closeProjectionWindowsByOutput = async (outputKey) => {
+  const normalizedOutputKey = normalizeOutputKey(outputKey);
+  if (!normalizedOutputKey) return 0;
+
+  let closedCount = 0;
+  const closeTasks = [];
+  const windows = BrowserWindow.getAllWindows();
+  for (const win of windows) {
+    if (!win || win.isDestroyed()) continue;
+    try {
+      const url = win.webContents.getURL();
+      const winOutputKey = resolveOutputKeyFromUrl(url);
+      if (winOutputKey !== normalizedOutputKey || !isProjectionUrl(url)) continue;
+      closeTasks.push(waitForProjectionWindowClosed(win));
+      closedCount += 1;
+    } catch (error) {
+      console.warn('[IPC] Failed to close projection window:', error);
+    }
+  }
+
+  await Promise.all(closeTasks);
+  return closedCount;
+};
+
+const waitForWindowLoad = async (win) => {
+  if (!win || win.isDestroyed()) return;
+  if (!win.webContents?.isLoadingMainFrame?.()) return;
+
+  await new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+
+    const timeout = setTimeout(finish, 2500);
+    win.webContents.once('did-finish-load', () => {
+      clearTimeout(timeout);
+      setTimeout(finish, 180);
+    });
+  });
+};
+
+const applyProjectionWindowBehavior = (win) => {
+  if (!win || win.isDestroyed()) return;
+
+  try { win.setMenuBarVisibility(false); } catch { }
+  try { win.setBackgroundColor('#000000'); } catch { }
+  try { win.setAlwaysOnTop(false); } catch { }
+  try { win.setSkipTaskbar(true); } catch { }
+  try { win.setFocusable(false); } catch { }
+  try { win.setIgnoreMouseEvents(true, { forward: true }); } catch { }
+  try { win.setVisibleOnAllWorkspaces(false, { visibleOnFullScreen: true }); } catch { }
+  try { win.setFullScreenable(true); } catch { }
+  try { win.setResizable(false); } catch { }
+};
+
+const moveProjectionToPrimaryDisplay = (win) => {
+  const primary = displayManager.getPrimaryDisplay();
+  if (!primary) return false;
+
+  const { x, y, width, height } = primary.bounds;
+
+  try {
+    win.setFullScreen(false);
+    win.setBounds({ x, y, width, height });
+    win.setFullScreen(true);
+    return true;
+  } catch (error) {
+    console.error('[IPC] Failed to move projection to primary display:', error);
+    return false;
+  }
+};
+
+const collectProjectionState = () => {
+  const projections = [];
+  const windows = BrowserWindow.getAllWindows();
+
+  windows.forEach((win) => {
+    if (!win || win.isDestroyed()) return;
+    try {
+      const url = win.webContents.getURL();
+      const outputKey = resolveOutputKeyFromUrl(url);
+      if (!outputKey || !isProjectionUrl(url)) return;
+
+      const display = displayManager.getWindowDisplay(win);
+      projections.push({
+        outputKey,
+        windowId: win.id,
+        displayId: display?.id ?? null,
+        displayName: display?.name ?? null,
+        targetType: display?.primary ? 'desktop' : 'display',
+      });
+    } catch (error) {
+      console.warn('[IPC] Failed to inspect projection window:', error);
+    }
+  });
+
+  return projections;
+};
+
+const openRegularOutputWindow = async (outputKey) => {
+  const normalizedOutputKey = normalizeOutputKey(outputKey);
+  const route = resolveOutputRoute(normalizedOutputKey);
+  if (!route) {
+    return { success: false, error: 'Invalid output key' };
+  }
+
+  const { createWindow } = await import('../windows.js');
+  const windows = BrowserWindow.getAllWindows();
+  let existingWindow = null;
+
+  for (const win of windows) {
+    if (!win || win.isDestroyed()) continue;
+    try {
+      const url = win.webContents.getURL();
+      const winOutputKey = resolveOutputKeyFromUrl(url);
+      if (winOutputKey !== normalizedOutputKey || isProjectionUrl(url)) continue;
+      existingWindow = win;
+      break;
+    } catch (error) {
+      console.warn('[IPC] Error checking output window URL:', error);
+    }
+  }
+
+  if (existingWindow && !existingWindow.isDestroyed()) {
+    try {
+      if (existingWindow.isMinimized?.()) existingWindow.restore?.();
+      existingWindow.focus?.();
+    } catch { }
+    return { success: true, route, reused: true };
+  }
+
+  if (normalizedOutputKey === 'time') {
+    createWindow(route, {
+      width: 1600,
+      height: 900,
+      minWidth: 1100,
+      minHeight: 620,
+      title: 'LyricDisplay Time',
+    });
+    return { success: true, route, reused: false };
+  }
+
+  createWindow(route);
+  return { success: true, route, reused: false };
+};
+
+const openTimerControlWindow = async () => {
+  const { createWindow } = await import('../windows.js');
+  const windows = BrowserWindow.getAllWindows();
+
+  for (const win of windows) {
+    if (!win || win.isDestroyed()) continue;
+    try {
+      const url = win.webContents.getURL();
+      if (!/(?:#\/|\/)timer-control(?:\?|$)/i.test(String(url || ''))) continue;
+      if (win.isMinimized?.()) win.restore?.();
+      win.focus?.();
+      return { success: true, route: '/timer-control', reused: true };
+    } catch (error) {
+      console.warn('[IPC] Error checking timer control window URL:', error);
+    }
+  }
+
+  createWindow('/timer-control', {
+    width: 1100,
+    height: 700,
+    minWidth: 1100,
+    minHeight: 560,
+    title: 'LyricDisplay Timer',
+  });
+  return { success: true, route: '/timer-control', reused: false };
+};
+
+const openObsSourceCreatorWindow = async () => {
+  const { createWindow } = await import('../windows.js');
+  const windows = BrowserWindow.getAllWindows();
+
+  for (const win of windows) {
+    if (!win || win.isDestroyed()) continue;
+    try {
+      const url = win.webContents.getURL();
+      if (!/(?:#\/|\/)obs-setup(?:\?|$)/i.test(String(url || ''))) continue;
+      if (win.isMinimized?.()) win.restore?.();
+      win.focus?.();
+      return { success: true, route: '/obs-setup', reused: true };
+    } catch (error) {
+      console.warn('[IPC] Error checking OBS source creator window URL:', error);
+    }
+  }
+
+  createWindow('/obs-setup', {
+    width: 1100,
+    height: 700,
+    minWidth: 1100,
+    minHeight: 560,
+    title: 'LyricDisplay OBS Source Creator',
+  });
+  return { success: true, route: '/obs-setup', reused: false };
+};
+
 /**
  * Register display management IPC handlers
- * Handles display detection, assignments, and output window management
+ * Handles display detection, projection state, and output windows
  */
-export function registerDisplayHandlers({ getMainWindow, requestRendererModal }) {
-  
-  ipcMain.handle('display:open-settings-modal', async () => {
+export function registerDisplayHandlers({ getMainWindow }) {
+
+  ipcMain.handle('display:get-projection-state', async () => {
     try {
-      if (typeof requestRendererModal !== 'function') {
-        return { success: false, error: 'Modal bridge unavailable' };
-      }
-      const { showDisplayDetectionModal } = await import('../displayDetection.js');
       const displays = displayManager.getAllDisplays();
-      const externalDisplays = displays.filter(d => !d.primary);
+      const projections = collectProjectionState();
 
-      if (!externalDisplays || externalDisplays.length === 0) {
-        return { success: false, error: 'No external displays connected' };
+      return {
+        success: true,
+        displays,
+        externalDisplays: displays.filter((d) => !d.primary),
+        projections,
+      };
+    } catch (error) {
+      console.error('Error getting projection state:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('display:project-output', async (_event, payload = {}) => {
+    try {
+      const { createWindow } = await import('../windows.js');
+      const outputKey = normalizeOutputKey(payload?.outputKey);
+      const targetType = payload?.targetType === 'display' ? 'display' : 'desktop';
+      const displayId = normalizeDisplayId(payload?.displayId);
+
+      const route = resolveOutputRoute(outputKey);
+      if (!route) {
+        return { success: false, error: 'Invalid output key' };
       }
 
-      await showDisplayDetectionModal(externalDisplays, false, requestRendererModal, true);
-      return { success: true };
+      if (targetType === 'display' && (displayId === null || typeof displayId === 'undefined')) {
+        return { success: false, error: 'Display ID is required for external projection' };
+      }
+
+      const windows = BrowserWindow.getAllWindows();
+      let projectionWindow = null;
+
+      for (const win of windows) {
+        if (!win || win.isDestroyed()) continue;
+        try {
+          const url = win.webContents.getURL();
+          const winOutputKey = resolveOutputKeyFromUrl(url);
+          if (winOutputKey !== outputKey) continue;
+
+          if (isProjectionUrl(url)) {
+            projectionWindow = win;
+          } else {
+            win.close();
+          }
+        } catch (err) {
+          console.warn('[IPC] Error checking window URL:', err);
+        }
+      }
+
+      if (!projectionWindow || projectionWindow.isDestroyed()) {
+        projectionWindow = createWindow(`${route}?projection=1`, {
+          projection: true,
+          backgroundColor: '#000000',
+        });
+      } else if (!isProjectionUrl(projectionWindow.webContents.getURL())) {
+        projectionWindow.loadURL(projectionWindow.webContents.getURL().replace(route, `${route}?projection=1`));
+      }
+
+      await waitForWindowLoad(projectionWindow);
+      applyProjectionWindowBehavior(projectionWindow);
+
+      const currentProjections = collectProjectionState();
+      const targetLocationKey = targetType === 'desktop'
+        ? 'desktop'
+        : `display:${String(displayId)}`;
+
+      const conflictingProjection = currentProjections.find((entry) => (
+        entry.outputKey !== outputKey && getProjectionLocationKey(entry) === targetLocationKey
+      )) || null;
+
+      if (conflictingProjection?.outputKey) {
+        await closeProjectionWindowsByOutput(conflictingProjection.outputKey);
+        displayManager.removeAssignmentsByOutput(conflictingProjection.outputKey);
+      }
+
+      displayManager.removeAssignmentsByOutput(outputKey);
+
+      if (targetType === 'display') {
+        const moved = displayManager.moveWindowToDisplay(projectionWindow, displayId, true);
+        if (!moved) {
+          return { success: false, error: 'Failed to move projection window to selected display' };
+        }
+        displayManager.saveDisplayAssignment(displayId, outputKey);
+      } else {
+        const moved = moveProjectionToPrimaryDisplay(projectionWindow);
+        if (!moved) {
+          return { success: false, error: 'Failed to project to primary display' };
+        }
+      }
+
+      try {
+        if (typeof projectionWindow.showInactive === 'function') {
+          projectionWindow.showInactive();
+        } else {
+          projectionWindow.show();
+        }
+      } catch { }
+
+      if (targetType === 'desktop') {
+        const mainWindow = getMainWindow?.();
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          setTimeout(() => {
+            try { mainWindow.focus(); } catch { }
+          }, 100);
+        }
+      }
+
+      const currentDisplay = displayManager.getWindowDisplay(projectionWindow);
+      return {
+        success: true,
+        outputKey,
+        targetType,
+        displayId: currentDisplay?.id ?? null,
+        displacedOutputKey: conflictingProjection?.outputKey || null,
+      };
     } catch (error) {
-      console.error('Error opening display settings modal:', error);
+      console.error('Error projecting output:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('display:stop-projection', async (_event, payload = {}) => {
+    try {
+      const outputKey = normalizeOutputKey(payload?.outputKey);
+      const route = resolveOutputRoute(outputKey);
+      if (!route) {
+        return { success: false, error: 'Invalid output key' };
+      }
+
+      const removedAssignments = displayManager.removeAssignmentsByOutput(outputKey);
+      const closedCount = await closeProjectionWindowsByOutput(outputKey);
+      const closed = closedCount > 0;
+
+      return { success: true, closed, closedCount, removedAssignments };
+    } catch (error) {
+      console.error('Error stopping projection:', error);
       return { success: false, error: error.message };
     }
   });
@@ -61,147 +449,37 @@ export function registerDisplayHandlers({ getMainWindow, requestRendererModal })
     }
   });
 
-  ipcMain.handle('display:save-assignment', async (_event, { displayId, outputKey }) => {
+  ipcMain.handle('display:open-output-window', async (_event, { outputKey }) => {
     try {
-      if (!outputKey) {
-        displayManager.removeDisplayAssignment(displayId);
-        return { success: true };
-      }
-
-      displayManager.saveDisplayAssignment(displayId, outputKey);
-
-      const windows = BrowserWindow.getAllWindows();
-      const outputRoute = outputKey === 'stage' ? '/stage' : outputKey === 'output1' ? '/output1' : '/output2';
-
-      for (const win of windows) {
-        if (!win || win.isDestroyed()) continue;
-        try {
-          const url = win.webContents.getURL();
-          if (url.includes(outputRoute)) {
-            displayManager.moveWindowToDisplay(win, displayId, true);
-            break;
-          }
-        } catch (err) {
-          console.warn('Error checking window URL:', err);
-        }
-      }
-
-      return { success: true };
+      return await openRegularOutputWindow(outputKey);
     } catch (error) {
-      console.error('Error saving display assignment:', error);
+      console.error('Error opening output window:', error);
       return { success: false, error: error.message };
     }
   });
 
-  ipcMain.handle('display:get-assignment', async (_event, { displayId }) => {
+  ipcMain.handle('display:open-timer-control-window', async () => {
     try {
-      const assignment = displayManager.getDisplayAssignment(displayId);
-      return { success: true, assignment };
+      return await openTimerControlWindow();
     } catch (error) {
-      console.error('Error getting display assignment:', error);
+      console.error('Error opening timer control window:', error);
       return { success: false, error: error.message };
     }
   });
 
-  ipcMain.handle('display:get-all-assignments', async () => {
+  ipcMain.handle('display:open-obs-source-creator-window', async () => {
     try {
-      const assignments = displayManager.getAllDisplayAssignments();
-      return { success: true, assignments };
+      return await openObsSourceCreatorWindow();
     } catch (error) {
-      console.error('Error getting all display assignments:', error);
-      return { success: false, error: error.message };
-    }
-  });
-
-  ipcMain.handle('display:remove-assignment', async (_event, { displayId }) => {
-    try {
-      displayManager.removeDisplayAssignment(displayId);
-      return { success: true };
-    } catch (error) {
-      console.error('Error removing display assignment:', error);
-      return { success: false, error: error.message };
-    }
-  });
-
-  ipcMain.handle('display:open-output-on-display', async (_event, { outputKey, displayId }) => {
-    try {
-      const { createWindow } = await import('../windows.js');
-      const route = outputKey === 'stage' ? '/stage' : outputKey === 'output1' ? '/output1' : '/output2';
-
-      const windows = BrowserWindow.getAllWindows();
-      let existingWindow = null;
-
-      for (const win of windows) {
-        if (!win || win.isDestroyed()) continue;
-        try {
-          const url = win.webContents.getURL();
-          if (url.includes(route)) {
-            existingWindow = win;
-            break;
-          }
-        } catch (err) {
-          console.warn('Error checking window URL:', err);
-        }
-      }
-
-      let win;
-      if (existingWindow) {
-        win = existingWindow;
-        console.log('[IPC] Using existing window for', route);
-      } else {
-        win = createWindow(route);
-        console.log('[IPC] Created new window for', route);
-
-        await new Promise(resolve => {
-          win.webContents.once('did-finish-load', () => {
-            setTimeout(resolve, 300);
-          });
-        });
-      }
-
-      if (displayId) {
-        displayManager.moveWindowToDisplay(win, displayId, true);
-      }
-
-      return { success: true };
-    } catch (error) {
-      console.error('Error opening output on display:', error);
-      return { success: false, error: error.message };
-    }
-  });
-
-  ipcMain.handle('display:close-output-window', async (_event, { outputKey }) => {
-    try {
-      const route = outputKey === 'stage' ? '/stage' : outputKey === 'output1' ? '/output1' : '/output2';
-      const windows = BrowserWindow.getAllWindows();
-
-      for (const win of windows) {
-        if (!win || win.isDestroyed()) continue;
-        try {
-          const url = win.webContents.getURL();
-          if (url.includes(route)) {
-            console.log('[IPC] Closing output window for', route);
-            win.close();
-            return { success: true };
-          }
-        } catch (err) {
-          console.warn('Error checking window URL:', err);
-        }
-      }
-
-      return { success: false, error: 'Window not found' };
-    } catch (error) {
-      console.error('Error closing output window:', error);
+      console.error('Error opening OBS source creator window:', error);
       return { success: false, error: error.message };
     }
   });
 
   ipcMain.handle('open-output-window', async (_event, outputNumber) => {
     try {
-      const route = outputNumber === 1 ? '/output1' : '/output2';
-      const { createWindow } = await import('../windows.js');
-      createWindow(route);
-      return { success: true };
+      const outputKey = Number(outputNumber) === 1 ? 'output1' : 'output2';
+      return await openRegularOutputWindow(outputKey);
     } catch (error) {
       return { success: false, error: error.message };
     }
