@@ -27,6 +27,16 @@ import { registerIntegrationRoutes } from './routes/integrations.js';
 
 dotenv.config();
 
+process.on('uncaughtException', (error) => {
+  console.error('Backend uncaught exception:', error);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('Backend unhandled rejection:', reason);
+  process.exit(1);
+});
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -86,7 +96,7 @@ app.use('/api/auth', tokenRateLimit);
 
 registerOutputRoutes(app, { getOutputRegistry, hasOutput });
 registerIntegrationRoutes(app, { getOutputRegistry, port: PORT });
-registerAuthRoutes(app, { secrets, tokenService });
+registerAuthRoutes(app, { secrets, tokenService, localhostOnly });
 registerConnectionRoutes(app, { authenticateRequest });
 registerMediaRoutes(app, {
   authenticateRequest,
@@ -121,7 +131,7 @@ if (!isDev) {
   const frontendPath = path.join(__dirname, '..', 'dist');
   app.use(express.static(frontendPath));
 
-  app.get('*', (req, res) => {
+  app.get('/{*splat}', (req, res) => {
     if (req.path.startsWith('/api/')) {
       return res.status(404).json({ error: 'API endpoint not found' });
     }

@@ -2,7 +2,7 @@
 
 > Professional real-time lyric display application for live events, church services, and multimedia presentations.
 
-**Version:** 6.4.2  
+**Version:** 6.5.3  
 **Author:** Peter Alakembi  
 **Co-Contributor:** David Okaliwe
 
@@ -144,6 +144,10 @@ npm run electron-pack    # Package Electron app
 
 The detailed repository layout lives in [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md).
 
+### NDI Companion
+
+NDI output support is powered by a separate companion repository: [lyricdisplay-ndi](https://github.com/PeterAlaks/lyricdisplay-ndi). Contributors who want to work on NDI features can clone that repository into the app project root and follow the setup notes in [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ### Contributing
 
 Please read the [contribution guide](CONTRIBUTING.md) and follow the [code of conduct](CODE_OF_CONDUCT.md) when participating in the project.
@@ -179,4 +183,4 @@ For technical support, feature requests, or bug reports:
 
 - [Website](https://lyricdisplay.app)
 - [Developer Portfolio](https://linktr.ee/peteralaks)
-- [Support Development](https://buymeacoffee.com/lyricdisplay)
+- [Support Development](https://lyricdisplay.app/donate)

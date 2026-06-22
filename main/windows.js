@@ -4,6 +4,8 @@ import { isDev, resolveProductionPath, appRoot } from './paths.js';
 import { getLogPaths, writeLog } from './logging.js';
 
 const MEMORY_LOG_INTERVAL_MS = 60_000;
+const RENDERER_SNAPSHOT_TIMEOUT_MS = 1_500;
+const MEMORY_PRESSURE_PRIVATE_KB = 1.5 * 1024 * 1024;
 const RECOVERY_WINDOW_MS = 5 * 60_000;
 const MAX_RECOVERY_ATTEMPTS = 3;
 const RECOVERABLE_RENDERER_REASONS = new Set(['crashed', 'killed', 'oom']);
@@ -67,6 +69,62 @@ function getConsoleLevelName(level) {
     return levelNames[level] || `LEVEL_${level}`;
   }
   return String(level || 'INFO').toUpperCase();
+}
+
+function withTimeout(promise, timeoutMs, fallback) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((resolve) => {
+      timer = setTimeout(() => resolve(fallback), timeoutMs);
+      timer.unref?.();
+    }),
+  ]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
+async function getRendererRuntimeSnapshot(webContents) {
+  if (!webContents || webContents.isDestroyed()) return null;
+
+  try {
+    return await withTimeout(
+      webContents.executeJavaScript(`(() => {
+        const storageSize = (storage) => {
+          try {
+            let total = 0;
+            for (let index = 0; index < storage.length; index += 1) {
+              const key = storage.key(index);
+              const value = storage.getItem(key);
+              total += String(key || '').length + String(value || '').length;
+            }
+            return total;
+          } catch {
+            return null;
+          }
+        };
+
+        const memory = performance && performance.memory ? {
+          jsHeapSizeLimit: performance.memory.jsHeapSizeLimit,
+          totalJSHeapSize: performance.memory.totalJSHeapSize,
+          usedJSHeapSize: performance.memory.usedJSHeapSize,
+        } : null;
+
+        return {
+          url: location.href,
+          visibilityState: document.visibilityState,
+          hidden: document.hidden,
+          memory,
+          localStorageBytes: storageSize(localStorage),
+          sessionStorageBytes: storageSize(sessionStorage),
+        };
+      })()`, true),
+      RENDERER_SNAPSHOT_TIMEOUT_MS,
+      { timedOut: true }
+    );
+  } catch (err) {
+    return { error: err?.message || String(err) };
+  }
 }
 
 function shouldRecoverRenderer(route, projection, details) {
@@ -256,7 +314,8 @@ function attachRendererDiagnostics(win, route, { projection = false } = {}) {
   });
 
   let memoryCapturePending = false;
-  const logMemory = (reason) => {
+  const memoryPressureLoggedPids = new Set();
+  const logMemory = async (reason) => {
     if (memoryCapturePending) return;
     const webContents = getUsableWebContents(win);
     if (!webContents || typeof webContents.getOSProcessId !== 'function') return;
@@ -264,11 +323,29 @@ function attachRendererDiagnostics(win, route, { projection = false } = {}) {
     try {
       const pid = webContents.getOSProcessId();
       const metric = app.getAppMetrics().find((item) => item.pid === pid);
+      const renderer = await getRendererRuntimeSnapshot(webContents);
+      const privateBytes = metric?.memory?.privateBytes;
+      if (
+        Number.isFinite(privateBytes) &&
+        privateBytes >= MEMORY_PRESSURE_PRIVATE_KB &&
+        !memoryPressureLoggedPids.has(pid)
+      ) {
+        memoryPressureLoggedPids.add(pid);
+        writeLog('WINDOW_MEMORY_PRESSURE', describeWindow(), {
+          pid,
+          privateBytes,
+          thresholdPrivateBytes: MEMORY_PRESSURE_PRIVATE_KB,
+          route,
+          reason,
+          renderer,
+        });
+      }
       writeLog('WINDOW_MEMORY', describeWindow(), reason, {
         pid,
         type: metric?.type || null,
         cpuPercent: metric?.cpu?.percentCPUUsage ?? null,
         memory: metric?.memory || null,
+        renderer,
       });
     } catch (err) {
       if (!win.isDestroyed()) {
@@ -302,6 +379,7 @@ export function createWindow(route = '/', options = {}) {
     minWidth = 1000,
     minHeight = 650,
     title = null,
+    projectionFocusable = false,
   } = options;
   const isTimerControlWindow = route.startsWith('/timer-control');
   const isObsSetupWindow = route.startsWith('/obs-setup');
@@ -330,7 +408,7 @@ export function createWindow(route = '/', options = {}) {
     thickFrame: true,
     autoHideMenuBar: true,
     skipTaskbar: projection,
-    focusable: projection ? false : true,
+    focusable: projection ? Boolean(projectionFocusable) : true,
     movable: projection ? false : true,
     resizable: projection ? false : true,
     title: windowTitle,
@@ -348,6 +426,7 @@ export function createWindow(route = '/', options = {}) {
       win.setIgnoreMouseEvents(true, { forward: true });
       win.setVisibleOnAllWorkspaces(false, { visibleOnFullScreen: true });
       win.setFullScreenable(true);
+      win.setFocusable(Boolean(projectionFocusable));
     } catch { }
   }
 
