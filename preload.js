@@ -27,6 +27,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getPlatform: () => process.platform,
   getAppVersion: () => ipcRenderer.invoke('app:get-version'),
   getLogPaths: () => ipcRenderer.invoke('app:get-log-paths'),
+  obsDockStartup: {
+    get: () => ipcRenderer.invoke('app:obs-dock-startup:get'),
+    set: (enabled) => ipcRenderer.invoke('app:obs-dock-startup:set', { enabled }),
+  },
+  obsDock: {
+    getInfo: () => ipcRenderer.invoke('app:obs-dock:get-info'),
+    startHeadlessNow: () => ipcRenderer.invoke('app:obs-dock:start-headless-now'),
+  },
   restartApp: () => ipcRenderer.invoke('app:relaunch'),
   windowControls: {
     minimize: () => ipcRenderer.invoke('window:minimize'),
@@ -106,6 +114,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   checkForUpdates: (showNoUpdateDialog) => ipcRenderer.invoke('updater:check', showNoUpdateDialog),
+  getUpdaterState: () => ipcRenderer.invoke('updater:get-state'),
   onUpdateAvailable: (callback) => {
     const channel = 'updater:update-available';
     ipcRenderer.removeAllListeners(channel);
@@ -124,8 +133,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on(channel, (_e, msg) => callback(msg));
     return () => ipcRenderer.removeAllListeners(channel);
   },
+  onUpdaterState: (callback) => {
+    const channel = 'updater:state-changed';
+    const listener = (_e, state) => callback?.(state);
+    ipcRenderer.on(channel, listener);
+    return () => ipcRenderer.removeListener(channel, listener);
+  },
+  onUpdateDownloadProgress: (callback) => {
+    const channel = 'updater:download-progress';
+    const listener = (_e, progress) => callback?.(progress);
+    ipcRenderer.on(channel, listener);
+    return () => ipcRenderer.removeListener(channel, listener);
+  },
   requestUpdateDownload: () => ipcRenderer.invoke('updater:download'),
   requestInstallAndRestart: () => ipcRenderer.invoke('updater:install'),
+  hideUpdateProgressWindow: () => ipcRenderer.invoke('updater:hide-progress'),
 
   onOpenShortcutsHelp: (callback) => {
     const channel = 'open-shortcuts-help';
