@@ -1,7 +1,7 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { useDarkModeState, useOutput1Settings, useOutput2Settings, useOutputSettings as useOutputSettingsSelector, useStageSettings, useIndividualOutputState, useOutputEnabled, useSetOutputEnabledAction } from '../hooks/useStoreSelectors';
-import { useControlSocket } from '../context/ControlSocketProvider';
+import { useOptionalControlSocket } from '../context/ControlSocketProvider';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Tooltip } from '@/components/ui/tooltip';
@@ -34,8 +34,8 @@ const SettingRow = ({ icon, label, tooltip, children, rightClassName = 'flex ite
   <div className="flex items-center justify-between gap-4">
     <Tooltip content={tooltip} side="right">
       <div className="flex items-center gap-2 min-w-[140px]">
-        {icon ? React.createElement(icon, { className: `w-4 h-4 ${darkMode ? 'text-gray-400' : 'text-gray-500'}` }) : null}
-        <label className={`text-sm ${darkMode ? 'text-gray-200' : 'text-gray-700'}`}>{label}</label>
+        {icon ? React.createElement(icon, { className: `h-3.5 w-3.5 ${darkMode ? 'text-gray-400' : 'text-gray-500'}` }) : null}
+        <label className={`text-[13px] leading-5 ${darkMode ? 'text-gray-200' : 'text-gray-700'}`}>{label}</label>
       </div>
     </Tooltip>
     <div className={`${rightClassName} ${justifyEnd ? '' : ''}`}>
@@ -274,7 +274,17 @@ const sanitizeDockTemplateSettings = (rawSettings) => {
   );
 };
 
-const OutputSettingsPanel = ({ outputKey, onDeleteOutput, compact = false }) => {
+const noop = () => {};
+
+const OutputSettingsPanel = ({
+  outputKey,
+  onDeleteOutput,
+  compact = false,
+  settings: controlledSettings,
+  onSettingsChange,
+  localMode = false,
+  title,
+}) => {
   const { darkMode: storedDarkMode } = useDarkModeState();
   const darkMode = compact ? true : storedDarkMode;
   const [templatePopoverOpen, setTemplatePopoverOpen] = React.useState(false);
@@ -282,7 +292,9 @@ const OutputSettingsPanel = ({ outputKey, onDeleteOutput, compact = false }) => 
   const [userTemplates, setUserTemplates] = React.useState([]);
   const [userTemplatesLoading, setUserTemplatesLoading] = React.useState(false);
   const globalSetOutputEnabled = useSetOutputEnabledAction();
-  const { emitStyleUpdate, emitIndividualOutputToggle } = useControlSocket();
+  const controlSocket = useOptionalControlSocket();
+  const emitStyleUpdate = controlSocket?.emitStyleUpdate || noop;
+  const emitIndividualOutputToggle = controlSocket?.emitIndividualOutputToggle || noop;
   const { showToast } = useToast();
   const { showModal } = useModal();
 
@@ -291,10 +303,13 @@ const OutputSettingsPanel = ({ outputKey, onDeleteOutput, compact = false }) => 
   const stageSettingsHook = useStageSettings();
   const genericOutputHook = useOutputSettingsSelector(outputKey);
 
-  const { settings, updateSettings } =
+  const storeBackedSettingsHook =
     outputKey === 'stage'
       ? stageSettingsHook
       : genericOutputHook;
+
+  const settings = controlledSettings || storeBackedSettingsHook.settings;
+  const updateSettings = onSettingsChange || storeBackedSettingsHook.updateSettings;
 
   const outputEnabledFromStore = useOutputEnabled(outputKey);
 
@@ -377,7 +392,7 @@ const OutputSettingsPanel = ({ outputKey, onDeleteOutput, compact = false }) => 
         <div className="space-y-3" onKeyDown={blurInputOnEnter}>
           <div className={`flex items-center justify-between rounded-md border px-3 py-2 ${darkMode ? 'border-gray-800 bg-gray-900' : 'border-gray-200 bg-white'}`}>
             <div>
-              <div className={`text-sm font-semibold ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>Stage</div>
+              <div className={`text-[13px] font-semibold leading-5 ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>Stage</div>
               <div className={`text-[11px] ${darkMode ? 'text-gray-500' : 'text-gray-500'}`}>{isOutputEnabled ? 'Enabled' : 'Disabled'}</div>
             </div>
             <button
@@ -437,8 +452,10 @@ const OutputSettingsPanel = ({ outputKey, onDeleteOutput, compact = false }) => 
   const applySettings = React.useCallback((partial) => {
     const newSettings = { ...settings, ...partial };
     updateSettings(partial);
-    emitStyleUpdate(outputKey, newSettings);
-  }, [settings, updateSettings, emitStyleUpdate, outputKey]);
+    if (!localMode) {
+      emitStyleUpdate(outputKey, newSettings);
+    }
+  }, [settings, updateSettings, emitStyleUpdate, outputKey, localMode]);
 
   const update = React.useCallback((key, value) => {
     applySettings({ [key]: value });
@@ -578,7 +595,7 @@ const OutputSettingsPanel = ({ outputKey, onDeleteOutput, compact = false }) => 
       ? 'bg-gray-800 border-gray-700 text-gray-100'
       : 'bg-white border-gray-300 text-gray-900'
       }`;
-    const compactSelectClass = `h-8 text-xs ${darkMode
+    const compactSelectClass = `h-8 text-[11px] leading-4 ${darkMode
       ? 'bg-gray-800 border-gray-700 text-gray-100'
       : 'bg-white border-gray-300 text-gray-900'
       }`;
@@ -618,7 +635,7 @@ const OutputSettingsPanel = ({ outputKey, onDeleteOutput, compact = false }) => 
       </button>
     );
     const compactContentClass = darkMode ? 'bg-gray-900 border-gray-700 text-gray-100' : 'bg-white border-gray-300 text-gray-900';
-    const compactItemClass = 'text-xs py-2';
+    const compactItemClass = 'py-1.5 text-[11px] leading-4';
     const compactSelectContentProps = {
       className: compactContentClass
     };
@@ -689,7 +706,7 @@ const OutputSettingsPanel = ({ outputKey, onDeleteOutput, compact = false }) => 
               className="ml-3 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-gray-800 text-gray-300 hover:bg-gray-900"
               aria-label="Close templates"
             >
-              <X className="h-4 w-4" />
+              <X className="h-3.5 w-3.5" />
             </button>
           </div>
 
@@ -750,7 +767,7 @@ const OutputSettingsPanel = ({ outputKey, onDeleteOutput, compact = false }) => 
       <div className="space-y-3" onKeyDown={blurInputOnEnter}>
         <div className={`flex items-center justify-between rounded-md border px-3 py-2 ${darkMode ? 'border-gray-800 bg-gray-900' : 'border-gray-200 bg-white'}`}>
           <div>
-            <div className={`text-sm font-semibold ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>{outputKey.replace('output', 'Output ')}</div>
+            <div className={`text-[13px] font-semibold leading-5 ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>{outputKey.replace('output', 'Output ')}</div>
             <div className={`text-[11px] ${darkMode ? 'text-gray-500' : 'text-gray-500'}`}>{isOutputEnabled ? 'Enabled' : 'Disabled'}</div>
           </div>
           <button
@@ -1150,14 +1167,16 @@ const OutputSettingsPanel = ({ outputKey, onDeleteOutput, compact = false }) => 
   );
 
   return (
-    <div className="space-y-4" onKeyDown={blurInputOnEnter}>
+    <div className="output-settings-panel space-y-4" onKeyDown={blurInputOnEnter}>
       <PanelHeaderActions
         applySettings={applySettings}
         darkMode={darkMode}
+        hideLiveActions={localMode}
         handleToggleOutput={handleToggleOutput}
         isOutputEnabled={isOutputEnabled}
         onDeleteOutput={onDeleteOutput}
         outputKey={outputKey}
+        title={title}
         settings={settings}
         showModal={showModal}
         showToast={showToast}
@@ -1209,7 +1228,7 @@ const OutputSettingsPanel = ({ outputKey, onDeleteOutput, compact = false }) => 
         style={{ marginTop: fontColorAdvancedExpanded ? undefined : 0 }}
       >
         <div className="flex items-center justify-between w-full">
-          <label className={`text-sm whitespace-nowrap ${darkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+          <label className={`text-[13px] leading-5 whitespace-nowrap ${darkMode ? 'text-gray-200' : 'text-gray-700'}`}>
             Translation Colour
           </label>
           <ColorPicker
