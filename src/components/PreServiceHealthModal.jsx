@@ -296,22 +296,22 @@ export default function PreServiceHealthModal({ darkMode }) {
         style={{ maxHeight: 'calc(100vh - 285px)' }}
       >
         <div className="space-y-4">
-          <section className={`rounded-2xl border p-4 ${statusBadgeClass(dashboardState.status, darkMode)}`}>
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex min-w-0 items-start gap-3">
-                <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${darkMode ? 'bg-gray-950/50' : 'bg-white/80'}`}>
+          <section className={`rounded-xl border px-3.5 py-3 ${statusBadgeClass(dashboardState.status, darkMode)}`}>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex min-w-0 items-start gap-2.5">
+                <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${darkMode ? 'bg-gray-950/50' : 'bg-white/80'}`}>
                   {initialLoading ? (
-                    <Loader2 className="h-5 w-5 animate-spin" />
+                    <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
-                    <DashboardIcon className="h-5 w-5" />
+                    <DashboardIcon className="h-4 w-4" />
                   )}
                 </div>
                 <div className="min-w-0">
-                  <h3 className="text-base font-semibold leading-tight">{dashboardState.label}</h3>
-                  <p className="mt-1 text-sm leading-relaxed opacity-85">{dashboardState.detail}</p>
+                  <h3 className="text-sm font-semibold leading-tight">{dashboardState.label}</h3>
+                  <p className="mt-0.5 text-xs leading-relaxed opacity-85">{dashboardState.detail}</p>
                 </div>
               </div>
-              <div className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-semibold ${darkMode ? 'border-white/10 bg-black/20' : 'border-black/5 bg-white/70'}`}>
+              <div className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${darkMode ? 'border-white/10 bg-black/20' : 'border-black/5 bg-white/70'}`}>
                 {passCount}/{checks.length || 0} checks passed
               </div>
             </div>
@@ -359,7 +359,7 @@ export default function PreServiceHealthModal({ darkMode }) {
                     <div key={check.id} className={`grid gap-3 px-4 py-3 transition-colors sm:grid-cols-[minmax(0,1fr)_auto] ${darkMode ? 'hover:bg-blue-500/5' : 'hover:bg-blue-50/50'}`}>
                       <div className="flex min-w-0 items-start gap-3">
                         <div className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${darkMode ? 'bg-gray-950 text-gray-400' : 'bg-gray-50 text-gray-500'}`}>
-                          <ItemIcon className="h-[18px] w-[18px]" />
+                          <ItemIcon className="h-4.5 w-4.5" />
                         </div>
                         <div className="min-w-0">
                           <p className={`text-sm font-semibold ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>{check.label}</p>

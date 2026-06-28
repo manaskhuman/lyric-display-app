@@ -141,7 +141,7 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
 
   const labelClass = darkMode ? 'text-gray-300' : 'text-gray-700';
   const mutedClass = darkMode ? 'text-gray-400' : 'text-gray-500';
-  const panelBg = darkMode ? 'bg-gray-800' : 'bg-gray-50';
+  const panelBg = darkMode ? 'bg-gray-800' : 'bg-[#f8fafc]';
   const activeCategoryBg = darkMode ? 'bg-gray-700' : 'bg-white';
   const preferenceFieldLabelClass = `block mb-1.5 text-sm font-medium ${labelClass}`;
   const preferenceToggleRowClass = "flex items-center justify-between gap-6 [&>button]:shrink-0";
@@ -768,7 +768,7 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
               </p>
               {(preferences.fileHandling?.maxSetlistFiles ?? DEFAULT_SETLIST_ITEMS) > SETLIST_PERFORMANCE_WARNING_ITEMS && (
                 <div className={`flex items-start gap-2 p-2 rounded ${darkMode ? 'bg-yellow-900/20 border border-yellow-600/30' : 'bg-yellow-50 border border-yellow-200'}`}>
-                  <AlertTriangle className={`w-4 h-4 mt-0.5 flex-shrink-0 ${darkMode ? 'text-yellow-400' : 'text-yellow-600'}`} />
+                  <AlertTriangle className={`w-4 h-4 mt-0.5 shrink-0 ${darkMode ? 'text-yellow-400' : 'text-yellow-600'}`} />
                   <p className={`text-xs ${darkMode ? 'text-yellow-300' : 'text-yellow-700'}`}>
                     Large setlists may impact performance when loading or switching between songs
                   </p>

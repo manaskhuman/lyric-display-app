@@ -4,7 +4,7 @@ import { getLineOutputText } from '../../utils/parseLyrics';
 import { resolveBackendUrl } from '../../utils/network';
 import { calculateOptimalFontSize } from '../../utils/maxLinesCalculator';
 import { paintToCss } from '../../utils/paint';
-import { logDebug, logError } from '../../utils/logger';
+import { logError } from '../../utils/logger';
 import ProjectionExitHint from '../ProjectionExitHint';
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -33,11 +33,12 @@ export default function LyricVisualFrame({
   className = 'relative w-full h-full overflow-hidden',
   onAutosizeChange,
   disableAnimations = false,
+  backgroundVideoPlaying,
+  renderBackgroundLayer = true,
+  renderFullScreenElementLayer = true,
 }) {
   const [adjustedFontSize, setAdjustedFontSize] = useState(null);
-  const [preloadedVideoUrl, setPreloadedVideoUrl] = useState(null);
-  const [isPreloading, setIsPreloading] = useState(false);
-  const preloadAbortControllerRef = useRef(null);
+  const backgroundVideoRef = useRef(null);
   const textContainerRef = useRef(null);
 
   const safeSettings = settings || {};
@@ -164,98 +165,38 @@ export default function LyricVisualFrame({
   const justifyContent = positionJustifyMap[effectiveLyricsPosition] || 'flex-end';
   const isVisible = Boolean(active && visible && displayLine);
   const shouldShowFullScreenBackground = fullScreenMode && (alwaysShowBackground || active);
+  const shouldRenderFullScreenBackgroundLayer = renderBackgroundLayer && shouldShowFullScreenBackground;
   const fullScreenBackgroundColorValue =
-    shouldShowFullScreenBackground && fullScreenBackgroundType === 'color'
+    shouldRenderFullScreenBackgroundLayer && fullScreenBackgroundType === 'color'
       ? paintToCss(fullScreenBackgroundPaint, fullScreenBackgroundColor || '#000000')
       : 'transparent';
   const windowBackgroundColor = isProjectionMode ? '#000000' : fullScreenBackgroundColorValue;
 
-  useEffect(() => {
-    const preloadVideo = async () => {
-      if (!shouldShowFullScreenBackground || fullScreenBackgroundType !== 'media' || !fullScreenBackgroundMedia) {
-        return;
-      }
-
-      const media = fullScreenBackgroundMedia;
-      const isVideo = media.mimeType?.startsWith('video/') ||
-        (!media.mimeType && typeof media.url === 'string' && /\.(mp4|webm|ogg|m4v|mov)$/i.test(media.url));
-      if (!isVideo || media.bundled) return;
-
-      const sourceUrl = media.url ? resolveBackendUrl(media.url) : null;
-      if (!sourceUrl || isPreloading) return;
-
-      const currentVideoId = `${media.url}-${media.uploadedAt}`;
-      const preloadedVideoId = preloadedVideoUrl ? preloadedVideoUrl.split('#')[1] : null;
-      if (preloadedVideoId === currentVideoId) return;
-
-      if (preloadedVideoUrl) {
-        URL.revokeObjectURL(preloadedVideoUrl.split('#')[0]);
-        setPreloadedVideoUrl(null);
-      }
-
-      preloadAbortControllerRef.current?.abort();
-      setIsPreloading(true);
-      const abortController = new AbortController();
-      preloadAbortControllerRef.current = abortController;
-
-      try {
-        logDebug(`${label}: Preloading video into memory:`, sourceUrl);
-        const response = await fetch(sourceUrl, {
-          signal: abortController.signal,
-          cache: 'force-cache',
-        });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const blob = await response.blob();
-        setPreloadedVideoUrl(`${URL.createObjectURL(blob)}#${currentVideoId}`);
-      } catch (error) {
-        if (error.name !== 'AbortError') {
-          logError(`${label}: Failed to preload video:`, error.message);
-        }
-      } finally {
-        setIsPreloading(false);
-        if (preloadAbortControllerRef.current === abortController) {
-          preloadAbortControllerRef.current = null;
-        }
-      }
-    };
-
-    preloadVideo();
-
-    return () => {
-      preloadAbortControllerRef.current?.abort();
-      preloadAbortControllerRef.current = null;
-    };
-  }, [
-    shouldShowFullScreenBackground,
-    fullScreenBackgroundType,
-    fullScreenBackgroundMedia?.url,
-    fullScreenBackgroundMedia?.uploadedAt,
-    isPreloading,
-    preloadedVideoUrl,
-    label,
-  ]);
-
-  useEffect(() => () => {
-    if (preloadedVideoUrl) {
-      URL.revokeObjectURL(preloadedVideoUrl.split('#')[0]);
-    }
-  }, [preloadedVideoUrl]);
-
   const resolveBackgroundMediaSource = () => {
-    if (!shouldShowFullScreenBackground || !fullScreenBackgroundMedia) return null;
+    if (!shouldRenderFullScreenBackgroundLayer || !fullScreenBackgroundMedia) return null;
     if (fullScreenBackgroundMedia.dataUrl) return fullScreenBackgroundMedia.dataUrl;
     if (!fullScreenBackgroundMedia.url) return null;
     if (fullScreenBackgroundMedia.bundled) return fullScreenBackgroundMedia.url;
 
-    const isVideo = fullScreenBackgroundMedia.mimeType?.startsWith('video/') ||
-      (!fullScreenBackgroundMedia.mimeType && /\.(mp4|webm|ogg|m4v|mov)$/i.test(fullScreenBackgroundMedia.url));
-    if (isVideo && preloadedVideoUrl) return preloadedVideoUrl.split('#')[0];
-
     return resolveBackendUrl(fullScreenBackgroundMedia.url);
   };
 
+  useEffect(() => {
+    if (typeof backgroundVideoPlaying !== 'boolean') return;
+
+    const video = backgroundVideoRef.current;
+    if (!video) return;
+
+    if (backgroundVideoPlaying) {
+      const playPromise = video.play();
+      playPromise?.catch?.(() => { });
+    } else {
+      video.pause();
+    }
+  }, [backgroundVideoPlaying, fullScreenBackgroundMedia?.url, fullScreenBackgroundMedia?.uploadedAt]);
+
   const renderFullScreenMedia = () => {
-    if (!shouldShowFullScreenBackground || fullScreenBackgroundType !== 'media') return null;
+    if (!shouldRenderFullScreenBackgroundLayer || fullScreenBackgroundType !== 'media') return null;
 
     const media = fullScreenBackgroundMedia;
     const mediaSource = resolveBackgroundMediaSource();
@@ -269,13 +210,15 @@ export default function LyricVisualFrame({
       return (
         <video
           key={`video-${cacheKey}`}
+          ref={backgroundVideoRef}
+          data-lyric-background-video="true"
           aria-hidden="true"
           className="absolute inset-0 w-full h-full object-cover"
-          autoPlay
+          autoPlay={typeof backgroundVideoPlaying === 'boolean' ? false : true}
           loop
           muted
           playsInline
-          preload="auto"
+          preload={typeof backgroundVideoPlaying === 'boolean' ? 'metadata' : 'auto'}
           src={mediaSource}
           onError={() => logError(`${label}: Failed to load background video:`, mediaSource)}
         />
@@ -295,7 +238,7 @@ export default function LyricVisualFrame({
   };
 
   const resolveFullScreenElementSource = () => {
-    if (!shouldShowFullScreenBackground || !fullScreenElementEnabled || !fullScreenElementMedia) return null;
+    if (!shouldShowFullScreenBackground || !renderFullScreenElementLayer || !fullScreenElementEnabled || !fullScreenElementMedia) return null;
     if (fullScreenElementMedia.dataUrl) return fullScreenElementMedia.dataUrl;
     if (!fullScreenElementMedia.url) return null;
     return fullScreenElementMedia.bundled

@@ -62,8 +62,8 @@ const LyricsWorkspace = ({
   const actionPadding = useIconOnlyButtons ? 'px-2 py-2' : 'px-4 py-2';
 
   return (
-    <div className="flex-1 min-w-0 pt-4 px-5 pb-5 flex flex-col h-full">
-    <div className="mb-6 flex-shrink-0 min-w-0" ref={headerContainerRef}>
+    <div className={`flex-1 min-w-0 pt-4 px-5 pb-5 flex flex-col h-full ${darkMode ? '' : 'bg-[#f8fafc]'}`}>
+    <div className="mb-6 shrink-0 min-w-0" ref={headerContainerRef}>
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0 flex-1">
           <h2 className={`text-xl font-bold whitespace-nowrap overflow-hidden text-ellipsis ${darkMode ? 'text-white' : 'text-gray-900'}`}>
@@ -77,7 +77,7 @@ const LyricsWorkspace = ({
         </div>
 
         {hasLyrics && (
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex items-center gap-2 shrink-0">
             {hasValidTimestamps(lyricsTimestamps) && (
               <Tooltip content={
                 remoteAutoplayActive || autoplayActive
@@ -92,12 +92,12 @@ const LyricsWorkspace = ({
                   className={`p-2 rounded-lg text-xs font-medium transition-all ${remoteAutoplayActive || autoplayActive
                     ? mutedDisabledClass
                     : intelligentAutoplayActive
-                      ? 'bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white'
+                      ? 'bg-linear-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white'
                       : blueHoverClass
                     }`}
                   title={intelligentAutoplayActive ? 'Stop intelligent autoplay' : 'Start intelligent autoplay'}
                 >
-                  <Sparkles className="h-[16px] w-[16px]" />
+                  <Sparkles className="h-4 w-4" />
                 </button>
               </Tooltip>
             )}
@@ -124,12 +124,12 @@ const LyricsWorkspace = ({
                 >
                   {autoplayActive ? (
                     <>
-                      <Square className="h-[16px] w-[16px] flex-shrink-0 fill-current" />
+                      <Square className="h-4 w-4 shrink-0 fill-current" />
                       {!useIconOnlyButtons && <span className="whitespace-nowrap">Autoplay</span>}
                     </>
                   ) : (
                     <>
-                      <Play className="h-[16px] w-[16px] flex-shrink-0" />
+                      <Play className="h-4 w-4 shrink-0" />
                       {!useIconOnlyButtons && <span className="whitespace-nowrap">Autoplay</span>}
                     </>
                   )}
@@ -144,7 +144,7 @@ const LyricsWorkspace = ({
                     className={`flex items-center justify-center ${useIconOnlyButtons ? 'px-1.5' : 'px-2'} py-2 rounded-r-lg transition-all ${blueHoverClass}`}
                     title="Autoplay settings"
                   >
-                    <ChevronDown className="h-[16px] w-[16px]" />
+                    <ChevronDown className="h-4 w-4" />
                   </button>
                 )}
               </div>
@@ -158,7 +158,7 @@ const LyricsWorkspace = ({
                 title={addTitle}
                 style={{ cursor: addDisabled ? 'not-allowed' : 'pointer', opacity: addDisabled ? 0.9 : 1 }}
               >
-                <Plus className="h-[16px] w-[16px] flex-shrink-0" />
+                <Plus className="h-4 w-4 shrink-0" />
                 {!useIconOnlyButtons && <span className="whitespace-nowrap overflow-hidden text-ellipsis">Add to Setlist</span>}
               </button>
             </Tooltip>
@@ -168,7 +168,7 @@ const LyricsWorkspace = ({
                 onClick={handleEditLyrics}
                 className={`flex items-center gap-2 rounded-lg text-xs font-medium transition-all ${blueHoverClass} ${actionPadding}`}
               >
-                <Edit className="h-[16px] w-[16px] flex-shrink-0" />
+                <Edit className="h-4 w-4 shrink-0" />
                 {!useIconOnlyButtons && <span className="whitespace-nowrap overflow-hidden text-ellipsis">Edit Lyrics</span>}
               </button>
             </Tooltip>
@@ -187,7 +187,7 @@ const LyricsWorkspace = ({
                 className={`p-2 rounded-lg transition-all ${blueHoverClass}`}
                 title="Song Information"
               >
-                <Info className="h-[16px] w-[16px]" />
+                <Info className="h-4 w-4" />
               </button>
             </Tooltip>
           </div>
