@@ -1,5 +1,6 @@
 import { deriveSectionsFromProcessedLines } from '../../../shared/lyricsParsing.js';
 import { appendActionLog } from '../actionLog.js';
+import { emitControllerEvent, emitLyricsLoad, emitLyricsRenderEvent } from '../broadcast.js';
 import { state } from '../state.js';
 
 export function registerDraftHandlers({ io, socket, hasPermission, clientType, deviceId, sessionId }) {
@@ -71,6 +72,8 @@ export function registerDraftHandlers({ io, socket, hasPermission, clientType, d
     }
 
     state.currentLyrics = processedLines || [];
+    state.currentLyricsTimestamps = [];
+    state.currentLyricsEnhancedTimestamps = [];
     state.currentSelectedLine = null;
     state.currentLyricsFileName = title || '';
     const derived = deriveSectionsFromProcessedLines(state.currentLyrics);
@@ -87,11 +90,34 @@ export function registerDraftHandlers({ io, socket, hasPermission, clientType, d
       metadata: { draftId, lines: processedLines?.length || 0 },
     });
 
-    io.emit('lyricsLoad', state.currentLyrics);
-    io.emit('fileNameUpdate', state.currentLyricsFileName);
-    io.emit('lyricsSectionsUpdate', { sections: state.currentLyricsSections, lineToSection: state.currentLineToSection });
+    emitLyricsLoad(io, {
+      lyrics: state.currentLyrics,
+      fileName: state.currentLyricsFileName,
+      rawLyricsContent: rawText || '',
+      lyricsSource: {
+        content: rawText || '',
+        fileType: 'txt',
+        filePath: null,
+        fileName: title || '',
+      },
+      songMetadata: {
+        title: title || '',
+        artists: [],
+        album: null,
+        year: null,
+        origin: 'draft',
+        filePath: null,
+        lyricLines: state.currentLyrics.length,
+      },
+      lyricsTimestamps: [],
+      lyricsEnhancedTimestamps: [],
+      sections: state.currentLyricsSections,
+      lineToSection: state.currentLineToSection,
+    });
+    emitLyricsRenderEvent(io, 'fileNameUpdate', state.currentLyricsFileName);
+    emitLyricsRenderEvent(io, 'lyricsSectionsUpdate', { sections: state.currentLyricsSections, lineToSection: state.currentLineToSection });
     if (rawText) {
-      io.emit('setlistLoadSuccess', {
+      emitControllerEvent(io, 'setlistLoadSuccess', {
         fileId: null,
         fileName: title,
         originalName: null,

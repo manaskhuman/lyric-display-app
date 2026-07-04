@@ -9,6 +9,7 @@ const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 const isOutputId = (value) => typeof value === 'string' && value.startsWith('output');
 const isRoutableOutput = (value) => value === 'stage' || isOutputId(value);
 const isCustomOutputId = (value) => isOutputId(value) && value !== 'output1' && value !== 'output2';
+const isPassiveDisplayRole = (role) => role === 'stage' || isOutputId(role);
 const shallowArrayEqual = (a, b) => {
   if (!Array.isArray(a) || !Array.isArray(b)) return false;
   if (a.length !== b.length) return false;
@@ -31,6 +32,7 @@ const summarizeSnapshotForLog = (state) => {
   return {
     lyrics: Array.isArray(state.lyrics) ? state.lyrics.length : undefined,
     lyricsTimestamps: Array.isArray(state.lyricsTimestamps) ? state.lyricsTimestamps.length : undefined,
+    lyricsEnhancedTimestamps: Array.isArray(state.lyricsEnhancedTimestamps) ? state.lyricsEnhancedTimestamps.length : undefined,
     lyricsSections: Array.isArray(state.lyricsSections) ? state.lyricsSections.length : undefined,
     setlistFiles: Array.isArray(state.setlistFiles) ? state.setlistFiles.length : undefined,
     rawLyricsContentBytes: typeof state.rawLyricsContent === 'string' ? state.rawLyricsContent.length : undefined,
@@ -59,6 +61,7 @@ const useSocketEvents = (role, clientPurpose = role) => {
   const {
     setLyrics,
     setLyricsTimestamps,
+    setLyricsEnhancedTimestamps,
     selectLine,
     updateOutputSettings,
     setSetlistFiles,
@@ -133,6 +136,10 @@ const useSocketEvents = (role, clientPurpose = role) => {
     const applyOutputEnabled = (output, enabled) => {
       if (typeof enabled !== 'boolean') return;
       const store = useLyricsStore.getState();
+      if (output === 'stage' && typeof store.setStageEnabled === 'function') {
+        store.setStageEnabled(enabled);
+        return;
+      }
       const setterName = `set${output.charAt(0).toUpperCase()}${output.slice(1)}Enabled`;
       const setter = store[setterName];
       if (typeof setter === 'function') {
@@ -219,6 +226,13 @@ const useSocketEvents = (role, clientPurpose = role) => {
           setLyricsTimestamps(nextTimestamps);
         }
       }
+      if (hasOwn(state, 'lyricsEnhancedTimestamps') && !preserveHydratedLyrics && !isPassiveDisplayRole(role)) {
+        const nextEnhancedTimestamps = Array.isArray(state.lyricsEnhancedTimestamps) ? state.lyricsEnhancedTimestamps : [];
+        const currentEnhancedTimestamps = useLyricsStore.getState().lyricsEnhancedTimestamps;
+        if (!shallowArrayEqual(currentEnhancedTimestamps, nextEnhancedTimestamps)) {
+          setLyricsEnhancedTimestamps(nextEnhancedTimestamps);
+        }
+      }
       if (hasOwn(state, 'lyricsFileName') && typeof state.lyricsFileName === 'string' && !preserveHydratedLyrics) {
         if (shouldIgnoreEmptyRemoteFileName(state.lyricsFileName)) {
           logDebug(`Ignoring empty ${source} lyricsFileName to preserve local desktop state`);
@@ -279,7 +293,7 @@ const useSocketEvents = (role, clientPurpose = role) => {
         }
       }
 
-      if (!preserveHydratedLyrics) {
+      if (!preserveHydratedLyrics && !isPassiveDisplayRole(role)) {
         applySections(state.lyricsSections || state.sections, state.lineToSection, state.lyrics);
       }
 
@@ -329,7 +343,10 @@ const useSocketEvents = (role, clientPurpose = role) => {
         lyrics[lyrics.length - 1] === currentStore.lyrics[lyrics.length - 1];
 
       setLyrics(lyrics);
-      setLyricsTimestamps(Array.isArray(payloadObject?.lyricsTimestamps) ? payloadObject.lyricsTimestamps : []);
+      if (!isPassiveDisplayRole(role)) {
+        setLyricsTimestamps(Array.isArray(payloadObject?.lyricsTimestamps) ? payloadObject.lyricsTimestamps : []);
+        setLyricsEnhancedTimestamps(Array.isArray(payloadObject?.lyricsEnhancedTimestamps) ? payloadObject.lyricsEnhancedTimestamps : []);
+      }
       if (typeof payloadObject?.fileName === 'string') {
         setLyricsFileName(payloadObject.fileName);
       }
@@ -345,7 +362,9 @@ const useSocketEvents = (role, clientPurpose = role) => {
       if (!isSameLyrics) {
         selectLine(null);
       }
-      applySections(sections, lineToSection, lyrics);
+      if (!isPassiveDisplayRole(role)) {
+        applySections(sections, lineToSection, lyrics);
+      }
     });
 
     socket.on('lyricsTimestampsUpdate', (timestamps) => {
@@ -368,7 +387,7 @@ const useSocketEvents = (role, clientPurpose = role) => {
     });
 
     socket.on('individualOutputToggle', (payload) => {
-      if (!isPlainObject(payload) || !isOutputId(payload.output) || typeof payload.enabled !== 'boolean') {
+      if (!isPlainObject(payload) || !isRoutableOutput(payload.output) || typeof payload.enabled !== 'boolean') {
         return;
       }
       const { output, enabled } = payload;
@@ -671,7 +690,7 @@ const useSocketEvents = (role, clientPurpose = role) => {
     socket.on('periodicStateSync', (state) => {
       applySnapshot(state, 'periodicStateSync');
     });
-  }, [role, setLyrics, setLyricsSections, setLineToSection, setLyricsTimestamps, selectLine, updateOutputSettings, setSetlistFiles, setIsDesktopApp, setLyricsFileName, setRawLyricsContent, setLyricsSource, setSongMetadata]);
+  }, [role, setLyrics, setLyricsSections, setLineToSection, setLyricsTimestamps, setLyricsEnhancedTimestamps, selectLine, updateOutputSettings, setSetlistFiles, setIsDesktopApp, setLyricsFileName, setRawLyricsContent, setLyricsSource, setSongMetadata]);
 
   const registerAuthenticatedHandlers = useCallback(({
     socket,
@@ -775,6 +794,7 @@ const useSocketEvents = (role, clientPurpose = role) => {
               lyricsSource: currentState.lyricsSource || null,
               songMetadata: currentState.songMetadata || null,
               lyricsTimestamps: currentState.lyricsTimestamps || [],
+              lyricsEnhancedTimestamps: currentState.lyricsEnhancedTimestamps || [],
               sections: currentState.lyricsSections || [],
               lineToSection: currentState.lineToSection || {},
             });

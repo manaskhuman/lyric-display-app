@@ -1,9 +1,10 @@
 import { processRawTextToLines, parseLrcContent, deriveSectionsFromProcessedLines } from '../../../shared/lyricsParsing.js';
 import { MAX_SETLIST_ITEMS } from '../../../shared/setlistLimits.js';
 import { appendActionLog } from '../actionLog.js';
+import { emitControllerEvent, emitLyricsLoad, emitLyricsRenderEvent, emitSetlistUpdate } from '../broadcast.js';
 import { blockIfLiveSafety } from '../liveSafety.js';
 import { schedulePersistSessionState } from '../sessionPersistence.js';
-import { state } from '../state.js';
+import { state, summarizeSetlistForDisplay } from '../state.js';
 
 export function registerSetlistHandlers({ io, socket, hasPermission, clientType, deviceId, sessionId }) {
   const actor = { clientType, deviceId, sessionId };
@@ -14,7 +15,11 @@ export function registerSetlistHandlers({ io, socket, hasPermission, clientType,
       return;
     }
 
-    socket.emit('setlistUpdate', state.setlistFiles);
+    const clientInfo = state.connectedClients.get(socket.id);
+    const files = clientInfo?.type === 'stage'
+      ? summarizeSetlistForDisplay(state.setlistFiles)
+      : state.setlistFiles;
+    socket.emit('setlistUpdate', files);
     console.log('Setlist sent to authenticated client:', socket.id, `(${state.setlistFiles.length} items)`);
   });
 
@@ -93,7 +98,7 @@ export function registerSetlistHandlers({ io, socket, hasPermission, clientType,
         },
       });
 
-      io.emit('setlistUpdate', state.setlistFiles);
+      emitSetlistUpdate(io, state.setlistFiles);
       socket.emit('setlistAddSuccess', {
         addedCount: newFiles.length,
         totalCount: state.setlistFiles.length
@@ -137,7 +142,7 @@ export function registerSetlistHandlers({ io, socket, hasPermission, clientType,
           target: fileToRemove?.displayName || fileId,
           metadata: { total: state.setlistFiles.length },
         });
-        io.emit('setlistUpdate', state.setlistFiles);
+        emitSetlistUpdate(io, state.setlistFiles);
         socket.emit('setlistRemoveSuccess', fileId);
       } else {
         socket.emit('setlistError', 'File not found in setlist');
@@ -167,7 +172,8 @@ export function registerSetlistHandlers({ io, socket, hasPermission, clientType,
 
       let processedLines;
       let timestamps = [];
-      let sanitizedRawContent = file.content;
+      let enhancedTimestamps = [];
+      let editableRawContent = file.content;
       let sections = [];
       let lineToSection = {};
       const isLrc = (file.fileType === 'lrc') ||
@@ -177,7 +183,8 @@ export function registerSetlistHandlers({ io, socket, hasPermission, clientType,
         const parsed = parseLrcContent(file.content);
         processedLines = parsed.processedLines;
         timestamps = parsed.timestamps || [];
-        sanitizedRawContent = parsed.rawText;
+        enhancedTimestamps = parsed.enhancedTimestamps || [];
+        editableRawContent = file.content;
         sections = parsed.sections || [];
         lineToSection = parsed.lineToSection || {};
       } else {
@@ -192,11 +199,12 @@ export function registerSetlistHandlers({ io, socket, hasPermission, clientType,
 
       state.currentLyrics = processedLines;
       state.currentLyricsTimestamps = timestamps;
+      state.currentLyricsEnhancedTimestamps = enhancedTimestamps;
       state.currentSelectedLine = null;
       state.currentLyricsFileName = cleanDisplayName;
-      state.currentRawLyricsContent = sanitizedRawContent;
+      state.currentRawLyricsContent = editableRawContent;
       state.currentLyricsSource = {
-        content: file.content || sanitizedRawContent || '',
+        content: file.content || editableRawContent || '',
         fileType: file.fileType || (isLrc ? 'lrc' : 'txt'),
         filePath: file.metadata?.filePath || null,
         fileName: file.originalName || cleanDisplayName || '',
@@ -225,25 +233,26 @@ export function registerSetlistHandlers({ io, socket, hasPermission, clientType,
         },
       });
 
-      io.emit('lyricsLoad', {
+      emitLyricsLoad(io, {
         lyrics: processedLines,
         fileName: cleanDisplayName,
-        rawLyricsContent: sanitizedRawContent,
+        rawLyricsContent: editableRawContent,
         lyricsSource: state.currentLyricsSource,
         songMetadata: state.currentSongMetadata,
         lyricsTimestamps: timestamps,
+        lyricsEnhancedTimestamps: enhancedTimestamps,
         sections,
         lineToSection,
       });
-      io.emit('lyricsTimestampsUpdate', timestamps);
-      io.emit('lyricsSectionsUpdate', { sections, lineToSection });
-      io.emit('setlistLoadSuccess', {
+      emitLyricsRenderEvent(io, 'lyricsTimestampsUpdate', timestamps);
+      emitLyricsRenderEvent(io, 'lyricsSectionsUpdate', { sections, lineToSection });
+      emitControllerEvent(io, 'setlistLoadSuccess', {
         fileId,
         fileName: cleanDisplayName,
         originalName: file.originalName,
         fileType: file.fileType || (isLrc ? 'lrc' : 'txt'),
         linesCount: processedLines.length,
-        rawContent: sanitizedRawContent,
+        rawContent: editableRawContent,
         loadedBy: clientType,
         metadata: {
           ...(file.metadata || {}),
@@ -279,7 +288,7 @@ export function registerSetlistHandlers({ io, socket, hasPermission, clientType,
       target: 'setlist',
       metadata: { previousCount },
     });
-    io.emit('setlistUpdate', state.setlistFiles);
+    emitSetlistUpdate(io, state.setlistFiles);
     socket.emit('setlistClearSuccess');
   });
 
@@ -338,7 +347,7 @@ export function registerSetlistHandlers({ io, socket, hasPermission, clientType,
       metadata: { total: state.setlistFiles.length },
     });
 
-    io.emit('setlistUpdate', state.setlistFiles);
+    emitSetlistUpdate(io, state.setlistFiles);
     socket.emit('setlistReorderSuccess', {
       orderedIds,
       totalCount: state.setlistFiles.length,

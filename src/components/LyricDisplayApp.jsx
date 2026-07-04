@@ -48,7 +48,7 @@ const LyricDisplayApp = () => {
   const navigate = useNavigate();
 
   const { isOutputOn, setIsOutputOn } = useOutputState();
-  const { lyrics, lyricsFileName, lyricsSource, rawLyricsContent, songMetadata, selectedLine, lyricsTimestamps, pendingSavedVersion, selectLine, setLyrics, setLyricsSections, setLineToSection, setRawLyricsContent, setLyricsFileName, setLyricsSource, setSongMetadata, setLyricsTimestamps, clearPendingSavedVersion } = useLyricsState();
+  const { lyrics, lyricsFileName, lyricsSource, rawLyricsContent, songMetadata, selectedLine, lyricsTimestamps, lyricsEnhancedTimestamps, pendingSavedVersion, selectLine, setLyrics, setLyricsSections, setLineToSection, setRawLyricsContent, setLyricsFileName, setLyricsSource, setSongMetadata, setLyricsTimestamps, setLyricsEnhancedTimestamps, clearPendingSavedVersion } = useLyricsState();
   const { settings: output1Settings, updateSettings: updateOutput1Settings } = useOutput1Settings();
   const { settings: output2Settings, updateSettings: updateOutput2Settings } = useOutput2Settings();
   const { settings: stageSettings, updateSettings: updateStageSettings } = useStageSettings();
@@ -132,6 +132,7 @@ const LyricDisplayApp = () => {
     lyricsTimestamps,
     rawLyricsContent,
     setLineToSection,
+    setLyricsEnhancedTimestamps,
     setLyricsSections,
     setLyricsTimestamps,
   });
@@ -190,6 +191,7 @@ const LyricDisplayApp = () => {
     setLineToSection,
     setRawLyricsContent,
     setLyricsTimestamps,
+    setLyricsEnhancedTimestamps,
     selectLine,
     setLyricsFileName,
     setLyricsSource,
@@ -441,22 +443,22 @@ const LyricDisplayApp = () => {
             <div className={`flex gap-3 ${hasLyrics ? 'mb-3' : 'mb-6'}`}>
               <Tooltip content={<span>Load a .txt or .lrc lyrics file from your computer - <strong>Ctrl+O</strong></span>} side="right">
                 <button
-                  className="flex-1 py-3 px-4 bg-linear-to-r from-blue-400 to-purple-600 text-white rounded-xl font-medium hover:from-blue-500 hover:to-purple-700 transition-all duration-200 flex items-center justify-center gap-2"
+                  className="flex-1 py-3 px-4 bg-linear-to-r from-blue-400 to-purple-600 text-white rounded-2xl text-sm font-medium hover:from-blue-500 hover:to-purple-700 transition-all duration-200 flex items-center justify-center gap-2"
                   onClick={openFileDialog}
                 >
-                  <FolderOpen className="w-5 h-5" />
+                  <FolderOpen className="w-4 h-4" />
                   Load lyrics file (.txt, .lrc)
                 </button>
               </Tooltip>
-              <Tooltip content={<span>Open the song canvas to create new lyrics from scratch - <strong>Ctrl+N</strong></span>} side="left">
+              <Tooltip content={<span>Open the song canvas to create new lyrics from scratch - <strong>Ctrl+N</strong></span>} side="right">
                 <button
-                  className={`h-[52px] w-[52px] rounded-xl font-medium transition-all duration-200 flex items-center justify-center ${darkMode
+                  className={`h-[52px] w-[52px] rounded-2xl text-sm font-medium transition-all duration-200 flex items-center justify-center ${darkMode
                     ? 'bg-gray-700 hover:bg-blue-500/10 hover:text-blue-300 text-gray-200'
                     : 'bg-gray-100 hover:bg-blue-50 hover:text-blue-600 text-gray-700'
                     }`}
                   onClick={handleCreateNewSong}
                 >
-                  <FilePlusCorner className="w-5 h-5" />
+                  <FilePlusCorner className="w-4 h-4" />
                 </button>
               </Tooltip>
             </div>
@@ -489,8 +491,15 @@ const LyricDisplayApp = () => {
                       : "data-[state=checked]:bg-black"}
           `}
                 />
-                <span className={`text-sm ml-5 ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
-                  {isOutputOn ? 'Display Output is ON' : 'Display Output is OFF'}
+                <span className={`ml-5 inline-flex items-center gap-3 text-sm font-semibold ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                  <span className="inline-block w-[152px] shrink-0">{isOutputOn ? 'Display Output is ON' : 'Display Output is OFF'}</span>
+                  <span
+                    className={`h-2 w-2 rounded-full ${isOutputOn
+                      ? 'bg-emerald-500'
+                      : darkMode ? 'bg-gray-500' : 'bg-gray-400'
+                      }`}
+                    aria-hidden="true"
+                  />
                 </span>
               </div>
 
@@ -620,6 +629,7 @@ const LyricDisplayApp = () => {
           lyricsContainerRef={lyricsContainerRef}
           lyricsFileName={lyricsFileName}
           lyricsTimestamps={lyricsTimestamps}
+          lyricsEnhancedTimestamps={lyricsEnhancedTimestamps}
           navigateToNextMatch={navigateToNextMatch}
           navigateToPreviousMatch={navigateToPreviousMatch}
           quickParserLoading={quickParserLoading}

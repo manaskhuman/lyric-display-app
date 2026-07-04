@@ -1,5 +1,6 @@
 import { deriveSectionsFromProcessedLines } from '../../../shared/lyricsParsing.js';
 import { appendActionLog } from '../actionLog.js';
+import { emitLyricsLoad, emitLyricsRenderEvent } from '../broadcast.js';
 import { blockIfLiveSafety } from '../liveSafety.js';
 import { schedulePersistSessionState } from '../sessionPersistence.js';
 import { state } from '../state.js';
@@ -34,7 +35,7 @@ export function registerLyricsHandlers({ io, socket, hasPermission, clientType, 
         metadata: { index },
       });
     }
-    io.emit('lineUpdate', { index });
+    emitLyricsRenderEvent(io, 'lineUpdate', { index });
   });
 
   socket.on('lyricsLoad', (payload) => {
@@ -51,11 +52,13 @@ export function registerLyricsHandlers({ io, socket, hasPermission, clientType, 
     const lyrics = Array.isArray(payload) ? payload : payloadObject?.lyrics || [];
     const fileName = payloadObject ? (payloadObject.fileName || '') : '';
     const incomingTimestamps = Array.isArray(payloadObject?.lyricsTimestamps) ? payloadObject.lyricsTimestamps : [];
+    const incomingEnhancedTimestamps = Array.isArray(payloadObject?.lyricsEnhancedTimestamps) ? payloadObject.lyricsEnhancedTimestamps : [];
     const incomingSections = Array.isArray(payloadObject?.sections) ? payloadObject.sections : null;
     const incomingLineToSection = isPlainObject(payloadObject?.lineToSection) ? payloadObject.lineToSection : null;
 
     state.currentLyrics = lyrics;
     state.currentLyricsTimestamps = incomingTimestamps;
+    state.currentLyricsEnhancedTimestamps = incomingEnhancedTimestamps;
     const derived = incomingSections ? null : deriveSectionsFromProcessedLines(state.currentLyrics);
     state.currentLyricsSections = incomingSections || derived?.sections || [];
     state.currentLineToSection = incomingLineToSection || derived?.lineToSection || {};
@@ -91,19 +94,20 @@ export function registerLyricsHandlers({ io, socket, hasPermission, clientType, 
       target: fileName || 'lyrics',
       metadata: { lines: lyrics.length },
     });
-    io.emit('lyricsLoad', {
+    emitLyricsLoad(io, {
       lyrics,
       fileName: state.currentLyricsFileName,
       rawLyricsContent: state.currentRawLyricsContent,
       lyricsSource: state.currentLyricsSource,
       songMetadata: state.currentSongMetadata,
       lyricsTimestamps: state.currentLyricsTimestamps,
+      lyricsEnhancedTimestamps: state.currentLyricsEnhancedTimestamps,
       sections: state.currentLyricsSections,
       lineToSection: state.currentLineToSection,
     });
-    io.emit('lyricsTimestampsUpdate', state.currentLyricsTimestamps);
-    io.emit('lyricsSectionsUpdate', { sections: state.currentLyricsSections, lineToSection: state.currentLineToSection });
-    io.emit('fileNameUpdate', state.currentLyricsFileName);
+    emitLyricsRenderEvent(io, 'lyricsTimestampsUpdate', state.currentLyricsTimestamps);
+    emitLyricsRenderEvent(io, 'lyricsSectionsUpdate', { sections: state.currentLyricsSections, lineToSection: state.currentLineToSection });
+    emitLyricsRenderEvent(io, 'fileNameUpdate', state.currentLyricsFileName);
   });
 
   socket.on('lyricsTimestampsUpdate', (timestamps) => {
@@ -127,7 +131,7 @@ export function registerLyricsHandlers({ io, socket, hasPermission, clientType, 
       target: state.currentLyricsFileName || 'lyrics',
       metadata: { timestamps: timestamps?.length || 0 },
     });
-    io.emit('lyricsTimestampsUpdate', timestamps);
+    emitLyricsRenderEvent(io, 'lyricsTimestampsUpdate', timestamps);
   });
 
   socket.on('splitNormalGroup', (payload = {}) => {
@@ -163,8 +167,24 @@ export function registerLyricsHandlers({ io, socket, hasPermission, clientType, 
 
     const newLyrics = [...state.currentLyrics];
     newLyrics.splice(index, 1, ...groupLines);
+    const timestampsAligned = Array.isArray(state.currentLyricsTimestamps) && state.currentLyricsTimestamps.length === state.currentLyrics.length;
+    const enhancedTimestampsAligned = Array.isArray(state.currentLyricsEnhancedTimestamps) && state.currentLyricsEnhancedTimestamps.length === state.currentLyrics.length;
+    const nextTimestamps = timestampsAligned ? [...state.currentLyricsTimestamps] : [];
+    const nextEnhancedTimestamps = enhancedTimestampsAligned ? [...state.currentLyricsEnhancedTimestamps] : [];
+    if (timestampsAligned) {
+      const groupTimestamp = state.currentLyricsTimestamps[index];
+      nextTimestamps.splice(index, 1, ...groupLines.map(() => groupTimestamp ?? null));
+    }
+    if (enhancedTimestampsAligned) {
+      const groupEnhanced = state.currentLyricsEnhancedTimestamps[index];
+      const expandedEnhanced = Array.isArray(groupEnhanced) && groupEnhanced.every(Array.isArray)
+        ? groupEnhanced.slice(0, groupLines.length)
+        : groupLines.map(() => []);
+      nextEnhancedTimestamps.splice(index, 1, ...expandedEnhanced);
+    }
     state.currentLyrics = newLyrics;
-    state.currentLyricsTimestamps = [];
+    state.currentLyricsTimestamps = nextTimestamps;
+    state.currentLyricsEnhancedTimestamps = nextEnhancedTimestamps;
     const derived = deriveSectionsFromProcessedLines(state.currentLyrics);
     state.currentLyricsSections = derived.sections || [];
     state.currentLineToSection = derived.lineToSection || {};
@@ -185,21 +205,22 @@ export function registerLyricsHandlers({ io, socket, hasPermission, clientType, 
       target: state.currentLyricsFileName || 'lyrics',
       metadata: { index, lines: groupLines.length },
     });
-    io.emit('lyricsLoad', {
+    emitLyricsLoad(io, {
       lyrics: state.currentLyrics,
       fileName: state.currentLyricsFileName,
       rawLyricsContent: state.currentRawLyricsContent,
       lyricsSource: state.currentLyricsSource,
       songMetadata: state.currentSongMetadata,
       lyricsTimestamps: state.currentLyricsTimestamps,
+      lyricsEnhancedTimestamps: state.currentLyricsEnhancedTimestamps,
       sections: state.currentLyricsSections,
       lineToSection: state.currentLineToSection,
     });
-    io.emit('lyricsTimestampsUpdate', state.currentLyricsTimestamps);
-    io.emit('lyricsSectionsUpdate', { sections: state.currentLyricsSections, lineToSection: state.currentLineToSection });
+    emitLyricsRenderEvent(io, 'lyricsTimestampsUpdate', state.currentLyricsTimestamps);
+    emitLyricsRenderEvent(io, 'lyricsSectionsUpdate', { sections: state.currentLyricsSections, lineToSection: state.currentLineToSection });
 
     if (typeof state.currentSelectedLine === 'number') {
-      io.emit('lineUpdate', { index: state.currentSelectedLine });
+      emitLyricsRenderEvent(io, 'lineUpdate', { index: state.currentSelectedLine });
     }
 
     socket.emit('lyricsSplitSuccess', { index });
@@ -235,7 +256,7 @@ export function registerLyricsHandlers({ io, socket, hasPermission, clientType, 
         target: fileName || 'lyrics',
       });
     }
-    io.emit('fileNameUpdate', fileName);
+    emitLyricsRenderEvent(io, 'fileNameUpdate', fileName);
   });
 
   socket.on('autoplayStateUpdate', ({ isActive, clientType: autoplayClientType }) => {

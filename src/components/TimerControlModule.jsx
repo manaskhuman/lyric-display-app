@@ -265,11 +265,33 @@ const useWindowActive = () => {
   return active;
 };
 
+const isTimerShortcutEditableTarget = (target) => {
+  if (!target || typeof target.closest !== 'function') return false;
+  return Boolean(target.closest([
+    'input',
+    'textarea',
+    'select',
+    'button',
+    'a[href]',
+    '[contenteditable="true"]',
+    '[role="button"]',
+    '[role="checkbox"]',
+    '[role="combobox"]',
+    '[role="menuitem"]',
+    '[role="option"]',
+    '[role="slider"]',
+    '[role="spinbutton"]',
+    '[role="switch"]',
+    '[role="textbox"]',
+  ].join(',')));
+};
+
 const TimerPreview = React.memo(({ timerState, displaySettings }) => {
   const showSecondaryText = displaySettings.showSecondaryText !== false;
   const needsClock = timerState.running || timerState.paused || displaySettings.showGlobalClock;
   const windowActive = useWindowActive();
-  const now = usePreviewClock(needsClock, windowActive ? 1000 : 5000);
+  const timerActive = timerState.running || timerState.paused;
+  const now = usePreviewClock(needsClock, timerActive || windowActive ? 1000 : 5000);
   const displayValue = React.useMemo(() => getTimerDisplay(timerState, now), [timerState, now]);
   const intensity = React.useMemo(() => getTimerIntensity(timerState, now), [timerState, now]);
   const progress = React.useMemo(() => getTimerProgress(timerState, now), [timerState, now]);
@@ -500,11 +522,11 @@ const TimerControlModule = () => {
     }
   }, [applyTimerDisplaySettings, commitTimerState]);
 
-  const buildDisplay = () => ({
+  const buildDisplay = React.useCallback(() => ({
     ...displaySettings,
-  });
+  }), [displaySettings]);
 
-  const getTargetTimestamp = () => {
+  const getTargetTimestamp = React.useCallback(() => {
     if (!targetTime) return null;
     const [hours, minutes] = targetTime.split(':').map((part) => Number(part));
     if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
@@ -514,9 +536,11 @@ const TimerControlModule = () => {
       next.setDate(next.getDate() + 1);
     }
     return next.getTime();
-  };
+  }, [targetTime]);
 
-  const handleStart = () => {
+  const canStartTimer = !active && (mode !== 'target' || Boolean(targetTime));
+
+  const handleStart = React.useCallback(() => {
     const display = buildDisplay();
     if (useSets) {
       actions.startTimerSet({
@@ -543,7 +567,52 @@ const TimerControlModule = () => {
       overrunMode,
       display,
     });
-  };
+  }, [
+    actions,
+    autoStartNext,
+    buildDisplay,
+    criticalSeconds,
+    durationMinutes,
+    getTargetTimestamp,
+    indicatorEnabled,
+    indicatorLabel,
+    indicatorSeconds,
+    mode,
+    overrunMode,
+    sets,
+    useSets,
+    warningSeconds,
+  ]);
+
+  const toggleTimerPlayback = React.useCallback(() => {
+    if (timerState.running) {
+      if (timerState.paused) {
+        actions.resumeTimer();
+      } else {
+        actions.pauseTimer();
+      }
+      return;
+    }
+
+    if (canStartTimer) {
+      handleStart();
+    }
+  }, [actions, canStartTimer, handleStart, timerState.paused, timerState.running]);
+
+  React.useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.defaultPrevented || event.repeat) return;
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      if (event.key !== ' ' && event.code !== 'Space') return;
+      if (isTimerShortcutEditableTarget(event.target)) return;
+
+      event.preventDefault();
+      toggleTimerPlayback();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [toggleTimerPlayback]);
 
   const handleOpenProjectOutput = React.useCallback(() => {
     showModal({

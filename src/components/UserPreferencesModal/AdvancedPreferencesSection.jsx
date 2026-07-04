@@ -110,7 +110,7 @@ const AdvancedPreferencesSection = ({
             </span>
           </div>
           <p className={`mt-1 text-xs ${mutedClass}`}>
-            Control LyricDisplay from an OBS dock while LyricDisplay runs quietly in the background.
+            Control LyricDisplay from an OBS dock while it runs quietly in the background.
           </p>
         </div>
       </div>
@@ -154,7 +154,7 @@ const AdvancedPreferencesSection = ({
               className={darkMode ? 'border-gray-600 bg-gray-800 text-gray-200 hover:bg-gray-700' : ''}
             >
               <Play className="w-4 h-4 mr-2" />
-              Switch to Dock Mode
+              Switch to Dock
             </Button>
           )}
           <Button
@@ -164,7 +164,7 @@ const AdvancedPreferencesSection = ({
             className={darkMode ? 'border-gray-600 bg-gray-800 text-gray-200 hover:bg-gray-700' : ''}
           >
             <Info className="w-4 h-4 mr-2" />
-            LyricDisplay Dock Setup
+            Setup
           </Button>
         </div>
         {isDevMode && (

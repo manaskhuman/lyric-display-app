@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect, useLayoutEffect } from 'react';
-import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { createPortal } from 'react-dom';
+import { DndContext, DragOverlay, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import useToast from '../hooks/useToast';
@@ -12,6 +13,12 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
 import { REQUEST_MODAL_CLOSE_EVENT } from '@/constants/modalEvents';
+
+const SETLIST_DROP_ANIMATION = {
+  duration: 180,
+  easing: 'cubic-bezier(0.2, 0, 0, 1)',
+};
+
 const SetlistModal = () => {
   const { setlistModalOpen, setSetlistModalOpen, setlistFiles, isSetlistFull, getAvailableSetlistSlots, setSetlistFiles, getMaxSetlistFiles } = useSetlistState();
 
@@ -29,6 +36,7 @@ const SetlistModal = () => {
   const { showToast } = useToast();
   const { showModal } = useModal();
   const [activeId, setActiveId] = useState(null);
+  const [activeOverlayWidth, setActiveOverlayWidth] = useState(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -40,18 +48,22 @@ const SetlistModal = () => {
     file.displayName.toLowerCase().includes(searchQuery.toLowerCase())
   );
   const canReorder = isDesktopApp && filteredFiles.length > 1;
+  const activeFile = activeId ? list.find((file) => file.id === activeId) : null;
 
   const handleDragStart = useCallback(({ active }) => {
     if (!isDesktopApp) return;
     setActiveId(active?.id ?? null);
+    setActiveOverlayWidth(active?.rect?.current?.initial?.width ?? null);
   }, [isDesktopApp]);
 
   const handleDragCancel = useCallback(() => {
     setActiveId(null);
+    setActiveOverlayWidth(null);
   }, []);
 
   const handleDragEnd = useCallback(({ active, over }) => {
     setActiveId(null);
+    setActiveOverlayWidth(null);
     if (!isDesktopApp || !over || !active || active.id === over.id) return;
 
     const fromIndex = list.findIndex((file) => file.id === active.id);
@@ -518,6 +530,21 @@ const SetlistModal = () => {
   const searchClearClass = darkMode
     ? 'text-gray-400 hover:bg-blue-500/10 hover:text-blue-300'
     : 'text-gray-500 hover:bg-blue-50 hover:text-blue-600';
+  const dragOverlay = activeFile ? (
+    <DragOverlay adjustScale={false} dropAnimation={SETLIST_DROP_ANIMATION}>
+      <SetlistItemCard
+        file={activeFile}
+        darkMode={darkMode}
+        isDesktopApp={isDesktopApp}
+        canReorder={canReorder}
+        isDragOverlay
+        onLoad={handleLoadFile}
+        onRemove={handleRemoveFile}
+        formatDate={formatDate}
+        style={{ width: activeOverlayWidth ? `${activeOverlayWidth}px` : undefined }}
+      />
+    </DragOverlay>
+  ) : null;
 
   return (
     <div
@@ -531,7 +558,7 @@ const SetlistModal = () => {
 
       {/* Modal */}
       <div className={`
-        relative w-full max-w-4xl mx-4 max-h-[90vh] rounded-2xl border shadow-2xl ring-1 overflow-hidden
+        relative flex min-h-0 w-full max-w-4xl flex-col mx-4 max-h-[90vh] rounded-2xl border shadow-2xl ring-1 overflow-hidden
         ${darkMode ? 'bg-gray-900 text-gray-50 border-gray-800 ring-blue-500/35' : 'bg-white text-gray-900 border-gray-200 ring-blue-500/20'}
         md:mx-auto md:w-full md:max-w-3xl md:max-h-[80vh] md:rounded-2xl
         sm:mx-2 sm:max-w-full sm:h-full sm:max-h-full sm:rounded-none
@@ -541,7 +568,7 @@ const SetlistModal = () => {
 
         {/* Fixed Header */}
         <div className={`
-          px-6 py-4 border-b flex items-center justify-between gap-4
+          shrink-0 px-6 py-4 border-b flex items-center justify-between gap-4
           ${darkMode ? 'border-gray-800 bg-gray-900' : 'border-gray-200 bg-white'}
         `}>
           <div className="min-w-0">
@@ -720,7 +747,7 @@ const SetlistModal = () => {
 
         {/* Fixed Search Bar */}
         <div className={`
-          px-6 py-4 border-b
+          shrink-0 px-6 py-4 border-b
           ${darkMode ? 'border-gray-800 bg-gray-950/35' : 'border-gray-200 bg-[#f8fafc]'}
         `}>
           <div className="relative">
@@ -750,16 +777,10 @@ const SetlistModal = () => {
               }
             </p>
           )}
-
-          {isDesktopApp && filteredFiles.length > 1 && !searchQuery && (
-            <p className={`mt-2 text-xs ${darkMode ? 'text-gray-500' : 'text-gray-500'}`}>
-              Drag the grip handle to reorder songs. Changes sync to all clients.
-            </p>
-          )}
         </div>
 
         {/* Scrollable Content */}
-        <div className={`flex-1 overflow-y-auto p-5 max-h-96 ${darkMode ? 'bg-gray-950/20' : 'bg-white'}`}>
+        <div className={`min-h-0 flex-1 overflow-y-auto p-5 ${darkMode ? 'bg-gray-950/20' : 'bg-white'}`}>
           {isLoading && (
             <div className="flex items-center justify-center py-8">
               <div className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
@@ -827,8 +848,26 @@ const SetlistModal = () => {
                   ))}
                 </div>
               </SortableContext>
+              {typeof document !== 'undefined' && dragOverlay
+                ? createPortal(dragOverlay, document.body)
+                : dragOverlay}
             </DndContext>
           )}
+        </div>
+
+        {/* Fixed Footer */}
+        <div className={`
+          shrink-0 px-6 py-4 border-t flex items-center justify-end
+          ${darkMode ? 'border-gray-800 bg-gray-900' : 'border-gray-200 bg-white'}
+        `}>
+          <Button
+            type="button"
+            variant={darkMode ? 'outline' : 'default'}
+            onClick={closeModal}
+            className={darkMode ? 'min-w-[96px] border-gray-500 bg-transparent text-white hover:border-gray-400 hover:bg-gray-800/40 hover:text-white' : 'min-w-[96px]'}
+          >
+            Close
+          </Button>
         </div>
       </div>
     </div>
@@ -858,9 +897,47 @@ const SortableSetlistItem = ({
   const style = {
     transform: transform ? CSS.Transform.toString(transform) : undefined,
     transition: transition || undefined,
-    boxShadow: isDragging ? (darkMode ? '0 10px 30px rgba(0,0,0,0.45)' : '0 10px 25px rgba(0,0,0,0.15)') : undefined,
+    opacity: isDragging ? 0.28 : undefined,
+    willChange: transform ? 'transform' : undefined,
   };
 
+  return (
+    <SetlistItemCard
+      file={file}
+      darkMode={darkMode}
+      isDesktopApp={isDesktopApp}
+      canReorder={canReorder}
+      isActive={isActive}
+      isDragging={isDragging}
+      onLoad={onLoad}
+      onRemove={onRemove}
+      formatDate={formatDate}
+      nodeRef={setNodeRef}
+      activatorNodeRef={setActivatorNodeRef}
+      attributes={attributes}
+      listeners={listeners}
+      style={style}
+    />
+  );
+};
+
+const SetlistItemCard = ({
+  file,
+  darkMode,
+  isDesktopApp,
+  canReorder,
+  isActive = false,
+  isDragging = false,
+  isDragOverlay = false,
+  onLoad,
+  onRemove,
+  formatDate,
+  nodeRef,
+  activatorNodeRef,
+  attributes,
+  listeners,
+  style,
+}) => {
   const handleLoad = useCallback(() => onLoad(file.id), [file.id, onLoad]);
 
   const handleRemove = useCallback((event) => {
@@ -879,7 +956,9 @@ const SortableSetlistItem = ({
     ? 'bg-gray-900/80 border-gray-800 hover:border-blue-500/30 hover:bg-blue-500/10'
     : 'bg-white border-gray-200 hover:border-blue-200 hover:bg-blue-50/45';
 
-  const activeClasses = isActive ? 'ring-2 ring-blue-400/70 ring-offset-1 ring-offset-transparent' : '';
+  const activeClasses = isActive && !isDragging
+    ? 'ring-2 ring-blue-400/70 ring-offset-1 ring-offset-transparent'
+    : '';
 
   const removeButtonClasses = darkMode
     ? 'text-gray-500 hover:bg-red-500/10 hover:text-red-300'
@@ -893,32 +972,34 @@ const SortableSetlistItem = ({
     ? 'Drag to reorder'
     : 'Reordering available on desktop when multiple items are visible';
 
+  const dragHandle = (
+    <button
+      type="button"
+      ref={activatorNodeRef}
+      className={`mt-0.5 hidden sm:flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${handleClasses} ${canReorder ? 'cursor-grab active:cursor-grabbing opacity-100' : 'cursor-not-allowed opacity-40'} ${isDragOverlay ? 'cursor-grabbing' : ''}`}
+      onClick={(event) => event.stopPropagation()}
+      aria-label="Reorder setlist item"
+      {...(!isDragOverlay && canReorder ? attributes : {})}
+      {...(!isDragOverlay && canReorder ? listeners : {})}
+    >
+      <GripVertical className="w-4 h-4" />
+    </button>
+  );
+
   return (
     <div
-      ref={setNodeRef}
+      ref={nodeRef}
       style={style}
-      className={`group relative rounded-xl border p-3.5 cursor-pointer transition-all duration-200 ${baseClasses} hover:shadow-sm ${activeClasses}`}
-      onClick={handleLoad}
-      onKeyDown={handleKeyDown}
-      role="button"
-      tabIndex={0}
+      className={`group relative rounded-xl border p-3.5 transition-[background-color,border-color,box-shadow,opacity] duration-150 ${baseClasses} ${isDragOverlay ? 'pointer-events-none cursor-grabbing scale-[1.01] shadow-2xl' : 'cursor-pointer hover:shadow-sm'} ${activeClasses}`}
+      onClick={isDragOverlay ? undefined : handleLoad}
+      onKeyDown={isDragOverlay ? undefined : handleKeyDown}
+      role={isDragOverlay ? undefined : 'button'}
+      tabIndex={isDragOverlay ? -1 : 0}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3 flex-1 min-w-0">
           {isDesktopApp && (
-            <Tooltip content={reorderTitle}>
-              <button
-                type="button"
-                ref={setActivatorNodeRef}
-                className={`mt-0.5 hidden sm:flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${handleClasses} ${canReorder ? 'cursor-grab active:cursor-grabbing opacity-100' : 'cursor-not-allowed opacity-40'}`}
-                onClick={(event) => event.stopPropagation()}
-                aria-label="Reorder setlist item"
-                {...(canReorder ? attributes : {})}
-                {...(canReorder ? listeners : {})}
-              >
-                <GripVertical className="w-4 h-4" />
-              </button>
-            </Tooltip>
+            isDragOverlay ? dragHandle : <Tooltip content={reorderTitle}>{dragHandle}</Tooltip>
           )}
           <div className="flex-1 min-w-0">
             <h3 className="truncate text-sm font-semibold">
@@ -931,7 +1012,7 @@ const SortableSetlistItem = ({
           </div>
         </div>
 
-        {isDesktopApp && (
+        {isDesktopApp && !isDragOverlay && (
           <Tooltip content="Remove from setlist">
             <button
               type="button"

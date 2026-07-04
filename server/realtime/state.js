@@ -3,6 +3,7 @@ import { DEFAULT_OUTPUT_IDS } from '../../shared/outputRegistry.js';
 export const state = {
   currentLyrics: [],
   currentLyricsTimestamps: [],
+  currentLyricsEnhancedTimestamps: [],
   currentLyricsFileName: '',
   currentRawLyricsContent: '',
   currentLyricsSource: {
@@ -138,6 +139,15 @@ const appendOutputState = (target, outputId) => {
   return target;
 };
 
+export const summarizeSetlistForDisplay = (files = []) => {
+  if (!Array.isArray(files)) return [];
+  return files.map((file) => ({
+    id: file?.id || '',
+    displayName: file?.displayName || '',
+    originalName: file?.originalName || '',
+  }));
+};
+
 export function buildCurrentState(clientInfo) {
   const timestamp = Date.now();
   const clientType = clientInfo?.type;
@@ -162,10 +172,7 @@ export function buildCurrentState(clientInfo) {
     return appendOutputState({
       ...baseState,
       lyrics: state.currentLyrics,
-      lyricsTimestamps: state.currentLyricsTimestamps,
       selectedLine: state.currentSelectedLine,
-      lyricsSections: state.currentLyricsSections,
-      lineToSection: state.currentLineToSection,
       isOutputOn: state.currentIsOutputOn,
       lyricsFileName: state.currentLyricsFileName || '',
       stageTimerState: state.currentStageTimerState,
@@ -176,14 +183,11 @@ export function buildCurrentState(clientInfo) {
     return {
       ...baseState,
       lyrics: state.currentLyrics,
-      lyricsTimestamps: state.currentLyricsTimestamps,
       selectedLine: state.currentSelectedLine,
-      lyricsSections: state.currentLyricsSections,
-      lineToSection: state.currentLineToSection,
       stageSettings: state.currentStageSettings,
       isOutputOn: state.currentIsOutputOn,
       stageEnabled: state.currentStageEnabled,
-      setlistFiles: state.setlistFiles,
+      setlistFiles: summarizeSetlistForDisplay(state.setlistFiles),
       lyricsFileName: state.currentLyricsFileName || '',
       stageTimerState: state.currentStageTimerState,
       stageMessages: state.currentStageMessages,
@@ -194,6 +198,7 @@ export function buildCurrentState(clientInfo) {
     ...baseState,
     lyrics: state.currentLyrics,
     lyricsTimestamps: state.currentLyricsTimestamps,
+    lyricsEnhancedTimestamps: state.currentLyricsEnhancedTimestamps,
     selectedLine: state.currentSelectedLine,
     lyricsSections: state.currentLyricsSections,
     lineToSection: state.currentLineToSection,
@@ -221,6 +226,39 @@ export function buildCurrentState(clientInfo) {
   }
 
   return currentState;
+}
+
+export function buildPeriodicState(clientInfo) {
+  const timestamp = Date.now();
+  const clientType = clientInfo?.type;
+  const clientPurpose = typeof clientInfo?.purpose === 'string' ? clientInfo.purpose : '';
+  const baseState = buildBaseState(clientInfo, timestamp);
+
+  if (clientPurpose === 'timer-control' || clientPurpose === 'time-display') {
+    return {
+      ...baseState,
+      stageTimerState: state.currentStageTimerState,
+    };
+  }
+
+  if (isOutputClientType(clientType)) {
+    return appendOutputState({
+      ...baseState,
+      selectedLine: state.currentSelectedLine,
+      isOutputOn: state.currentIsOutputOn,
+    }, clientType);
+  }
+
+  if (clientType === 'stage') {
+    return {
+      ...baseState,
+      isOutputOn: state.currentIsOutputOn,
+      stageEnabled: state.currentStageEnabled,
+      stageTimerState: state.currentStageTimerState,
+    };
+  }
+
+  return buildCurrentState(clientInfo);
 }
 
 export function getConnectedClients() {

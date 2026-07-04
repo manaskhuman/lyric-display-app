@@ -3,16 +3,21 @@ import fs from 'fs';
 import path from 'path';
 import util from 'util';
 import { getUserDataMigrationResult } from './appIdentity.js';
+import {
+  LOG_RETENTION,
+  MANAGED_LOG_FILE_PATTERN,
+  buildLogPrunePlan,
+  getLogSessionPath,
+} from './logRetention.js';
 
-const MAX_LOG_BYTES = 5 * 1024 * 1024;
-const MAX_ROTATED_LOGS = 3;
 const RESOURCE_LOG_INTERVAL_MS = 60_000;
 
 let initialized = false;
 let logDir = null;
 let logFilePath = null;
 let latestLogFilePath = null;
-let logStream = null;
+let fileLoggingReady = false;
+let currentLogBytes = 0;
 let originals = null;
 let resourceDiagnosticsTimer = null;
 let resourceDiagnosticsPending = false;
@@ -54,16 +59,32 @@ const resolveLogDir = () => {
   }
 };
 
-const rotateLogs = (filePath) => {
+const warnLoggingFailure = (...args) => {
   try {
-    if (!fs.existsSync(filePath)) return;
-    const stat = fs.statSync(filePath);
-    if (!stat.isFile() || stat.size < MAX_LOG_BYTES) return;
+    originals?.warn?.(...args);
+  } catch {
+  }
+};
 
-    for (let index = MAX_ROTATED_LOGS; index >= 1; index -= 1) {
+const getFileSize = (filePath) => {
+  try {
+    const stat = fs.statSync(filePath);
+    return stat.isFile() ? stat.size : 0;
+  } catch {
+    return 0;
+  }
+};
+
+const rotateLogs = (filePath, { force = false } = {}) => {
+  try {
+    if (!fs.existsSync(filePath)) return false;
+    const stat = fs.statSync(filePath);
+    if (!stat.isFile() || (!force && stat.size < LOG_RETENTION.maxLogBytes)) return false;
+
+    for (let index = LOG_RETENTION.maxRotatedLogs; index >= 1; index -= 1) {
       const source = `${filePath}.${index}`;
       const target = `${filePath}.${index + 1}`;
-      if (index === MAX_ROTATED_LOGS && fs.existsSync(source)) {
+      if (index === LOG_RETENTION.maxRotatedLogs && fs.existsSync(source)) {
         fs.rmSync(source, { force: true });
         continue;
       }
@@ -73,21 +94,77 @@ const rotateLogs = (filePath) => {
     }
 
     fs.renameSync(filePath, `${filePath}.1`);
+    return true;
   } catch (error) {
+    warnLoggingFailure('[Logging] Failed to rotate log file:', error);
+    return false;
+  }
+};
+
+const listManagedLogFiles = () => {
+  try {
+    return fs.readdirSync(logDir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && MANAGED_LOG_FILE_PATTERN.test(entry.name))
+      .map((entry) => {
+        const filePath = path.join(logDir, entry.name);
+        const stat = fs.statSync(filePath);
+        return {
+          filePath,
+          sessionPath: getLogSessionPath(filePath),
+          size: stat.size,
+          mtimeMs: stat.mtimeMs,
+        };
+      });
+  } catch (error) {
+    warnLoggingFailure('[Logging] Failed to list log files for cleanup:', error);
+    return [];
+  }
+};
+
+const pruneLogFolder = ({ preservePaths = [] } = {}) => {
+  const deleteLogFile = (filePath) => {
     try {
-      originals?.warn?.('[Logging] Failed to rotate log file:', error);
-    } catch {
+      fs.rmSync(filePath, { force: true });
+      return true;
+    } catch (error) {
+      warnLoggingFailure('[Logging] Failed to delete old log file:', filePath, error);
+      return false;
     }
+  };
+
+  const plan = buildLogPrunePlan(listManagedLogFiles(), { preservePaths });
+  plan.deletePaths.forEach(deleteLogFile);
+  return plan.stats;
+};
+
+const appendToLogFile = (text) => {
+  if (!fileLoggingReady || !logFilePath) return;
+
+  const byteLength = Buffer.byteLength(text, 'utf8');
+  if (currentLogBytes > 0 && currentLogBytes + byteLength > LOG_RETENTION.maxLogBytes) {
+    if (rotateLogs(logFilePath, { force: true })) {
+      currentLogBytes = 0;
+    } else {
+      currentLogBytes = getFileSize(logFilePath);
+    }
+  }
+
+  try {
+    fs.appendFileSync(logFilePath, text, 'utf8');
+    currentLogBytes += byteLength;
+  } catch (error) {
+    fileLoggingReady = false;
+    warnLoggingFailure('[Logging] Failed to write log file:', error);
   }
 };
 
 const writeLine = (level, message) => {
-  if (!logStream) return;
+  if (!fileLoggingReady) return;
   const normalized = String(message || '').replace(/\r?\n/g, '\n');
   const lines = normalized.split('\n');
   for (const line of lines) {
     if (line.length === 0) continue;
-    logStream.write(`[${timestamp()}] [${level}] ${line}\n`);
+    appendToLogFile(`[${timestamp()}] [${level}] ${line}\n`);
   }
 };
 
@@ -104,6 +181,44 @@ export const getLogPaths = () => ({
   logFilePath,
   latestLogFilePath,
 });
+
+function logUserDataMigrationStatus() {
+  const status = getUserDataMigrationResult();
+  if (!status) return;
+
+  const conflicts = [
+    ...(Array.isArray(status.conflicts) ? status.conflicts : []),
+    ...(Array.isArray(status.legacyNdi?.conflicts) ? status.legacyNdi.conflicts : []),
+    ...(Array.isArray(status.legacyUserDataNdi?.conflicts) ? status.legacyUserDataNdi.conflicts : []),
+  ];
+  const errors = [
+    ...(Array.isArray(status.errors) ? status.errors : []),
+    ...(Array.isArray(status.legacyNdi?.errors) ? status.legacyNdi.errors : []),
+    ...(Array.isArray(status.legacyUserDataNdi?.errors) ? status.legacyUserDataNdi.errors : []),
+  ];
+  const didMigrationWork = Boolean(
+    status.attempted ||
+    status.reconciliationAttempted ||
+    status.legacyNdi?.attempted ||
+    status.legacyUserDataNdi?.attempted ||
+    conflicts.length ||
+    errors.length
+  );
+
+  if (didMigrationWork) {
+    writeLog('INFO', 'User data migration run status', status);
+    return;
+  }
+
+  writeLog('INFO', 'User data migration already complete', {
+    migratedAt: status.migratedAt,
+    sourcePath: status.sourcePath,
+    targetPath: status.targetPath,
+    deletedLegacy: status.deletedLegacy,
+    legacyNdiDeleted: status.legacyNdi?.deletedLegacy,
+    legacyUserDataNdiDeleted: status.legacyUserDataNdi?.deletedLegacy,
+  });
+}
 
 function summarizeAppMetrics() {
   try {
@@ -178,8 +293,13 @@ export function initFileLogging() {
     logFilePath = path.join(logDir, createSessionLogFileName());
     latestLogFilePath = path.join(logDir, 'latest.log');
     rotateLogs(logFilePath);
-    rotateLogs(latestLogFilePath);
-    logStream = fs.createWriteStream(logFilePath, { flags: 'a' });
+    fs.closeSync(fs.openSync(logFilePath, 'a'));
+    currentLogBytes = getFileSize(logFilePath);
+    fileLoggingReady = true;
+    const pruneStats = pruneLogFolder({ preservePaths: [logFilePath] });
+    if (pruneStats?.deletedFiles > 0) {
+      writeLog('INFO', 'Log retention pruning completed', pruneStats);
+    }
     try {
       fs.writeFileSync(latestLogFilePath, logFilePath, 'utf8');
     } catch (error) {
@@ -232,7 +352,7 @@ export function initFileLogging() {
     pid: process.pid,
     logFilePath,
   });
-  writeLog('INFO', 'User data migration status', getUserDataMigrationResult());
+  logUserDataMigrationStatus();
   startResourceDiagnostics();
 
   return getLogPaths();
