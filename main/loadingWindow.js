@@ -38,7 +38,7 @@ export function createLoadingWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      preload: resolveProductionPath('preload.js')
+      preload: resolveProductionPath('preloads', 'loading.cjs')
     }
   });
 
@@ -106,7 +106,7 @@ export function createLoadingWindow() {
         }
 
         .photo-panel {
-          width: 44%;
+          width: 48%;
           min-width: 320px;
           height: 100%;
           background: #111827;
@@ -198,7 +198,7 @@ export function createLoadingWindow() {
         .credits {
           font-size: 9px;
           color: #6B7280;
-          letter-spacing: 0.28em;
+          letter-spacing: 0.18em;
           text-transform: uppercase;
           font-weight: 500;
           line-height: 1.5;

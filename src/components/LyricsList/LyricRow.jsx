@@ -1,7 +1,7 @@
 import React from 'react';
 import { Ungroup } from 'lucide-react';
 import { Tooltip } from '@/components/ui/tooltip';
-import { HORIZONTAL_PADDING_PX, ROW_GAP } from './layout';
+import { HORIZONTAL_PADDING_PX, ROW_GAP } from '../../hooks/LyricsList/useLyricsListRows';
 import LyricLineContent from './LyricLineContent';
 import TutorialLineAnchor from './TutorialLineAnchor';
 import { formatTimestamp } from '../../utils/timestampHelpers';
@@ -21,6 +21,7 @@ export default function LyricRow({
   handleRowTouchMove,
   handleRowTouchEnd,
   selectedLine,
+  previewLine,
   darkMode,
   hoveredLineIndex,
   setHoveredLineIndex,
@@ -36,6 +37,7 @@ export default function LyricRow({
   handleStageOnlyTutorialOpenChange,
   handleNeverShowTutorialPopovers,
   searchQuery,
+  highlightedLineIndex,
   isStructureTagLine,
   getNormalGroupLines,
   density = 'default',
@@ -48,6 +50,7 @@ export default function LyricRow({
   const sectionLabel = sectionId ? sectionById.get(sectionId)?.label : null;
   const isActiveSection = sectionId && sectionId === activeSectionId;
   const isBatchSelected = selectedIndices?.has(index);
+  const isActiveSearchMatch = index === highlightedLineIndex && Boolean(searchQuery);
   const timestamp = Array.isArray(lyricsTimestamps) ? lyricsTimestamps[index] : null;
   const hasTimestamp = typeof timestamp === 'number' && Number.isFinite(timestamp) && timestamp >= 0;
 
@@ -79,6 +82,7 @@ export default function LyricRow({
       )}
       <div
         data-line-index={virtualized ? undefined : index}
+        data-preview-line={index === previewLine ? 'true' : undefined}
         className={`${getLineClassName(index, virtualized, isBatchSelected)} relative`}
         onClick={(event) => handleRowClick(event, index)}
         onContextMenu={(event) => handleContextMenuOpen(event, index)}
@@ -108,6 +112,7 @@ export default function LyricRow({
               isStructureTagLine={isStructureTagLine}
               getNormalGroupLines={getNormalGroupLines}
               density={density}
+              isActiveSearchMatch={isActiveSearchMatch}
             />
           </div>
         </div>

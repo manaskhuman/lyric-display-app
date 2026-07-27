@@ -7,29 +7,17 @@ import {
 } from '../state.js';
 import { emitOutputMetricsUpdate } from '../broadcast.js';
 import { getPrimaryOutputInstance, isOutputClientType, isOutputDiscoveryClientType, isPlainObject } from '../utils.js';
+import { performance } from 'node:perf_hooks';
+import {
+  describeStatePayload,
+  isStatePayloadNoteworthy,
+  shouldSamplePeriodicState,
+} from '../stateDiagnostics.js';
+import { REALTIME_EVENTS } from '../../../shared/apiContractRegistry.js';
 
 const normalizePurpose = (value) => (
   typeof value === 'string' && value.trim() ? value.trim().toLowerCase() : null
 );
-
-const describeStatePayload = (clientInfo, payload) => {
-  let approxBytes = 0;
-  try {
-    approxBytes = Buffer.byteLength(JSON.stringify(payload), 'utf8');
-  } catch {
-    approxBytes = -1;
-  }
-
-  return {
-    clientType: clientInfo?.type || 'unknown',
-    purpose: clientInfo?.purpose || null,
-    keys: Object.keys(payload || {}).length,
-    lyrics: Array.isArray(payload?.lyrics) ? payload.lyrics.length : 0,
-    setlistItems: Array.isArray(payload?.setlistFiles) ? payload.setlistFiles.length : 0,
-    hasRawLyricsContent: Object.hasOwn(payload || {}, 'rawLyricsContent'),
-    approxBytes,
-  };
-};
 
 const emitCurrentState = (socket, clientInfo, reason, shouldLog = false) => {
   if (!clientInfo) {
@@ -56,7 +44,7 @@ export function registerConnectionHandlers({ io, socket, clientType, deviceId, s
 
   if (isOutputClient) {
     if (!state.registeredOutputs.has(clientType)) {
-      socket.emit('outputUnavailable', { output: clientType });
+      socket.emit(REALTIME_EVENTS.outputUnavailable, { output: clientType });
       socket.disconnect(true);
       return false;
     }
@@ -116,7 +104,7 @@ export function registerConnectionHandlers({ io, socket, clientType, deviceId, s
       }
     }
     emitCurrentState(socket, state.connectedClients.get(socket.id), 'clientConnect', true);
-    socket.emit('outputsRegistry', { outputs: buildOutputList() });
+    socket.emit(REALTIME_EVENTS.outputsRegistry, { outputs: buildOutputList() });
   });
 
   socket.on('heartbeat', () => {
@@ -164,15 +152,26 @@ export function registerConnectionHandlers({ io, socket, clientType, deviceId, s
       const clientInfo = state.connectedClients.get(socket.id);
       if (!clientInfo) return;
       emitCurrentState(socket, clientInfo, 'initial-sync', true);
-      socket.emit('outputsRegistry', { outputs: buildOutputList() });
+      socket.emit(REALTIME_EVENTS.outputsRegistry, { outputs: buildOutputList() });
     }
   }, 100);
 
+  let periodicStateCount = 0;
   const stateBroadcastInterval = setInterval(() => {
     if (socket.connected) {
       const clientInfo = state.connectedClients.get(socket.id);
       if (!clientInfo) return;
-      socket.emit('periodicStateSync', buildPeriodicState(clientInfo));
+      const buildStartedAt = performance.now();
+      const payload = buildPeriodicState(clientInfo);
+      const buildMs = performance.now() - buildStartedAt;
+      socket.emit('periodicStateSync', payload);
+
+      periodicStateCount += 1;
+      if (shouldSamplePeriodicState(periodicStateCount, buildMs)) {
+        const diagnostics = describeStatePayload(clientInfo, payload, { buildMs });
+        const log = isStatePayloadNoteworthy(diagnostics) ? console.warn : console.log;
+        log(`Periodic state diagnostics for ${socket.id}`, diagnostics);
+      }
     }
   }, 30000);
 
@@ -193,7 +192,7 @@ export function registerCurrentStateHandler({ socket, hasPermission }) {
     console.log('State requested by authenticated client:', socket.id);
     const clientInfo = state.connectedClients.get(socket.id);
     if (!emitCurrentState(socket, clientInfo, 'requestCurrentState', true)) return;
-    socket.emit('outputsRegistry', { outputs: buildOutputList() });
+    socket.emit(REALTIME_EVENTS.outputsRegistry, { outputs: buildOutputList() });
   });
 }
 

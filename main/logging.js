@@ -1,8 +1,11 @@
 import { app } from 'electron';
+import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import util from 'util';
+import { randomUUID } from 'crypto';
 import { getUserDataMigrationResult } from './appIdentity.js';
+import { BatchedLogWriter, formatStructuredLogRecord } from './batchedLogWriter.js';
 import {
   LOG_RETENTION,
   MANAGED_LOG_FILE_PATTERN,
@@ -11,6 +14,7 @@ import {
 } from './logRetention.js';
 
 const RESOURCE_LOG_INTERVAL_MS = 60_000;
+const MAX_FORMATTED_LOG_CHARS = 48 * 1024;
 
 let initialized = false;
 let logDir = null;
@@ -21,19 +25,36 @@ let currentLogBytes = 0;
 let originals = null;
 let resourceDiagnosticsTimer = null;
 let resourceDiagnosticsPending = false;
+let batchedWriter = null;
+let logContext = null;
 
 const timestamp = () => new Date().toISOString();
 
 const safeInspect = (value) => {
-  if (typeof value === 'string') return value;
+  if (typeof value === 'string') {
+    return value.length > MAX_FORMATTED_LOG_CHARS
+      ? `${value.slice(0, MAX_FORMATTED_LOG_CHARS)}… [truncated]`
+      : value;
+  }
   return util.inspect(value, {
     depth: 5,
     breakLength: 140,
     maxArrayLength: 80,
+    maxStringLength: MAX_FORMATTED_LOG_CHARS,
   });
 };
 
-const formatArgs = (args) => args.map(safeInspect).join(' ');
+const formatArgs = (args) => {
+  let formatted = '';
+  for (const arg of args) {
+    const inspected = safeInspect(arg);
+    const separator = formatted ? ' ' : '';
+    const remaining = MAX_FORMATTED_LOG_CHARS - formatted.length - separator.length;
+    if (remaining <= 0) break;
+    formatted += `${separator}${inspected.slice(0, remaining)}`;
+  }
+  return formatted;
+};
 
 const createSessionLogFileName = () => {
   const stamp = new Date()
@@ -57,6 +78,58 @@ const resolveLogDir = () => {
   } catch {
     return path.join(process.cwd(), 'logs');
   }
+};
+
+const readJsonFile = (filePath) => {
+  try {
+    if (!filePath || !fs.existsSync(filePath)) return null;
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch {
+    return null;
+  }
+};
+
+const runGit = (command) => {
+  if (app.isPackaged) return null;
+  try {
+    return execSync(command, {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    return null;
+  }
+};
+
+const getRuntimeBuildInfo = () => {
+  const appPath = (() => {
+    try {
+      return app.getAppPath?.();
+    } catch {
+      return null;
+    }
+  })();
+
+  const candidates = [
+    appPath ? path.join(appPath, 'dist', 'build-info.json') : null,
+    path.join(process.cwd(), 'dist', 'build-info.json'),
+  ];
+  const fromFile = candidates.map(readJsonFile).find(Boolean);
+  if (fromFile) return fromFile;
+
+  const status = runGit('git status --short');
+  return {
+    version: app.getVersion?.(),
+    builtAt: null,
+    commit: runGit('git rev-parse HEAD'),
+    shortCommit: runGit('git rev-parse --short=12 HEAD'),
+    branch: runGit('git branch --show-current'),
+    tag: runGit('git describe --tags --exact-match HEAD'),
+    dirty: Boolean(status),
+    dirtySummary: status || '',
+    source: app.isPackaged ? 'packaged-no-build-info' : 'local-git-fallback',
+  };
 };
 
 const warnLoggingFailure = (...args) => {
@@ -137,9 +210,8 @@ const pruneLogFolder = ({ preservePaths = [] } = {}) => {
   return plan.stats;
 };
 
-const appendToLogFile = (text) => {
+const appendBatchToLogFile = async (text) => {
   if (!fileLoggingReady || !logFilePath) return;
-
   const byteLength = Buffer.byteLength(text, 'utf8');
   if (currentLogBytes > 0 && currentLogBytes + byteLength > LOG_RETENTION.maxLogBytes) {
     if (rotateLogs(logFilePath, { force: true })) {
@@ -150,21 +222,29 @@ const appendToLogFile = (text) => {
   }
 
   try {
-    fs.appendFileSync(logFilePath, text, 'utf8');
+    await fs.promises.appendFile(logFilePath, text, 'utf8');
     currentLogBytes += byteLength;
   } catch (error) {
     fileLoggingReady = false;
-    warnLoggingFailure('[Logging] Failed to write log file:', error);
+    throw error;
   }
 };
 
-const writeLine = (level, message) => {
-  if (!fileLoggingReady) return;
+const formatRecord = (level, message, context = {}) => formatStructuredLogRecord({
+  timestamp: timestamp(),
+  level,
+  message,
+  context: { ...logContext, ...context },
+});
+
+const writeLine = (level, message, context = {}) => {
+  if (!fileLoggingReady || !batchedWriter) return;
   const normalized = String(message || '').replace(/\r?\n/g, '\n');
   const lines = normalized.split('\n');
+  const critical = level === 'FATAL' || level === 'ERROR' || level === 'BACKEND_ERROR';
   for (const line of lines) {
     if (line.length === 0) continue;
-    appendToLogFile(`[${timestamp()}] [${level}] ${line}\n`);
+    batchedWriter.enqueue(formatRecord(level, line, context), { critical });
   }
 };
 
@@ -172,8 +252,8 @@ export const writeLog = (level, ...args) => {
   writeLine(level, formatArgs(args));
 };
 
-export const writeRawLog = (level, text) => {
-  writeLine(level, text);
+export const writeRawLog = (level, text, context = {}) => {
+  writeLine(level, text, context);
 };
 
 export const getLogPaths = () => ({
@@ -190,17 +270,20 @@ function logUserDataMigrationStatus() {
     ...(Array.isArray(status.conflicts) ? status.conflicts : []),
     ...(Array.isArray(status.legacyNdi?.conflicts) ? status.legacyNdi.conflicts : []),
     ...(Array.isArray(status.legacyUserDataNdi?.conflicts) ? status.legacyUserDataNdi.conflicts : []),
+    ...(Array.isArray(status.flatNdiInstall?.conflicts) ? status.flatNdiInstall.conflicts : []),
   ];
   const errors = [
     ...(Array.isArray(status.errors) ? status.errors : []),
     ...(Array.isArray(status.legacyNdi?.errors) ? status.legacyNdi.errors : []),
     ...(Array.isArray(status.legacyUserDataNdi?.errors) ? status.legacyUserDataNdi.errors : []),
+    ...(Array.isArray(status.flatNdiInstall?.errors) ? status.flatNdiInstall.errors : []),
   ];
   const didMigrationWork = Boolean(
     status.attempted ||
     status.reconciliationAttempted ||
     status.legacyNdi?.attempted ||
     status.legacyUserDataNdi?.attempted ||
+    status.flatNdiInstall?.attempted ||
     conflicts.length ||
     errors.length
   );
@@ -217,6 +300,7 @@ function logUserDataMigrationStatus() {
     deletedLegacy: status.deletedLegacy,
     legacyNdiDeleted: status.legacyNdi?.deletedLegacy,
     legacyUserDataNdiDeleted: status.legacyUserDataNdi?.deletedLegacy,
+    flatNdiInstallDeleted: status.flatNdiInstall?.deletedLegacy,
   });
 }
 
@@ -276,7 +360,7 @@ function startResourceDiagnostics() {
   });
 }
 
-export function initFileLogging() {
+export function initFileLogging(options = {}) {
   if (initialized) return getLogPaths();
   initialized = true;
   originals = {
@@ -296,6 +380,22 @@ export function initFileLogging() {
     fs.closeSync(fs.openSync(logFilePath, 'a'));
     currentLogBytes = getFileSize(logFilePath);
     fileLoggingReady = true;
+    logContext = {
+      sessionId: options.sessionId || randomUUID(),
+      process: 'main',
+      pid: process.pid,
+    };
+    batchedWriter = new BatchedLogWriter({
+      writeBatch: appendBatchToLogFile,
+      onError: (error) => {
+        fileLoggingReady = false;
+        warnLoggingFailure('[Logging] Failed to write log file:', error);
+      },
+      formatDropNotice: (count) => formatRecord('WARN', 'Buffered log entries dropped during overload', {
+        source: 'logger',
+        droppedCount: count,
+      }),
+    });
     const pruneStats = pruneLogFolder({ preservePaths: [logFilePath] });
     if (pruneStats?.deletedFiles > 0) {
       writeLog('INFO', 'Log retention pruning completed', pruneStats);
@@ -349,7 +449,7 @@ export function initFileLogging() {
     appName: app.getName?.(),
     version: app.getVersion?.(),
     packaged: app.isPackaged,
-    pid: process.pid,
+    build: getRuntimeBuildInfo(),
     logFilePath,
   });
   logUserDataMigrationStatus();
@@ -358,7 +458,27 @@ export function initFileLogging() {
   return getLogPaths();
 }
 
-export function mirrorStreamToLog(stream, level, targetStream = null) {
+export async function flushFileLogs({ timeoutMs = 1500 } = {}) {
+  if (!batchedWriter || !fileLoggingReady) return true;
+  let timeout;
+  try {
+    return await Promise.race([
+      batchedWriter.flushAll(),
+      new Promise((resolve) => {
+        timeout = setTimeout(() => resolve(false), Math.max(100, timeoutMs));
+        timeout.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+export function getLogBufferStats() {
+  return batchedWriter?.getStats() || null;
+}
+
+export function mirrorStreamToLog(stream, level, targetStream = null, context = {}) {
   if (!stream) return;
   stream.on('data', (chunk) => {
     const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk);
@@ -368,6 +488,6 @@ export function mirrorStreamToLog(stream, level, targetStream = null) {
       } catch {
       }
     }
-    writeRawLog(level, text);
+    writeRawLog(level, text, context);
   });
 }

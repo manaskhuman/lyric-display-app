@@ -447,7 +447,7 @@ const useMenuHandlers = (closeMenu) => {
       headerDescription: 'Inspect connected clients, sync state, and retry health',
       component: 'ConnectionDiagnostics',
       variant: 'info',
-      size: 'large',
+      size: 'md',
       actions: [
         { label: 'Close', variant: 'outline' },
         {
@@ -487,10 +487,25 @@ const useMenuHandlers = (closeMenu) => {
     window.dispatchEvent(new Event('open-support-dev-modal'));
   }, [closeMenu]);
 
-  const handleCheckUpdates = useCallback(() => {
+  const handleCheckUpdates = useCallback(async () => {
     closeMenu();
-    window.electronAPI?.checkForUpdates?.(true);
-  }, [closeMenu]);
+    const result = await window.electronAPI?.checkForUpdates?.(true);
+    if (result?.state?.updateMode === 'store') {
+      showToast({
+        title: 'Updates managed by Microsoft Store',
+        message: 'Open Microsoft Store and select Library > Get updates to check manually.',
+        variant: 'info',
+        dedupeKey: 'app-update-store-managed',
+      });
+    } else if (result?.deferred) {
+      showToast({
+        title: 'Update check deferred',
+        message: 'LyricDisplay will check for updates when Live Safety is turned off.',
+        variant: 'info',
+        dedupeKey: 'app-update-check-deferred',
+      });
+    }
+  }, [closeMenu, showToast]);
 
   const handleAbout = useCallback(async (appVersion) => {
     closeMenu();

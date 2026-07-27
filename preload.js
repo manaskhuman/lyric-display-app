@@ -28,7 +28,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return () => ipcRenderer.removeListener(channel, listener);
     }
   },
-  getAdminKey: () => ipcRenderer.invoke('get-admin-key'),
   getJoinCode: () => ipcRenderer.invoke('get-join-code'),
   getDesktopJWT: (payload) => ipcRenderer.invoke('get-desktop-jwt', payload),
   getConnectionDiagnostics: () => ipcRenderer.invoke('get-connection-diagnostics'),
@@ -42,6 +41,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getPlatform: () => process.platform,
   getAppVersion: () => ipcRenderer.invoke('app:get-version'),
   getLogPaths: () => ipcRenderer.invoke('app:get-log-paths'),
+  signalStartupReady: (payload) => ipcRenderer.send('app:renderer-ready', payload),
   obsDockStartup: {
     get: () => ipcRenderer.invoke('app:obs-dock-startup:get'),
     set: (enabled) => ipcRenderer.invoke('app:obs-dock-startup:set', { enabled }),
@@ -86,18 +86,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   showSaveDialog: (options) => ipcRenderer.invoke('show-save-dialog', options),
-  writeFile: (filePath, content) => ipcRenderer.invoke('write-file', filePath, content),
-
-  onProgressUpdate: (callback) => {
-    ipcRenderer.removeAllListeners('progress-update');
-    ipcRenderer.on('progress-update', (event, progress) => callback(progress));
-  },
-
-  onLoadingStatus: (callback) => {
-    ipcRenderer.removeAllListeners('loading-status');
-    ipcRenderer.on('loading-status', (event, status) => callback(status));
-  },
-
+  writeFile: (filePath, content, options) => ipcRenderer.invoke('write-file', filePath, content, options),
 
   onAdminKeyAvailable: (callback) => {
     const channel = 'admin-key:available';
@@ -163,6 +152,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   requestUpdateDownload: () => ipcRenderer.invoke('updater:download'),
   requestInstallAndRestart: () => ipcRenderer.invoke('updater:install'),
   hideUpdateProgressWindow: () => ipcRenderer.invoke('updater:hide-progress'),
+  setUpdateSessionActive: (active) => ipcRenderer.invoke('updater:set-session-active', Boolean(active)),
 
   onOpenShortcutsHelp: (callback) => {
     const channel = 'open-shortcuts-help';
@@ -219,15 +209,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on(channel, (_e, payload) => callback(payload));
     return () => ipcRenderer.removeAllListeners(channel);
   },
-
-  browserBack: () => ipcRenderer.send('browser-nav', 'back'),
-  browserForward: () => ipcRenderer.send('browser-nav', 'forward'),
-  browserReload: () => ipcRenderer.send('browser-nav', 'reload'),
-  browserNavigate: (url) => ipcRenderer.send('browser-nav', 'navigate', url),
-  browserOpenExternal: () => ipcRenderer.send('browser-open-external'),
-  onBrowserLocation: (callback) => {
-    ipcRenderer.removeAllListeners('browser-location');
-    ipcRenderer.on('browser-location', (_e, url) => callback(url));
+  onOpenScheduleFromPath: (callback) => {
+    const channel = 'open-schedule-from-path';
+    ipcRenderer.removeAllListeners(channel);
+    ipcRenderer.on(channel, (_e, payload) => callback(payload));
+    return () => ipcRenderer.removeAllListeners(channel);
+  },
+  onOpenScheduleFromPathError: (callback) => {
+    const channel = 'open-schedule-from-path-error';
+    ipcRenderer.removeAllListeners(channel);
+    ipcRenderer.on(channel, (_e, payload) => callback(payload));
+    return () => ipcRenderer.removeAllListeners(channel);
   },
 
   removeAllListeners: (channel) => {
@@ -334,6 +326,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     setFeedbackPort: (port) => ipcRenderer.invoke('osc:set-feedback-port', { port }),
     setAddressPrefix: (prefix) => ipcRenderer.invoke('osc:set-address-prefix', { prefix }),
     setFeedbackEnabled: (enabled) => ipcRenderer.invoke('osc:set-feedback-enabled', { enabled }),
+    setRemoteAccessEnabled: (enabled) => ipcRenderer.invoke('osc:set-remote-access', { enabled }),
+    setAllowedSources: (sources) => ipcRenderer.invoke('osc:set-allowed-sources', { sources }),
+    setRateLimit: (rateLimit) => ipcRenderer.invoke('osc:set-rate-limit', { rateLimit }),
+    setDuplicateWindow: (duplicateWindowMs) => ipcRenderer.invoke('osc:set-duplicate-window', { duplicateWindowMs }),
     getSupportedAddresses: () => ipcRenderer.invoke('osc:get-supported-addresses'),
     sendFeedback: (address, args) => ipcRenderer.invoke('osc:send-feedback', { address, args })
   },

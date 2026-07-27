@@ -1,4 +1,12 @@
 import path from 'path';
+import { extractLyricTextFromSource } from '../shared/documentTextExtraction.js';
+import {
+  isSupportedLyricsImportFile,
+  normalizeLyricFileType,
+} from '../shared/lyricImportRegistry.js';
+import { parseScheduleDocument } from '../shared/scheduleUtils.js';
+
+const MAX_SCHEDULE_FILE_BYTES = 5 * 1024 * 1024;
 
 let pendingFileToOpen = null;
 
@@ -16,9 +24,7 @@ export function setPendingFile(filePath) {
 }
 
 export function isSupportedLyricsFile(filePath) {
-  if (!filePath) return false;
-  const ext = path.extname(filePath).toLowerCase();
-  return ext === '.txt' || ext === '.lrc';
+  return isSupportedLyricsImportFile(filePath);
 }
 
 export function isSupportedSetlistFile(filePath) {
@@ -27,8 +33,13 @@ export function isSupportedSetlistFile(filePath) {
   return ext === '.ldset';
 }
 
+export function isSupportedScheduleFile(filePath) {
+  if (!filePath) return false;
+  return path.extname(filePath).toLowerCase() === '.ldsch';
+}
+
 export function isSupportedFile(filePath) {
-  return isSupportedLyricsFile(filePath) || isSupportedSetlistFile(filePath);
+  return isSupportedLyricsFile(filePath) || isSupportedSetlistFile(filePath) || isSupportedScheduleFile(filePath);
 }
 
 export function extractFilePathFromArgs(args) {
@@ -63,7 +74,37 @@ export async function handleFileOpen(filePath, mainWindow) {
     return;
   }
 
-  if (ext !== '.txt' && ext !== '.lrc') {
+  if (ext === '.ldsch') {
+    console.log('[FileHandler] Opening schedule file:', filePath);
+    if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.webContents) {
+      setPendingFile(filePath);
+      return;
+    }
+
+    try {
+      const fs = await import('fs/promises');
+      const fileStat = await fs.stat(filePath);
+      if (!fileStat.isFile()) throw new Error('Schedule path is not a file');
+      if (fileStat.size > MAX_SCHEDULE_FILE_BYTES) throw new Error('Schedule file must be 5 MB or smaller');
+      const schedule = parseScheduleDocument(await fs.readFile(filePath, 'utf8'));
+      mainWindow.webContents.send('open-schedule-from-path', {
+        schedule,
+        fileName: path.basename(filePath),
+        filePath,
+      });
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    } catch (error) {
+      console.error('[FileHandler] Error reading schedule:', error);
+      mainWindow.webContents.send('open-schedule-from-path-error', {
+        filePath,
+        error: error?.message || 'Could not open schedule',
+      });
+    }
+    return;
+  }
+
+  if (!isSupportedLyricsImportFile(filePath)) {
     console.warn('[FileHandler] Unsupported file type:', ext);
     return;
   }
@@ -83,9 +124,14 @@ export async function handleFileOpen(filePath, mainWindow) {
   if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
     try {
       const fs = await import('fs/promises');
-      const content = await fs.readFile(filePath, 'utf-8');
       const fileName = path.basename(filePath);
-      const fileType = ext.substring(1);
+      const fileType = normalizeLyricFileType({ fileName });
+      const content = await extractLyricTextFromSource({
+        fileType,
+        fileName,
+        path: filePath,
+        readFile: fs.readFile,
+      });
 
       console.log('[FileHandler] Sending file to renderer:', fileName);
 

@@ -2,10 +2,17 @@ import React from 'react';
 import { useLocation } from 'react-router-dom';
 import useSocket from '../hooks/useSocket';
 import useSharedTimer from '../hooks/useSharedTimer';
-import { formatGlobalClock, isTimerVisiblyActive, splitClockPeriod } from '../utils/timerUtils';
+import {
+  formatGlobalClock,
+  getRemainingMs,
+  isTimerVisiblyActive,
+  shouldShowGlobalTimeForManualScheduleItem,
+  splitClockPeriod,
+} from '../utils/timerUtils';
 import { useTimerDisplaySettings } from '../hooks/useStoreSelectors';
 import { paintToCss } from '../utils/paint';
 import ProjectionExitHint from '../components/ProjectionExitHint';
+import { calculateScheduleProjection } from '../../shared/scheduleUtils.js';
 
 const PERIOD_STYLE = {
   fontSize: '0.38em',
@@ -30,19 +37,89 @@ const getDisplayUpdatedAt = (display) => {
   return Number.isFinite(updatedAt) ? updatedAt : 0;
 };
 
-const useAutoFitText = (text, enabled = true) => {
+const AUTO_FIT_CACHE_LIMIT = 80;
+const autoFitCache = new Map();
+
+const getTextFitShape = (text) => String(text || '')
+  .replace(/[0-9]/g, '0')
+  .replace(/[A-Z]/g, 'A')
+  .replace(/[a-z]/g, 'a');
+
+const getFontFitKey = (display) => [
+  display.timerFontFamily || display.fontFamily || 'Bebas Neue',
+  display.timerBold === false ? '400' : '700',
+  display.timerItalic ? 'italic' : 'normal',
+  display.timerUnderline ? 'underline' : 'none',
+  display.timerAlign || 'center',
+].join('|');
+
+const rememberAutoFit = (key, value) => {
+  if (autoFitCache.has(key)) {
+    autoFitCache.delete(key);
+  }
+  autoFitCache.set(key, value);
+  while (autoFitCache.size > AUTO_FIT_CACHE_LIMIT) {
+    autoFitCache.delete(autoFitCache.keys().next().value);
+  }
+};
+
+const useAutoFitText = ({ enabled = true, fitKey }) => {
   const [containerEl, setContainerEl] = React.useState(null);
   const [textEl, setTextEl] = React.useState(null);
   const [fontSize, setFontSize] = React.useState(null);
+  const [containerSize, setContainerSize] = React.useState({ width: 0, height: 0 });
+
+  React.useLayoutEffect(() => {
+    if (!enabled || !containerEl) return undefined;
+
+    const updateSize = () => {
+      const width = Math.round(containerEl.clientWidth);
+      const height = Math.round(containerEl.clientHeight);
+      setContainerSize((current) => (
+        current.width === width && current.height === height
+          ? current
+          : { width, height }
+      ));
+    };
+
+    let frame = null;
+    const scheduleSize = () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        updateSize();
+      });
+    };
+
+    updateSize();
+    const observer = new ResizeObserver(scheduleSize);
+    observer.observe(containerEl);
+    window.addEventListener('resize', scheduleSize);
+
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      observer.disconnect();
+      window.removeEventListener('resize', scheduleSize);
+    };
+  }, [containerEl, enabled]);
 
   React.useLayoutEffect(() => {
     if (!enabled || !containerEl || !textEl) return undefined;
+    if (containerSize.width <= 0 || containerSize.height <= 0) return undefined;
 
-    const fit = () => {
-      const availableWidth = containerEl.clientWidth * 0.995;
-      const availableHeight = containerEl.clientHeight * 0.98;
+    const fit = ({ ignoreCache = false } = {}) => {
+      const availableWidth = containerSize.width * 0.995;
+      const availableHeight = containerSize.height * 0.98;
       if (availableWidth <= 0 || availableHeight <= 0) return;
 
+      const cacheKey = `${fitKey}|${Math.round(availableWidth)}x${Math.round(availableHeight)}`;
+      const cached = ignoreCache ? null : autoFitCache.get(cacheKey);
+      if (cached) {
+        setFontSize((current) => (current === cached ? current : cached));
+        return;
+      }
+
+      const previousFontSize = textEl.style.fontSize;
       let low = 24;
       let high = 1000;
       let best = low;
@@ -57,15 +134,19 @@ const useAutoFitText = (text, enabled = true) => {
           high = mid - 1;
         }
       }
+      textEl.style.fontSize = previousFontSize;
+      rememberAutoFit(cacheKey, best);
       setFontSize(best);
     };
 
     let frame = null;
-    const scheduleFit = () => {
+    let cancelled = false;
+    const scheduleFit = (options) => {
+      if (cancelled) return;
       if (frame) window.cancelAnimationFrame(frame);
       frame = window.requestAnimationFrame(() => {
         frame = null;
-        fit();
+        if (!cancelled) fit(options);
       });
     };
 
@@ -73,16 +154,15 @@ const useAutoFitText = (text, enabled = true) => {
       frame = null;
       fit();
     });
-    const observer = new ResizeObserver(scheduleFit);
-    observer.observe(containerEl);
-    window.addEventListener('resize', scheduleFit);
+
+    const fontsReady = document.fonts?.ready;
+    fontsReady?.then?.(() => scheduleFit({ ignoreCache: true })).catch?.(() => {});
 
     return () => {
+      cancelled = true;
       if (frame) window.cancelAnimationFrame(frame);
-      observer.disconnect();
-      window.removeEventListener('resize', scheduleFit);
     };
-  }, [containerEl, textEl, text, enabled]);
+  }, [containerEl, containerSize.height, containerSize.width, enabled, fitKey, textEl]);
 
   return {
     containerRef: setContainerEl,
@@ -113,15 +193,47 @@ const TimeDisplay = () => {
       : { ...stateDisplay, ...localDisplay };
   }, [timerDisplaySettings, timerState.display]);
   const hasActiveTimer = isTimerVisiblyActive(timerState, now);
-  const shouldShowClock = !hasActiveTimer && display.showClockWhenIdle !== false;
+  const showManualItemGlobalTime = shouldShowGlobalTimeForManualScheduleItem(timerState);
+  const shouldShowClock = showManualItemGlobalTime || (!hasActiveTimer && display.showClockWhenIdle !== false);
   const clockValue = React.useMemo(() => formatGlobalClock(now, display), [display, now]);
   const clockParts = React.useMemo(() => splitClockPeriod(clockValue), [clockValue]);
   const showGlobalClock = display.showGlobalClock !== false;
   const showSecondaryText = display.showSecondaryText !== false;
+  const hasRunningSchedule = timerState.running && Array.isArray(timerState.sets) && timerState.sets.length > 0;
+  const scheduleRemainingMs = hasRunningSchedule && timerState.mode !== 'countup'
+    ? getRemainingMs(timerState, now)
+    : null;
+  const scheduleProjection = React.useMemo(() => calculateScheduleProjection({
+    items: timerState.sets,
+    active: hasRunningSchedule,
+    activeIndex: timerState.activeSetIndex,
+    now,
+    currentRemainingMs: scheduleRemainingMs,
+    currentIsTransition: timerState.phase === 'indicator',
+    currentIsUnbounded: Boolean(timerState.scheduleReconciliationHold),
+    transitionMs: timerState.indicatorEnabled ? timerState.indicatorDurationMs : 0,
+    idealEndAt: timerState.scheduleIdealEndAt,
+  }), [
+    hasRunningSchedule,
+    now,
+    scheduleRemainingMs,
+    timerState.activeSetIndex,
+    timerState.indicatorDurationMs,
+    timerState.indicatorEnabled,
+    timerState.phase,
+    timerState.scheduleReconciliationHold,
+    timerState.scheduleIdealEndAt,
+    timerState.sets,
+  ]);
+  const isBehindSchedule = hasRunningSchedule && scheduleProjection.status === 'behind';
   const isWaitingForTime = !hasActiveTimer && !showGlobalClock;
-  const isIdleFullScreenClock = shouldShowClock && !isWaitingForTime;
+  const isFullScreenClock = shouldShowClock && !isWaitingForTime;
+  const showActiveSecondaryGlobalClock = showSecondaryText
+    && showGlobalClock
+    && hasActiveTimer
+    && !showManualItemGlobalTime;
 
-  const value = isWaitingForTime ? 'Waiting for time...' : (isIdleFullScreenClock ? clockParts.time : displayValue);
+  const value = isWaitingForTime ? 'Waiting for time...' : (isFullScreenClock ? clockParts.time : displayValue);
   const label = !showSecondaryText || isWaitingForTime
     ? ''
     : shouldShowClock
@@ -139,7 +251,15 @@ const TimeDisplay = () => {
     : (display.textColor || '#FFFFFF');
   const timerFontSizeMode = display.timerFontSizeMode || 'auto';
   const autoFitEnabled = timerFontSizeMode !== 'manual';
-  const { containerRef, textRef, fontSize: autoFontSize } = useAutoFitText(value, autoFitEnabled);
+  const autoFitKey = React.useMemo(() => [
+    getTextFitShape(value),
+    getFontFitKey(display),
+    showActiveSecondaryGlobalClock ? 'active-with-clock' : 'primary',
+  ].join('|'), [display, showActiveSecondaryGlobalClock, value]);
+  const { containerRef, textRef, fontSize: autoFontSize } = useAutoFitText({
+    enabled: autoFitEnabled,
+    fitKey: autoFitKey,
+  });
   const mainFontSize = autoFitEnabled ? (autoFontSize || 220) : (Number(display.timerFontSize) || 180);
   const otherItemsScale = Math.min(2, Math.max(0.08, Number(display.otherItemsScale ?? display.globalClockScale) || 0.1));
   const otherItemsFontSize = Math.max(16, mainFontSize * otherItemsScale);
@@ -156,6 +276,8 @@ const TimeDisplay = () => {
       style={{
         background: paintToCss(display.backgroundPaint, display.backgroundColor || '#000000'),
         fontFamily: otherItemsFontFamily,
+        contain: 'layout paint style',
+        isolation: 'isolate',
       }}
     >
       <ProjectionExitHint visible={isProjectionMode && showProjectionExitHint} />
@@ -185,7 +307,8 @@ const TimeDisplay = () => {
           className="w-full flex flex-col justify-center overflow-hidden"
           style={{
             alignItems,
-            height: hasActiveTimer && showGlobalClock && showSecondaryText ? '70vh' : '86vh',
+            height: showActiveSecondaryGlobalClock ? '70vh' : '86vh',
+            contain: 'layout paint',
           }}
         >
           <div
@@ -207,11 +330,12 @@ const TimeDisplay = () => {
               textOverflow: 'ellipsis',
               opacity: isWaitingForTime ? 0.45 : 1,
               animation: intensity === 'critical' && timerState.running ? 'timerPulse 1s infinite' : 'none',
+              contain: 'layout paint',
             }}
           >
             {value}
           </div>
-          {showSecondaryText && isIdleFullScreenClock && clockParts.period && (
+          {showSecondaryText && isFullScreenClock && clockParts.period && (
             <div
               className="font-bold leading-none text-center"
               style={{
@@ -230,7 +354,7 @@ const TimeDisplay = () => {
           )}
         </div>
 
-        {display.showProgress !== false && hasActiveTimer && (
+        {display.showProgress !== false && hasActiveTimer && !showManualItemGlobalTime && (
           <div
             className="mx-auto mt-4 rounded-full overflow-hidden"
             style={{
@@ -261,9 +385,9 @@ const TimeDisplay = () => {
             </div>
           </div>
         )}
-        {showSecondaryText && showGlobalClock && hasActiveTimer && (
+        {showActiveSecondaryGlobalClock && (
           <div
-            className="mx-auto mt-2 w-full text-center font-mono font-semibold leading-none"
+            className="mx-auto mt-2 flex w-full items-center justify-center gap-[0.65em] text-center font-semibold leading-none"
             style={{
               color: 'rgba(255,255,255,0.72)',
               fontSize: `${otherItemsFontSize}px`,
@@ -275,7 +399,13 @@ const TimeDisplay = () => {
               whiteSpace: 'nowrap',
             }}
           >
-            <ClockValue value={clockValue} />
+            {isBehindSchedule && (
+              <>
+                <span style={{ color: display.warningColor || '#F59E0B' }}>Behind schedule</span>
+                <span aria-hidden="true" style={{ color: 'rgba(255,255,255,0.28)' }}>&middot;</span>
+              </>
+            )}
+            <span className="font-mono"><ClockValue value={clockValue} /></span>
           </div>
         )}
       </div>

@@ -14,11 +14,19 @@ import { handleDisplayChange } from './main/displayDetection.js';
 import { performStartupSequence } from './main/startup.js';
 import { performCleanup } from './main/cleanup.js';
 import { createLoadingWindow } from './main/loadingWindow.js';
-import { registerObsDockPairingToken, setBackendMessageHandler } from './main/backend.js';
+import {
+  backendAppSessionId,
+  registerObsDockPairingToken,
+  setBackendMessageHandler,
+  setBackendStatusHandler,
+  syncBackendParsingConfig,
+} from './main/backend.js';
+import { setAdminKeyFromBackend } from './main/adminKey.js';
 import { relaunchInDesktopMode, relaunchInObsDockHeadlessMode } from './main/obsDockStartup.js';
 import * as userPreferences from './main/userPreferences.js';
-import { initFileLogging } from './main/logging.js';
+import { flushFileLogs, initFileLogging } from './main/logging.js';
 import { createAppTray, destroyAppTray } from './main/tray.js';
+import { recordSuccessfulAppLaunch } from './main/telemetry.js';
 
 const APP_PROTOCOL = 'lyricdisplay';
 const DEV_APP_PROTOCOL = 'lyricdisplay-dev';
@@ -369,7 +377,7 @@ if (!hasLock) {
   process.exit(0);
 }
 
-initFileLogging();
+initFileLogging({ sessionId: backendAppSessionId });
 registerLyricVideoMediaScheme();
 
 if (process.platform === 'win32' && process.argv.length >= 2) {
@@ -400,11 +408,16 @@ registerIpcHandlers({
   updateDarkModeMenu: menuAPI.updateDarkModeMenu,
   updateUndoRedoState: menuAPI.updateUndoRedoState,
   checkForUpdates,
-  requestRendererModal
+  requestRendererModal,
+  syncBackendParsingConfig,
 });
 registerInAppBrowserIpc();
 
 setBackendMessageHandler((message) => {
+  if (message?.type === 'security-admin-key') {
+    return { success: setAdminKeyFromBackend(message.adminKey) };
+  }
+
   if (message?.type === 'switch-to-desktop-mode') {
     if (isHeadlessMode) {
       console.log('[Main] Desktop mode relaunch requested from Dock Mode');
@@ -435,6 +448,33 @@ setBackendMessageHandler((message) => {
   }
 });
 
+setBackendStatusHandler((status) => {
+  if (status?.state !== 'failed' || isHeadlessMode) return;
+
+  requestRendererModal({
+    title: 'Backend service stopped',
+    description: 'LyricDisplay could not recover its local backend after repeated attempts. Browser Sources and control synchronization may now be stale.',
+    body: `Reason: ${status.reason || 'unknown'} · Attempts: ${status.attempts || 0}/${status.maxAttempts || 0}`,
+    variant: 'error',
+    dedupeKey: 'backend-restart-exhausted',
+    dismissible: true,
+    actions: [
+      { label: 'Dismiss', value: 'dismiss', variant: 'outline' },
+      { label: 'Restart LyricDisplay', value: 'restart', variant: 'destructive', autoFocus: true },
+    ],
+  }, {
+    timeout: false,
+    fallback: () => ({ dismissed: true }),
+  }).then((result) => {
+    if (result?.data !== 'restart') return;
+    app.relaunch();
+    app.isQuitting = true;
+    app.quit();
+  }).catch((error) => {
+    console.error('[Backend] Failed to show restart exhaustion alert:', error);
+  });
+});
+
 app.whenReady().then(async () => {
   try { Menu.setApplicationMenu(null); } catch { }
   if (!isHeadlessMode) {
@@ -452,6 +492,12 @@ app.whenReady().then(async () => {
 
   if (mainWindow) {
     attachMainWindowLifecycle(mainWindow);
+  }
+
+  if ((mainWindow || isHeadlessMode) && !app.isQuitting) {
+    void recordSuccessfulAppLaunch({
+      enabled: userPreferences.getPreference('advanced.shareAnonymousUsageData') ?? false,
+    });
   }
 
   if (isHeadlessMode || userPreferences.getPreference('general.minimizeToTray')) {
@@ -499,9 +545,17 @@ app.on('window-all-closed', () => {
   }
 });
 
+let quitLogsFlushed = false;
 app.on('before-quit', (event) => {
   app.isQuitting = true;
-  performCleanup();
+  if (!quitLogsFlushed) {
+    event.preventDefault();
+    performCleanup();
+    void flushFileLogs().finally(() => {
+      quitLogsFlushed = true;
+      app.quit();
+    });
+  }
 });
 
 app.on('will-quit', () => {

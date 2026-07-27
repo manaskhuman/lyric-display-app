@@ -1,6 +1,8 @@
 import { parseLyrics } from './parseLyrics.js';
 import { parseLrc } from './parseLrc.js';
 import { parseTxtContent, parseLrcContent } from '../../shared/lyricsParsing.js';
+import { normalizeLyricFileType } from '../../shared/lyricImportRegistry.js';
+import { parseLyricImportContent } from '../../shared/documentTextExtraction.js';
 
 let workerInstance = null;
 let workerInitAttempted = false;
@@ -98,17 +100,28 @@ const readRawTextFromFile = async (file) => {
   return null;
 };
 
+const readRawBytesFromFile = async (file) => {
+  if (!file || typeof file.arrayBuffer !== 'function') return null;
+  return file.arrayBuffer();
+};
+
 const parseViaElectronIPC = async (file, options) => {
   if (!isElectron() || !window.electronAPI?.parseLyricsFile) return null;
   const fileType = options.fileType || 'txt';
+  const prefersBytes = fileType === 'docx' || fileType === 'rtf';
   const filePath = file?.path || options.path || options.filePath || null;
   let rawText = typeof options.rawText === 'string' ? options.rawText : null;
+  let rawBytes = options.rawBytes || null;
 
-  if (!filePath && rawText === null) {
+  if (!filePath && rawText === null && !prefersBytes) {
     rawText = await readRawTextFromFile(file);
   }
 
-  if (!filePath && rawText === null) {
+  if (!filePath && rawText === null && !rawBytes && prefersBytes) {
+    rawBytes = await readRawBytesFromFile(file);
+  }
+
+  if (!filePath && rawText === null && !rawBytes) {
     return null;
   }
 
@@ -117,6 +130,12 @@ const parseViaElectronIPC = async (file, options) => {
     name: options.name || file?.name || '',
     path: filePath,
     rawText,
+    rawBytes,
+    enableSplitting: options.enableSplitting,
+    splitConfig: options.splitConfig,
+    groupingConfig: options.groupingConfig,
+    groupingPlan: options.groupingPlan,
+    ignoreSavedGroupingPlan: options.ignoreSavedGroupingPlan,
   };
 
   try {
@@ -135,6 +154,8 @@ const parseViaElectronIPC = async (file, options) => {
 };
 
 const parseViaWorker = (file, options) => {
+  if (!['txt', 'lrc'].includes(options.fileType)) return null;
+
   const workerPromise = sendToWorker({
     action: 'parse-file',
     payload: {
@@ -144,6 +165,7 @@ const parseViaWorker = (file, options) => {
       enableSplitting: options.enableSplitting,
       splitConfig: options.splitConfig,
       groupingConfig: options.groupingConfig,
+      groupingPlan: options.groupingPlan,
     },
   });
 
@@ -155,7 +177,29 @@ const parseSynchronously = async (file, options) => {
     enableSplitting: options.enableSplitting,
     splitConfig: options.splitConfig,
     groupingConfig: options.groupingConfig,
+    groupingPlan: options.groupingPlan,
   };
+
+  if (!['txt', 'lrc'].includes(options.fileType)) {
+    let rawBytes = options.rawBytes || null;
+    let rawText = typeof options.rawText === 'string' ? options.rawText : null;
+    const prefersBytes = options.fileType === 'docx' || options.fileType === 'rtf';
+
+    if (rawText === null && !prefersBytes) {
+      rawText = await readRawTextFromFile(file);
+    }
+    if (!rawBytes && prefersBytes) {
+      rawBytes = await readRawBytesFromFile(file);
+    }
+
+    return parseLyricImportContent({
+      fileType: options.fileType,
+      fileName: options.name || file?.name || '',
+      rawText,
+      rawBytes,
+      parsingOptions: parserOptions,
+    });
+  }
 
   if (typeof options.rawText === 'string') {
     return options.fileType === 'lrc'
@@ -170,16 +214,17 @@ const parseSynchronously = async (file, options) => {
 };
 
 const detectFileType = (file, explicitType) => {
-  if (explicitType) return explicitType;
-  const name = (file?.name || '').toLowerCase();
-  if (name.endsWith('.lrc')) return 'lrc';
-  return 'txt';
+  return normalizeLyricFileType({
+    fileType: explicitType,
+    fileName: file?.name,
+    fallback: 'txt',
+  });
 };
 
 /**
  * Parse a lyrics file asynchronously using the best available strategy.
  * @param {File|undefined|null} file
- * @param {{ fileType?: 'txt' | 'lrc', rawText?: string, path?: string, name?: string, enableSplitting?: boolean, splitConfig?: object }} options
+ * @param {{ fileType?: 'txt' | 'lrc' | 'md' | 'rtf' | 'docx', rawText?: string, rawBytes?: ArrayBuffer, path?: string, name?: string, enableSplitting?: boolean, splitConfig?: object }} options
  */
 export async function parseLyricsFileAsync(file, options = {}) {
   const fileType = detectFileType(file, options.fileType);
@@ -187,7 +232,6 @@ export async function parseLyricsFileAsync(file, options = {}) {
     ...options,
     fileType,
     name: options.name || file?.name || '',
-    enableSplitting: options.enableSplitting ?? false,
     splitConfig: options.splitConfig || {},
   };
 

@@ -21,14 +21,18 @@ export const useOptionalControlSocket = () => useContext(ControlSocketContext);
 
 const LONG_BACKOFF_WARNING_MS = 4000;
 const OBS_DOCK_RECOVERY_POLL_MS = 2500;
+const CURRENT_STATE_READY_TIMEOUT_MS = 15000;
+const getStartupClock = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
 export const ControlSocketProvider = ({ children, role = 'control' }) => {
     const socketRef = useRef(null);
     const reconnectTimeoutRef = useRef(null);
     const heartbeatIntervalRef = useRef(null);
+    const currentStateTimeoutRef = useRef(null);
     const clientId = useRef(`control_${Date.now()}`);
     const readyRef = useRef(false);
     const appliedSavedLiveSafetyRef = useRef(false);
+    const startupTimingsRef = useRef({});
 
     const [connectionStatus, setConnectionStatus] = useState('disconnected');
     const [ready, setReady] = useState(false);
@@ -92,8 +96,16 @@ export const ControlSocketProvider = ({ children, role = 'control' }) => {
         }
     }, [clearAuthToken, setAuthStatus]);
 
+    const clearCurrentStateTimeout = useCallback(() => {
+        if (currentStateTimeoutRef.current) {
+            clearTimeout(currentStateTimeoutRef.current);
+            currentStateTimeoutRef.current = null;
+        }
+    }, []);
+
     const cleanupSocket = useCallback(() => {
         return new Promise((resolve) => {
+            clearCurrentStateTimeout();
             if (!socketRef.current) {
                 resolve();
                 return;
@@ -126,13 +138,14 @@ export const ControlSocketProvider = ({ children, role = 'control' }) => {
                 resolve();
             }
         });
-    }, []);
+    }, [clearCurrentStateTimeout]);
 
     const disposeCurrentSocket = useCallback((socket, reason) => {
         if (!socket || socketRef.current !== socket) {
             return false;
         }
 
+        clearCurrentStateTimeout();
         socketRef.current = null;
         readyRef.current = false;
         setReady(false);
@@ -146,20 +159,12 @@ export const ControlSocketProvider = ({ children, role = 'control' }) => {
         }
 
         return true;
-    }, [stopHeartbeat]);
+    }, [clearCurrentStateTimeout, stopHeartbeat]);
 
     const connectSocketInternal = useCallback(async () => {
         const canConnect = connectionManager.canAttemptConnection(clientId.current);
 
         if (!canConnect.allowed) {
-            if (canConnect.reason === 'max_attempts_reached') {
-                logError('Max connection attempts reached');
-                setConnectionStatus('error');
-                setAuthStatus('failed');
-                clearBackoffWarning();
-                return;
-            }
-
             if (canConnect.reason === 'already_connecting') {
                 return;
             }
@@ -193,11 +198,15 @@ export const ControlSocketProvider = ({ children, role = 'control' }) => {
 
         try {
             connectionManager.startConnectionAttempt(clientId.current);
+            const attemptStartedAt = getStartupClock();
+            startupTimingsRef.current = { attemptStartedAt };
             setAuthStatus('authenticating');
             setConnectionStatus('connecting');
 
             const clientType = getClientType();
             const token = await ensureValidToken(clientType);
+            const tokenResolvedAt = getStartupClock();
+            startupTimingsRef.current.tokenMs = tokenResolvedAt - attemptStartedAt;
 
             if (!token) {
                 throw new Error('Authentication token was not provided');
@@ -205,6 +214,8 @@ export const ControlSocketProvider = ({ children, role = 'control' }) => {
 
             const socketUrl = resolveBackendOrigin();
             await cleanupSocket();
+            const socketStartedAt = getStartupClock();
+            startupTimingsRef.current.socketStartedAt = socketStartedAt;
 
             socketRef.current = io(socketUrl, {
                 transports: ['websocket', 'polling'],
@@ -219,6 +230,9 @@ export const ControlSocketProvider = ({ children, role = 'control' }) => {
                 const isDesktopApp = clientType === 'desktop';
 
                 const handleConnect = () => {
+                    const socketConnectedAt = getStartupClock();
+                    startupTimingsRef.current.socketConnectedAt = socketConnectedAt;
+                    startupTimingsRef.current.socketMs = socketConnectedAt - socketStartedAt;
                     logDebug(`Control socket connected: ${clientId.current}`);
                     connectionManager.recordConnectionSuccess(clientId.current);
                     setConnectionStatus('connected');
@@ -232,7 +246,29 @@ export const ControlSocketProvider = ({ children, role = 'control' }) => {
                     }
                     startHeartbeat();
 
+                    clearCurrentStateTimeout();
+                    currentStateTimeoutRef.current = setTimeout(() => {
+                        if (socketRef.current !== socket || readyRef.current) return;
+                        const error = new Error(`currentState not received within ${CURRENT_STATE_READY_TIMEOUT_MS}ms`);
+                        logWarn(`Control socket ready timeout for ${clientId.current}; reconnecting`, {
+                            role,
+                            socketId: socket.id,
+                            connected: socket.connected,
+                        });
+                        connectionManager.recordConnectionFailure(clientId.current, error);
+                        setConnectionStatus('error');
+                        readyRef.current = false;
+                        setReady(false);
+                        disposeCurrentSocket(socket, 'currentState-timeout');
+                        scheduleRetry();
+                    }, CURRENT_STATE_READY_TIMEOUT_MS);
+
                     socket.once('currentState', () => {
+                        const readyAt = getStartupClock();
+                        startupTimingsRef.current.readyAt = readyAt;
+                        startupTimingsRef.current.stateSyncMs = readyAt - socketConnectedAt;
+                        startupTimingsRef.current.totalConnectionMs = readyAt - attemptStartedAt;
+                        clearCurrentStateTimeout();
                         readyRef.current = true;
                         setReady(true);
                         window.dispatchEvent(new CustomEvent('sync-completed'));
@@ -241,6 +277,7 @@ export const ControlSocketProvider = ({ children, role = 'control' }) => {
                 };
 
                 const handleConnectError = (error) => {
+                    clearCurrentStateTimeout();
                     logError(`Control socket connection error:`, error);
                     connectionManager.recordConnectionFailure(clientId.current, error);
                     if (error?.message?.includes('Authentication') || error?.message?.includes('token')) {
@@ -254,6 +291,7 @@ export const ControlSocketProvider = ({ children, role = 'control' }) => {
                 };
 
                 const handleDisconnect = (reason) => {
+                    clearCurrentStateTimeout();
                     logDebug(`Control socket disconnected: ${reason}`);
                     setConnectionStatus('disconnected');
                     readyRef.current = false;
@@ -271,6 +309,7 @@ export const ControlSocketProvider = ({ children, role = 'control' }) => {
                 socket.on('disconnect', handleDisconnect);
 
                 socket.on('currentState', (state) => {
+                    clearCurrentStateTimeout();
                     const syncTime = Date.now();
                     setLastSyncTime(syncTime);
                     if (state?.liveSafety && typeof state.liveSafety.enabled === 'boolean') {
@@ -284,6 +323,8 @@ export const ControlSocketProvider = ({ children, role = 'control' }) => {
                 });
 
                 socket.on('periodicStateSync', (state) => {
+                    const syncTime = Date.now();
+                    setLastSyncTime(syncTime);
                     if (state?.liveSafety && typeof state.liveSafety.enabled === 'boolean') {
                         setLiveSafety(state.liveSafety);
                     }
@@ -347,6 +388,7 @@ export const ControlSocketProvider = ({ children, role = 'control' }) => {
         setConnectionStatus,
         emitBackoffWarning,
         clearBackoffWarning,
+        clearCurrentStateTimeout,
         role
     ]);
 
@@ -364,14 +406,16 @@ export const ControlSocketProvider = ({ children, role = 'control' }) => {
         }, retryDelay);
     }, [connectSocketInternal]);
 
-    const pendingEmissionsRef = useRef(new Map());
-
     const createEmitFunction = useCallback((eventName) => {
         return (...args) => {
             if (!socketRef.current?.connected || !readyRef.current || authStatus !== 'authenticated') {
-
-                pendingEmissionsRef.current.set(eventName, { args });
-                return true;
+                window.dispatchEvent(new CustomEvent('command-rejected', {
+                    detail: {
+                        eventName,
+                        message: 'The action was not sent because live control is disconnected. Reconnect and try again.',
+                    },
+                }));
+                return false;
             }
 
             socketRef.current.emit(eventName, ...args);
@@ -380,15 +424,53 @@ export const ControlSocketProvider = ({ children, role = 'control' }) => {
         };
     }, [authStatus]);
 
-    useEffect(() => {
-        if (readyRef.current && socketRef.current?.connected && authStatus === 'authenticated') {
-            pendingEmissionsRef.current.forEach((emission, eventName) => {
-                socketRef.current.emit(eventName, ...emission.args);
-                logDebug(`Emitted queued ${eventName}:`, ...emission.args);
-            });
-            pendingEmissionsRef.current.clear();
+    const replaceSetlist = useCallback((files) => new Promise((resolve) => {
+        const socket = socketRef.current;
+        if (!socket?.connected || !readyRef.current || authStatus !== 'authenticated') {
+            resolve({ success: false, error: 'Setlist service is not connected' });
+            return;
         }
-    }, [readyRef.current, authStatus]);
+
+        let settled = false;
+        const finish = (result) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeoutId);
+            resolve(result?.success
+                ? result
+                : { success: false, error: result?.error || 'Setlist replacement failed' });
+        };
+        const timeoutId = setTimeout(() => {
+            finish({ success: false, error: 'Setlist replacement timed out' });
+        }, 10000);
+
+        socket.emit('setlistReplace', { files }, finish);
+        logDebug(`Emitted setlistReplace for ${Array.isArray(files) ? files.length : 0} files`);
+    }), [authStatus]);
+
+    const updateSetlistItem = useCallback((fileId, file) => new Promise((resolve) => {
+        const socket = socketRef.current;
+        if (!socket?.connected || !readyRef.current || authStatus !== 'authenticated') {
+            resolve({ success: false, error: 'Setlist service is not connected' });
+            return;
+        }
+
+        let settled = false;
+        const finish = (result) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeoutId);
+            resolve(result?.success
+                ? result
+                : { success: false, error: result?.error || 'Setlist item update failed' });
+        };
+        const timeoutId = setTimeout(() => {
+            finish({ success: false, error: 'Setlist item update timed out' });
+        }, 10000);
+
+        socket.emit('setlistItemUpdate', { fileId, file }, finish);
+        logDebug(`Emitted setlistItemUpdate for ${fileId}`);
+    }), [authStatus]);
 
     const emitLineUpdate = useCallback((value) => {
         const payload = (value && typeof value === 'object' && !Array.isArray(value))
@@ -537,6 +619,27 @@ export const ControlSocketProvider = ({ children, role = 'control' }) => {
 
     useEffect(() => {
         if (typeof window === 'undefined') return undefined;
+
+        const recoverConnection = () => {
+            if (connectionStatus === 'connected' || connectionStatus === 'connecting') return;
+            forceReconnect();
+        };
+        const recoverWhenVisible = () => {
+            if (document.visibilityState === 'visible') recoverConnection();
+        };
+
+        window.addEventListener('online', recoverConnection);
+        window.addEventListener('pageshow', recoverConnection);
+        document.addEventListener('visibilitychange', recoverWhenVisible);
+        return () => {
+            window.removeEventListener('online', recoverConnection);
+            window.removeEventListener('pageshow', recoverConnection);
+            document.removeEventListener('visibilitychange', recoverWhenVisible);
+        };
+    }, [connectionStatus, forceReconnect]);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return undefined;
         if (getClientType() !== 'obsDock') return undefined;
         if (connectionStatus === 'connected' || connectionStatus === 'connecting' || authStatus === 'authenticating') {
             return undefined;
@@ -596,6 +699,16 @@ export const ControlSocketProvider = ({ children, role = 'control' }) => {
         };
     }, [connectionStatus, authStatus, lastSyncTime]);
 
+    const getStartupTimings = useCallback(() => {
+        const timings = startupTimingsRef.current;
+        return {
+            tokenMs: timings.tokenMs ?? null,
+            socketMs: timings.socketMs ?? null,
+            stateSyncMs: timings.stateSyncMs ?? null,
+            totalConnectionMs: timings.totalConnectionMs ?? null,
+        };
+    }, []);
+
     useEffect(() => {
         const handleSyncCompleted = () => {
             const syncTime = Date.now();
@@ -616,6 +729,7 @@ export const ControlSocketProvider = ({ children, role = 'control' }) => {
 
         return () => {
             clearBackoffWarning();
+            clearCurrentStateTimeout();
             if (reconnectTimeoutRef.current) {
                 clearTimeout(reconnectTimeoutRef.current);
             }
@@ -623,7 +737,7 @@ export const ControlSocketProvider = ({ children, role = 'control' }) => {
             connectionManager.cleanup(clientId.current);
             cleanupSocket();
         };
-    }, [connectSocketInternal, stopHeartbeat, cleanupSocket, clearBackoffWarning]);
+    }, [connectSocketInternal, stopHeartbeat, cleanupSocket, clearBackoffWarning, clearCurrentStateTimeout]);
 
     useEffect(() => {
         const handleDiagnosticsRequest = () => {
@@ -648,6 +762,8 @@ export const ControlSocketProvider = ({ children, role = 'control' }) => {
         emitRequestSetlist,
         emitSetlistClear,
         emitSetlistReorder,
+        replaceSetlist,
+        updateSetlistItem,
         emitLyricsDraftSubmit,
         emitLyricsDraftApprove,
         emitLyricsDraftReject,
@@ -671,6 +787,7 @@ export const ControlSocketProvider = ({ children, role = 'control' }) => {
         liveSafety,
         actionLog,
         getConnectionDiagnostics,
+        getStartupTimings,
     };
 
     return (

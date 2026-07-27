@@ -15,8 +15,12 @@ const ExternalControlPreferencesSection = ({
   handleMidiToggle,
   handleOscFeedbackPortChange,
   handleOscFeedbackToggle,
+  handleOscAllowedSourcesChange,
   handleOscPortChange,
+  handleOscRateLimitChange,
+  handleOscRemoteAccessToggle,
   handleOscToggle,
+  getNumberPreferenceInputProps,
   inputClass,
   labelClass,
   lastLearnedMidi,
@@ -30,6 +34,9 @@ const ExternalControlPreferencesSection = ({
   preferenceFieldLabelClass,
   setMidiMappingsExpanded,
 }) => {
+  const selectContentClass = darkMode
+    ? 'bg-gray-700 border-gray-600 text-gray-200'
+    : 'bg-white border-gray-300';
   const noteEntries = Object.entries(midiStatus?.mappings?.notes || {})
     .sort(([a], [b]) => Number(a) - Number(b))
     .map(([note, mapping]) => ({
@@ -102,7 +109,7 @@ const ExternalControlPreferencesSection = ({
                 <SelectTrigger className={inputClass}>
                   <SelectValue placeholder="Select MIDI device..." />
                 </SelectTrigger>
-                <SelectContent className={darkMode ? 'bg-gray-700 border-gray-600' : ''}>
+                <SelectContent className={selectContentClass}>
                   <SelectItem value="-1">None</SelectItem>
                   {midiStatus?.availablePorts?.map((port) => (
                     <SelectItem key={port.index} value={String(port.index)}>
@@ -286,13 +293,67 @@ const ExternalControlPreferencesSection = ({
               <label className={preferenceFieldLabelClass}>Listening Port</label>
               <Input
                 type="number"
-                value={oscStatus?.port || 8000}
-                onChange={(e) => handleOscPortChange(e.target.value)}
                 min="1"
                 max="65535"
+                {...getNumberPreferenceInputProps('externalControl', 'oscPort', {
+                  min: 1,
+                  max: 65535,
+                  fallbackValue: 8000,
+                  currentValue: oscStatus?.port,
+                  parse: 'int',
+                }, handleOscPortChange)}
                 className={inputClass}
               />
               <p className={`text-xs ${mutedClass}`}>Requires restart to take effect</p>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div>
+                <label className={`text-sm font-medium ${labelClass}`}>Allow OSC from LAN</label>
+                <p className={`text-xs ${mutedClass}`}>Off binds OSC to this computer only. Interface changes require restart.</p>
+              </div>
+              <Switch
+                checked={oscStatus?.remoteAccessEnabled || false}
+                onCheckedChange={handleOscRemoteAccessToggle}
+                className={`!h-7 !w-14 !border-0 shadow-sm transition-colors ${darkMode
+                  ? 'data-[state=checked]:bg-amber-400 data-[state=unchecked]:bg-gray-600'
+                  : 'data-[state=checked]:bg-amber-600 data-[state=unchecked]:bg-gray-300'
+                  }`}
+                thumbClassName="!h-5 !w-6 data-[state=checked]:!translate-x-7 data-[state=unchecked]:!translate-x-1"
+              />
+            </div>
+
+            {oscStatus?.remoteAccessEnabled && (
+              <div className="space-y-2">
+                <label className={preferenceFieldLabelClass}>Allowed Source IPs</label>
+                <Input
+                  key={(oscStatus?.allowedSources || []).join(',')}
+                  type="text"
+                  defaultValue={(oscStatus?.allowedSources || []).join(', ')}
+                  placeholder="Empty allows any LAN source"
+                  onBlur={(event) => handleOscAllowedSourcesChange(event.target.value)}
+                  className={inputClass}
+                />
+                <p className={`text-xs ${mutedClass}`}>Comma-separated IPv4 addresses. Leave empty only on a trusted production network.</p>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <label className={preferenceFieldLabelClass}>Messages per Second</label>
+              <Input
+                type="number"
+                min="5"
+                max="200"
+                {...getNumberPreferenceInputProps('externalControl', 'oscRateLimit', {
+                  min: 5,
+                  max: 200,
+                  fallbackValue: 30,
+                  currentValue: oscStatus?.rateLimit,
+                  parse: 'int',
+                }, handleOscRateLimitChange)}
+                className={inputClass}
+              />
+              <p className={`text-xs ${mutedClass}`}>Per-source limit; excess packets are dropped before reaching live controls.</p>
             </div>
 
             <div className="flex items-center justify-between">
@@ -316,10 +377,15 @@ const ExternalControlPreferencesSection = ({
                 <label className={preferenceFieldLabelClass}>Feedback Port</label>
                 <Input
                   type="number"
-                  value={oscStatus?.feedbackPort || 9000}
-                  onChange={(e) => handleOscFeedbackPortChange(e.target.value)}
                   min="1"
                   max="65535"
+                  {...getNumberPreferenceInputProps('externalControl', 'oscFeedbackPort', {
+                    min: 1,
+                    max: 65535,
+                    fallbackValue: 9000,
+                    currentValue: oscStatus?.feedbackPort,
+                    parse: 'int',
+                  }, handleOscFeedbackPortChange)}
                   className={inputClass}
                 />
               </div>

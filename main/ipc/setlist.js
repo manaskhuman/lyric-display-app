@@ -1,33 +1,16 @@
 import { ipcMain, dialog } from 'electron';
 import { exportSetlistToPDF, exportSetlistToTXT } from '../setlistExport.js';
+import { extractLyricTextFromSource } from '../../shared/documentTextExtraction.js';
 import {
-  MAX_SETLIST_FILE_BYTES,
+  getLyricOpenDialogFilters,
+  normalizeLyricFileType,
+} from '../../shared/lyricImportRegistry.js';
+import {
   hasSetlistExtension,
   normalizeSetlistPath,
   sanitizeSetlistDefaultName,
-  validateSetlistData,
 } from '../setlistValidation.js';
-
-async function readValidatedSetlistFile(fs, filePath) {
-  const normalizedPath = normalizeSetlistPath(filePath);
-  if (!normalizedPath || !hasSetlistExtension(normalizedPath)) {
-    return { success: false, error: 'Only .ldset files can be loaded as setlists' };
-  }
-
-  const stats = await fs.stat(normalizedPath);
-  if (stats.size > MAX_SETLIST_FILE_BYTES) {
-    return { success: false, error: 'Setlist file is too large' };
-  }
-
-  const content = await fs.readFile(normalizedPath, 'utf8');
-  const setlistData = JSON.parse(content);
-  const validation = validateSetlistData(setlistData);
-  if (!validation.valid) {
-    return { success: false, error: validation.error };
-  }
-
-  return { success: true, setlistData, filePath: normalizedPath };
-}
+import { readValidatedSetlistFile, saveSetlistFile } from '../setlistFileStorage.js';
 
 /**
  * Register setlist IPC handlers
@@ -72,17 +55,8 @@ export function registerSetlistHandlers({ getMainWindow }) {
         return { success: false, error: 'Setlists must be saved as .ldset files' };
       }
 
-      const validation = validateSetlistData(setlistData);
-      if (!validation.valid) {
-        return { success: false, error: validation.error };
-      }
-
-      const jsonContent = JSON.stringify(setlistData, null, 2);
-      if (Buffer.byteLength(jsonContent, 'utf8') > MAX_SETLIST_FILE_BYTES) {
-        return { success: false, error: 'Setlist file is too large' };
-      }
-
-      await fs.writeFile(normalizedPath, jsonContent, 'utf8');
+      const saved = await saveSetlistFile(fs, normalizedPath, setlistData);
+      if (!saved.success) return saved;
 
       console.log('[Setlist] Saved setlist to:', normalizedPath);
       return { success: true, filePath: normalizedPath };
@@ -161,9 +135,7 @@ export function registerSetlistHandlers({ getMainWindow }) {
       const win = getMainWindow?.();
       const result = await dialog.showOpenDialog(win || undefined, {
         title: 'Add Files to Setlist',
-        filters: [
-          { name: 'Lyric Files', extensions: ['txt', 'lrc'] }
-        ],
+        filters: getLyricOpenDialogFilters(),
         properties: ['openFile', 'multiSelections']
       });
 
@@ -174,12 +146,19 @@ export function registerSetlistHandlers({ getMainWindow }) {
       const fs = await import('fs/promises');
       const files = await Promise.all(
         result.filePaths.map(async (filePath) => {
-          const content = await fs.readFile(filePath, 'utf8');
           const fileName = filePath.split(/[\\/]/).pop();
+          const fileType = normalizeLyricFileType({ fileName });
+          const extractedContent = await extractLyricTextFromSource({
+            fileType,
+            fileName,
+            path: filePath,
+            readFile: fs.readFile,
+          });
           const stats = await fs.stat(filePath);
           return {
             name: fileName,
-            content,
+            content: extractedContent,
+            fileType,
             lastModified: stats.mtimeMs,
             filePath
           };

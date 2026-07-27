@@ -8,6 +8,10 @@ import { app } from 'electron';
 import path from 'path';
 import './appIdentity.js';
 import { DEFAULT_SETLIST_ITEMS, normalizeSetlistItemLimit } from '../shared/setlistLimits.js';
+import {
+  CURRENT_PREFERENCES_SCHEMA_VERSION,
+  migratePreferences,
+} from './preferenceMigrations.js';
 
 const preferencesStore = new Store({
   name: 'user-preferences',
@@ -17,6 +21,7 @@ const preferencesStore = new Store({
       autoCheckForUpdates: true,
       confirmOnClose: true,
       liveSafetyMode: false,
+      previewLines: false,
       toastSoundsMuted: false,
       skipSectionTitlesOnKeyboard: true,
       startMinimized: false,
@@ -99,9 +104,19 @@ const preferencesStore = new Store({
       heartbeatInterval: 30000,
       maxConnectionAttempts: 10,
       ffmpegPath: '',
+      shareAnonymousUsageData: false,
+      telemetryConsentDecided: false,
     },
   },
 });
+
+const preferenceMigration = migratePreferences(preferencesStore.store);
+if (preferenceMigration.success && preferenceMigration.changed) {
+  preferencesStore.store = preferenceMigration.preferences;
+  console.log(`[UserPreferences] Migrated schema ${preferenceMigration.sourceVersion} to ${CURRENT_PREFERENCES_SCHEMA_VERSION}`);
+} else if (!preferenceMigration.success) {
+  console.warn(`[UserPreferences] ${preferenceMigration.error}; existing preferences were left unchanged`);
+}
 
 /**
  * Get all preferences
@@ -224,6 +239,7 @@ export function resetCategoryToDefaults(category) {
 export function resetAllToDefaults() {
   try {
     preferencesStore.clear();
+    preferencesStore.set('_schemaVersion', CURRENT_PREFERENCES_SCHEMA_VERSION);
     console.log('[UserPreferences] Reset all preferences to defaults');
     return { success: true };
   } catch (error) {

@@ -1,6 +1,7 @@
-import { Check, ChevronRight, Loader2, Power, RefreshCw, Trash2 } from 'lucide-react';
+import { AlertCircle, Check, ChevronRight, Loader2, Power, RefreshCw, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
+import AlwaysInfoButton from '../LyricVideoStudio/AlwaysInfoButton';
 
 const UserPreferencesLayout = ({
   activeCategory,
@@ -8,6 +9,7 @@ const UserPreferencesLayout = ({
   categories,
   children,
   companionRunning,
+  companionStarting,
   darkMode,
   handleNdiCheckForUpdate,
   handleNdiLaunch,
@@ -19,6 +21,7 @@ const UserPreferencesLayout = ({
   ndiCheckingUpdate,
   ndiStatus,
   panelBg,
+  saveError,
   saving,
   setActiveCategory,
 }) => (
@@ -52,13 +55,20 @@ const UserPreferencesLayout = ({
           <h3 className={`text-lg font-semibold ${labelClass}`}>
             {categories.find(c => c.id === activeCategory)?.label}
           </h3>
+          {categories.find(c => c.id === activeCategory)?.info && (
+            <AlwaysInfoButton
+              side="left"
+              ariaLabel={`About ${categories.find(c => c.id === activeCategory)?.label}`}
+              content={categories.find(c => c.id === activeCategory)?.info}
+            />
+          )}
           {activeCategory === 'ndi' && ndiStatus.installed && (
             <div className="flex items-center gap-2 shrink-0">
               {!companionRunning ? (
                 <Tooltip content="Launch the NDI companion process" side="bottom">
-                  <Button size="sm" onClick={handleNdiLaunch} className={`${darkMode ? 'bg-green-600 hover:bg-green-700' : 'bg-green-500 hover:bg-green-600'} text-white`}>
-                    <Power className="w-3.5 h-3.5 mr-1.5" />
-                    Launch
+                  <Button size="sm" onClick={handleNdiLaunch} disabled={companionStarting} className={`${darkMode ? 'bg-green-600 hover:bg-green-700' : 'bg-green-500 hover:bg-green-600'} text-white`}>
+                    {companionStarting ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Power className="w-3.5 h-3.5 mr-1.5" />}
+                    {companionStarting ? 'Starting' : 'Launch'}
                   </Button>
                 </Tooltip>
               ) : (
@@ -97,12 +107,17 @@ const UserPreferencesLayout = ({
       </div>
     </div>
 
-    <div className={`flex items-center justify-center px-6 py-3 border-t shrink-0 rounded-b-2xl ${darkMode ? 'border-gray-700 bg-gray-800/50' : 'border-gray-200 bg-gray-50'}`}>
+    <div className={`flex items-center justify-center border-t px-6 py-3 shrink-0 rounded-b-2xl ${darkMode ? 'border-white/5 bg-slate-950/45' : 'border-slate-900/5 bg-[#f8fafc]'}`}>
       <div className={`text-xs ${mutedClass} flex items-center gap-2`}>
         {saving ? (
           <>
             <Loader2 className="w-3 h-3 animate-spin" />
             <span>Saving...</span>
+          </>
+        ) : saveError ? (
+          <>
+            <AlertCircle className={`w-3 h-3 ${darkMode ? 'text-red-400' : 'text-red-600'}`} />
+            <span className={darkMode ? 'text-red-400' : 'text-red-600'}>Settings could not be saved</span>
           </>
         ) : lastSaved ? (
           <>

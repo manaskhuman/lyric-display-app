@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FolderOpen, FilePlusCorner, FileMusic, Plus, PlusCircle } from 'lucide-react';
+import { FolderOpen, FilePlusCorner, FileMusic, Plus, PlusCircle, View } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useLyricsState, useOutputState, useOutput1Settings, useOutput2Settings, useStageSettings, useDarkModeState, useSetlistState, useIsDesktopApp, useAutoplaySettings, useIntelligentAutoplayState, useAllOutputIds, useKeyboardNavigationPreferences } from '../hooks/useStoreSelectors';
 import { useControlSocket } from '../context/ControlSocketProvider';
@@ -22,8 +22,8 @@ import useModal from '../hooks/useModal';
 import { Tooltip } from '@/components/ui/tooltip';
 import { DEFAULT_OUTPUT_IDS, MAX_CUSTOM_OUTPUTS } from '../../shared/outputRegistry.js';
 import { useAutoplayManager } from '../hooks/useAutoplayManager';
-import { useSyncOutputs } from '../hooks/useSyncOutputs';
-import { useLyricsLoader } from '../hooks/LyricDisplayApp/useLyricsLoader';
+import { useRegisterCustomOutputs, useSyncOutputs } from '../hooks/useSyncOutputs';
+import { useLyricsLoader, usePendingLyricsLoad } from '../hooks/LyricDisplayApp/useLyricsLoader';
 import { useKeyboardShortcuts } from '../hooks/LyricDisplayApp/useKeyboardShortcuts';
 import { useElectronListeners } from '../hooks/LyricDisplayApp/useElectronListeners';
 import { useResponsiveWidth } from '../hooks/LyricDisplayApp/useResponsiveWidth';
@@ -35,11 +35,16 @@ import { useCustomOutputActions } from '../hooks/LyricDisplayApp/useCustomOutput
 import { useLineCounterText } from '../hooks/LyricDisplayApp/useLineCounterText';
 import { useLrcTimestampHydration } from '../hooks/LyricDisplayApp/useLrcTimestampHydration';
 import { useOutputControlActions } from '../hooks/LyricDisplayApp/useOutputControlActions';
-import { usePendingLyricsLoad } from '../hooks/LyricDisplayApp/usePendingLyricsLoad';
 import { usePendingSavedVersionPrompt } from '../hooks/LyricDisplayApp/usePendingSavedVersionPrompt';
-import { useRegisterCustomOutputs } from '../hooks/LyricDisplayApp/useRegisterCustomOutputs';
-import { useResetLyricsScroll } from '../hooks/LyricDisplayApp/useResetLyricsScroll';
+import {
+  useArmLyricsScrollRestoreOnUnmount,
+  useLyricsScrollRestoration,
+  useResetLyricsScroll,
+} from '../hooks/LyricDisplayApp/useLyricsScrollRestoration';
 import { useSetlistNavigation } from '../hooks/LyricDisplayApp/useSetlistNavigation';
+import { getLyricsAcceptAttribute } from '../../shared/lyricImportRegistry.js';
+import { createLyricsScrollKey } from '../utils/lyricsScrollMemory.js';
+import { VIRTUALIZATION_THRESHOLD } from '../hooks/LyricsList/useLyricsListRows';
 import ControlPanelHeaderActions from './LyricDisplayApp/ControlPanelHeaderActions';
 import ControlPanelModals from './LyricDisplayApp/ControlPanelModals';
 import LyricsWorkspace from './LyricDisplayApp/LyricsWorkspace';
@@ -66,11 +71,11 @@ const LyricDisplayApp = () => {
   const scrollableSettingsRef = useRef(null);
   useMenuShortcuts(navigate, fileInputRef);
 
-  const { socket, emitOutputToggle, emitIndividualOutputToggle, emitLineUpdate, emitLyricsLoad, emitStyleUpdate, emitSetlistAdd, emitSetlistClear, emitSetlistLoad, emitAutoplayStateUpdate, emitOutputRemove, emitOutputsRegister, connectionStatus, authStatus, forceReconnect, refreshAuthToken, isConnected, isAuthenticated, ready } = useControlSocket();
+  const { socket, emitOutputToggle, emitIndividualOutputToggle, emitLineUpdate, emitLyricsLoad, emitStyleUpdate, emitSetlistAdd, emitSetlistClear, emitSetlistLoad, replaceSetlist, emitAutoplayStateUpdate, emitOutputRemove, emitOutputsRegister, connectionStatus, authStatus, forceReconnect, refreshAuthToken, isConnected, isAuthenticated, ready, liveSafety } = useControlSocket();
 
   const handleFileUpload = useFileUpload();
   const handleMultipleFileUpload = useMultipleFileUpload();
-  const loadSetlist = useSetlistLoader({ setlistFiles, setSetlistFiles, emitSetlistAdd, emitSetlistClear });
+  const loadSetlist = useSetlistLoader({ setlistFiles, replaceSetlist });
 
   const allOutputIds = useAllOutputIds();
   const customOutputIds = React.useMemo(
@@ -88,6 +93,19 @@ const LyricDisplayApp = () => {
   const headerContainerRef = useRef(null);
 
   const { containerRef: lyricsContainerRef, searchQuery, highlightedLineIndex, currentMatchIndex, totalMatches, handleSearch: baseHandleSearch, clearSearch, navigateToNextMatch, navigateToPreviousMatch } = useSearch(lyrics);
+  const lyricsScrollKey = React.useMemo(
+    () => createLyricsScrollKey({ lyricsSource, lyricsFileName }),
+    [lyricsFileName, lyricsSource]
+  );
+  const getLyricsScrollElement = React.useCallback(() => lyricsContainerRef.current, [lyricsContainerRef]);
+
+  useArmLyricsScrollRestoreOnUnmount(lyricsScrollKey);
+  useLyricsScrollRestoration({
+    enabled: lyrics.length > 0 && lyrics.length <= VIRTUALIZATION_THRESHOLD,
+    getElement: getLyricsScrollElement,
+    lyricsKey: lyricsScrollKey,
+    scope: 'control',
+  });
 
   const trackAction = React.useCallback((actionType) => {
     window.dispatchEvent(new CustomEvent('support-dev:track-action', {
@@ -235,8 +253,7 @@ const LyricDisplayApp = () => {
     setPresentationModalOpen,
     setlistFiles,
     setSetlistFiles,
-    emitSetlistAdd,
-    emitSetlistClear
+    replaceSetlist
   });
 
   usePendingLyricsLoad(processLoadedLyrics);
@@ -394,7 +411,8 @@ const LyricDisplayApp = () => {
     handleSyncOutputs,
     showToast,
     songName: lyricsFileName,
-    enabled: isDesktopApp
+    enabled: isDesktopApp,
+    liveSafetyEnabled: Boolean(liveSafety?.enabled),
   });
 
   const iconButtonClass = (disabled = false) => {
@@ -440,14 +458,14 @@ const LyricDisplayApp = () => {
             />
 
             {/* Load and Create Buttons */}
-            <div className={`flex gap-3 ${hasLyrics ? 'mb-3' : 'mb-6'}`}>
-              <Tooltip content={<span>Load a .txt or .lrc lyrics file from your computer - <strong>Ctrl+O</strong></span>} side="right">
+            <div data-tour="load-lyrics" className={`flex gap-3 ${hasLyrics ? 'mb-3' : 'mb-6'}`}>
+              <Tooltip content={<span>Load a lyrics file from your computer - <strong>Ctrl+O</strong></span>} side="right">
                 <button
                   className="flex-1 py-3 px-4 bg-linear-to-r from-blue-400 to-purple-600 text-white rounded-2xl text-sm font-medium hover:from-blue-500 hover:to-purple-700 transition-all duration-200 flex items-center justify-center gap-2"
                   onClick={openFileDialog}
                 >
                   <FolderOpen className="w-4 h-4" />
-                  Load lyrics file (.txt, .lrc)
+                  Load lyrics file
                 </button>
               </Tooltip>
               <Tooltip content={<span>Open the song canvas to create new lyrics from scratch - <strong>Ctrl+N</strong></span>} side="right">
@@ -464,7 +482,7 @@ const LyricDisplayApp = () => {
             </div>
             <input
               type="file"
-              accept=".txt,.lrc"
+              accept={getLyricsAcceptAttribute()}
               ref={fileInputRef}
               style={{ display: 'none' }}
               onChange={handleFileChange}
@@ -479,9 +497,10 @@ const LyricDisplayApp = () => {
             )}
 
             {/* Output Toggle */}
-            <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center justify-between mb-6" data-tour="master-output">
               <div className="flex items-center gap-4 pl-4">
                 <Switch
+                  aria-label="Toggle display output"
                   checked={isOutputOn}
                   onCheckedChange={handleToggle}
                   className={`
@@ -493,46 +512,75 @@ const LyricDisplayApp = () => {
                 />
                 <span className={`ml-5 inline-flex items-center gap-3 text-sm font-semibold ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
                   <span className="inline-block w-[152px] shrink-0">{isOutputOn ? 'Display Output is ON' : 'Display Output is OFF'}</span>
-                  <span
-                    className={`h-2 w-2 rounded-full ${isOutputOn
+                  <span className="relative inline-flex h-5 w-5 shrink-0 items-center justify-center" aria-hidden="true">
+                    <span className={`absolute h-2 w-2 origin-center rounded-full bg-emerald-500 opacity-20 transition-transform duration-500 ease-out motion-reduce:transition-none ${isOutputOn ? 'scale-[2.6]' : 'scale-100'}`} />
+                    <span className={`relative h-2 w-2 rounded-full ${isOutputOn
                       ? 'bg-emerald-500'
                       : darkMode ? 'bg-gray-500' : 'bg-gray-400'
                       }`}
-                    aria-hidden="true"
-                  />
+                    />
+                  </span>
                 </span>
               </div>
 
-              {/* Help trigger button */}
-              <Tooltip content="Control Panel Help" side="bottom">
-                <button
-                  onClick={() => {
-                    showModal({
-                      title: 'Control Panel Help',
-                      headerDescription: 'Master your LyricDisplay workflow with these essential tools',
-                      component: 'ControlPanelHelp',
-                      variant: 'info',
-                      size: 'large',
-                      dismissLabel: 'Got it'
-                    });
-                  }}
-                  className={`p-2 rounded-lg transition-colors ${darkMode
-                    ? 'hover:bg-gray-700 text-gray-400 hover:text-gray-200'
-                    : 'hover:bg-gray-100 text-gray-500 hover:text-gray-700'
-                    }`}
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </button>
-              </Tooltip>
+              <div className="flex items-center gap-1">
+                <Tooltip content="Preview Outputs" side="bottom">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      showModal({
+                        title: 'Preview Outputs',
+                        headerDescription: 'Preview output, stage, time and custom displays with current output visibility.',
+                        component: 'PreviewOutputs',
+                        variant: 'info',
+                        size: 'large',
+                        dismissLabel: 'Close',
+                        className: 'max-w-4xl'
+                      });
+                    }}
+                    className={`rounded-lg p-2 transition-colors ${darkMode
+                      ? 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+                      : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700'
+                      }`}
+                    aria-label="Preview Outputs"
+                  >
+                    <View className="h-4 w-4" />
+                  </button>
+                </Tooltip>
+
+                {/* Help remains the rightmost action. */}
+                <Tooltip content="Control Panel Help" side="bottom">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      showModal({
+                        title: 'Control Panel Help',
+                        headerDescription: 'Master your LyricDisplay workflow with these essential tools',
+                        component: 'ControlPanelHelp',
+                        variant: 'info',
+                        size: 'large',
+                        dismissLabel: 'Got it'
+                      });
+                    }}
+                    className={`rounded-lg p-2 transition-colors ${darkMode
+                      ? 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+                      : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700'
+                      }`}
+                    aria-label="Control Panel Help"
+                  >
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </button>
+                </Tooltip>
+              </div>
             </div>
 
             <div className={`border-t my-8 ${darkMode ? 'border-gray-700' : 'border-gray-100'}`}></div>
 
             {/* Output Tabs */}
             <Tabs value={activeTab} onValueChange={handleOutputTabSwitch}>
-              <TabsList className={`w-full p-1.5 h-11 mb-8 gap-1 ${darkMode ? 'bg-gray-700 text-gray-300' : ''}`}>
+              <TabsList data-tour="output-settings" className={`w-full p-1.5 h-11 mb-8 gap-1 ${darkMode ? 'bg-gray-700 text-gray-300' : ''}`}>
                 {allOutputIds.map((id) => {
                   const num = id.replace('output', '');
                   return (

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createGroupingPlan } from '../shared/lyricsParsing.js';
 import {
   createDefaultOutputSettings,
   createOutputSlice,
@@ -10,6 +11,15 @@ import { registerConnectionHandlers } from '../server/realtime/handlers/connecti
 import { registerLyricsHandlers } from '../server/realtime/handlers/lyricsHandlers.js';
 import { registerOutputHandlers } from '../server/realtime/handlers/outputHandlers.js';
 import { registerSetlistHandlers } from '../server/realtime/handlers/setlistHandlers.js';
+import {
+  getLyricsParsingConfig,
+  setLyricsParsingConfig,
+} from '../server/realtime/lyricsParsingConfig.js';
+import {
+  applySessionSnapshot,
+  createSessionSnapshot,
+  sanitizePersistedStageTimerState,
+} from '../server/realtime/sessionPersistence.js';
 import { buildCurrentState, buildPeriodicState, state } from '../server/realtime/state.js';
 
 function createSocketHarness() {
@@ -124,6 +134,7 @@ test('setlistLoad emits parsed LRC lyrics, timestamps, sections, and editable ra
       fileType: 'lrc',
       filePath: null,
       fileName: 'Service Song.lrc',
+      setlistItemId: 'setlist_lrc',
     });
     assert.equal(state.currentSongMetadata.title, 'Service Song');
     assert.equal(state.currentSongMetadata.source, 'test');
@@ -162,6 +173,105 @@ test('setlistLoad emits parsed LRC lyrics, timestamps, sections, and editable ra
     state.currentSongMetadata = previousSongMetadata;
     state.currentLyricsSections = previousSections;
     state.currentLineToSection = previousLineToSection;
+  }
+});
+
+test('setlistLoad applies the desktop line-length preference instead of the server default', () => {
+  const previousConfig = getLyricsParsingConfig();
+  const previousState = {
+    connectedClients: state.connectedClients,
+    setlistFiles: state.setlistFiles,
+    currentLyrics: state.currentLyrics,
+    currentLyricsTimestamps: state.currentLyricsTimestamps,
+    currentLyricsEnhancedTimestamps: state.currentLyricsEnhancedTimestamps,
+    currentLyricsFileName: state.currentLyricsFileName,
+    currentRawLyricsContent: state.currentRawLyricsContent,
+    currentLyricsSource: state.currentLyricsSource,
+    currentSongMetadata: state.currentSongMetadata,
+    currentSelectedLine: state.currentSelectedLine,
+    currentLyricsSections: state.currentLyricsSections,
+    currentLineToSection: state.currentLineToSection,
+  };
+
+  const content = [
+    'CCLI SONG #426298 CCLI LICENSE #1259902',
+    '',
+    '© 1990 MERCY / VINEYARD PUBLISHING; VINEYARD SONGS CANADA',
+    '',
+    'CHORUS',
+    '',
+    "REFINER'S FIRE MY HEART'S ONE DESIRE",
+    'IS TO BE HOLY SET APART FOR YOU LORD',
+    '',
+    'I CHOOSE TO BE HOLY SET APART FOR YOU MY MASTER',
+    '',
+    'READY TO DO YOUR WILL',
+  ].join('\n');
+
+  state.connectedClients = new Map();
+  state.setlistFiles = [{
+    id: 'setlist_refiners_fire',
+    displayName: "Refiner's Fire",
+    originalName: "Refiner's Fire.txt",
+    fileType: 'txt',
+    content,
+    metadata: null,
+  }];
+  setLyricsParsingConfig({
+    enableSplitting: false,
+    normalGroupConfig: {
+      ENABLED: true,
+      MAX_LINE_LENGTH: 60,
+      MAX_LINES_PER_GROUP: 2,
+      CROSS_BLANK_LINE_GROUPING: true,
+    },
+    enableTranslationGrouping: true,
+    structureTagsConfig: { MODE: 'isolate' },
+  });
+
+  try {
+    assert.equal(
+      buildCurrentState({ type: 'mobile', purpose: 'control' }).lyricsParsingOptions.groupingConfig.maxLineLength,
+      60
+    );
+    assert.equal(
+      buildCurrentState({ type: 'mobile', purpose: 'control' }).lyricsParsingOptions.groupingConfig.maxLinesPerGroup,
+      2
+    );
+    assert.equal(
+      buildCurrentState({ type: 'mobile', purpose: 'control' }).lyricsParsingOptions.enableSplitting,
+      false
+    );
+
+    const { handlers, io, socket } = createSocketHarness();
+    registerSetlistHandlers({
+      io,
+      socket,
+      hasPermission: (_socket, permission) => permission === 'lyrics:write',
+      clientType: 'desktop',
+      deviceId: 'device-test',
+      sessionId: 'session-test',
+    });
+
+    handlers.get('setlistLoad')?.('setlist_refiners_fire');
+
+    assert.equal(state.currentLyrics.length, 4);
+    assert.deepEqual(state.currentLyrics[0].lines, [
+      'CCLI SONG #426298 CCLI LICENSE #1259902',
+      '© 1990 MERCY / VINEYARD PUBLISHING; VINEYARD SONGS CANADA',
+    ]);
+    assert.equal(state.currentLyrics[1], 'CHORUS');
+    assert.deepEqual(state.currentLyrics[2].lines, [
+      "REFINER'S FIRE MY HEART'S ONE DESIRE",
+      'IS TO BE HOLY SET APART FOR YOU LORD',
+    ]);
+    assert.deepEqual(state.currentLyrics[3].lines, [
+      'I CHOOSE TO BE HOLY SET APART FOR YOU MY MASTER',
+      'READY TO DO YOUR WILL',
+    ]);
+  } finally {
+    setLyricsParsingConfig(previousConfig);
+    Object.assign(state, previousState);
   }
 });
 
@@ -451,6 +561,253 @@ test('setlistUpdate fanout sends full setlist to controllers and names only to s
   } finally {
     state.connectedClients = previousConnectedClients;
     state.setlistFiles = previousSetlist;
+  }
+});
+
+test('setlistItemUpdate refreshes the stored song in place and subsequent loads use edited content', () => {
+  const previousConnectedClients = state.connectedClients;
+  const previousSetlist = state.setlistFiles;
+  const previousLyrics = state.currentLyrics;
+  const previousLyricsSource = state.currentLyricsSource;
+  const previousRawLyricsContent = state.currentRawLyricsContent;
+  const previousTimestamps = state.currentLyricsTimestamps;
+  const previousEnhancedTimestamps = state.currentLyricsEnhancedTimestamps;
+  const previousFileName = state.currentLyricsFileName;
+  const previousSongMetadata = state.currentSongMetadata;
+  const previousSelectedLine = state.currentSelectedLine;
+  const previousSections = state.currentLyricsSections;
+  const previousLineToSection = state.currentLineToSection;
+
+  state.connectedClients = new Map();
+  state.setlistFiles = [{
+    id: 'setlist_edit_target',
+    displayName: 'Editable Song',
+    originalName: 'Editable Song.txt',
+    fileType: 'txt',
+    content: 'Old first line\nOld second line',
+    lastModified: 100,
+    addedAt: 50,
+    metadata: { filePath: 'C:\\Lyrics\\Editable Song.txt', source: 'test' },
+    addedBy: { clientType: 'desktop', deviceId: 'device-test', sessionId: 'session-test' },
+  }];
+  const desktop = createTrackedClient('socket-desktop-update', { type: 'desktop', purpose: 'control', permissions: ['admin:full'] });
+
+  try {
+    const { handlers, io, socket } = createSocketHarness();
+    registerSetlistHandlers({
+      io,
+      socket,
+      hasPermission: (_socket, permission) => permission === 'setlist:write' || permission === 'admin:full' || permission === 'lyrics:write',
+      clientType: 'desktop',
+      deviceId: 'device-test',
+      sessionId: 'session-test',
+    });
+
+    let updateResult = null;
+    handlers.get('setlistItemUpdate')?.({
+      fileId: 'setlist_edit_target',
+      file: {
+        name: 'Editable Song.txt',
+        content: 'Edited first line\n\nEdited second line',
+        fileType: 'txt',
+        lastModified: 200,
+        metadata: {
+          filePath: 'C:\\Lyrics\\Editable Song.txt',
+          source: 'test',
+          groupingPlan: createGroupingPlan(['Edited first line', 'Edited second line']),
+        },
+      },
+    }, (result) => {
+      updateResult = result;
+    });
+
+    assert.equal(updateResult.success, true);
+    assert.equal(state.setlistFiles[0].id, 'setlist_edit_target');
+    assert.equal(state.setlistFiles[0].addedAt, 50);
+    assert.equal(state.setlistFiles[0].content.includes('Edited first line'), true);
+    assert.equal(desktop.events.some((event) => event.eventName === 'setlistUpdate'), true);
+
+    handlers.get('setlistLoad')?.('setlist_edit_target');
+
+    assert.deepEqual(state.currentLyrics, ['Edited first line', 'Edited second line']);
+    assert.equal(state.currentRawLyricsContent, state.setlistFiles[0].content);
+    assert.equal(state.currentLyricsSource.setlistItemId, 'setlist_edit_target');
+  } finally {
+    state.connectedClients = previousConnectedClients;
+    state.setlistFiles = previousSetlist;
+    state.currentLyrics = previousLyrics;
+    state.currentLyricsSource = previousLyricsSource;
+    state.currentRawLyricsContent = previousRawLyricsContent;
+    state.currentLyricsTimestamps = previousTimestamps;
+    state.currentLyricsEnhancedTimestamps = previousEnhancedTimestamps;
+    state.currentLyricsFileName = previousFileName;
+    state.currentSongMetadata = previousSongMetadata;
+    state.currentSelectedLine = previousSelectedLine;
+    state.currentLyricsSections = previousSections;
+    state.currentLineToSection = previousLineToSection;
+  }
+});
+
+test('setlistItemUpdate rejects updates from a different non-admin session without mutation', () => {
+  const previousConnectedClients = state.connectedClients;
+  const previousSetlist = state.setlistFiles;
+  const previousLiveSafety = state.liveSafety;
+
+  state.connectedClients = new Map();
+  state.liveSafety = { enabled: false, updatedAt: null, updatedBy: null };
+  state.setlistFiles = [{
+    id: 'owned-song',
+    displayName: 'Owned Song',
+    originalName: 'Owned Song.txt',
+    fileType: 'txt',
+    content: 'Original content',
+    metadata: null,
+    addedBy: { clientType: 'desktop', deviceId: 'owner-device', sessionId: 'owner-session' },
+  }];
+
+  try {
+    const { handlers, io, socket, socketEvents } = createSocketHarness();
+    registerSetlistHandlers({
+      io,
+      socket,
+      hasPermission: (_socket, permission) => permission === 'setlist:write',
+      clientType: 'web',
+      deviceId: 'other-device',
+      sessionId: 'other-session',
+    });
+
+    let result = null;
+    handlers.get('setlistItemUpdate')?.({
+      fileId: 'owned-song',
+      file: { name: 'Owned Song.txt', content: 'Unauthorized edit', fileType: 'txt' },
+    }, (payload) => {
+      result = payload;
+    });
+
+    assert.equal(result.success, false);
+    assert.match(result.error, /only update files you added/i);
+    assert.equal(state.setlistFiles[0].content, 'Original content');
+    assert.equal(socketEvents.some((event) => event.eventName === 'permissionError'), true);
+  } finally {
+    state.connectedClients = previousConnectedClients;
+    state.setlistFiles = previousSetlist;
+    state.liveSafety = previousLiveSafety;
+  }
+});
+
+test('setlist replacement validates the complete batch before mutating live state', () => {
+  const previousConnectedClients = state.connectedClients;
+  const previousSetlist = state.setlistFiles;
+  const previousLiveSafety = state.liveSafety;
+
+  state.connectedClients = new Map();
+  state.setlistFiles = [{
+    id: 'existing-song',
+    displayName: 'Existing Song',
+    originalName: 'Existing Song.txt',
+    content: 'Keep this lyric unless replacement succeeds',
+    fileType: 'txt',
+  }];
+  state.liveSafety = { enabled: false, updatedAt: null, updatedBy: null };
+
+  try {
+    const { handlers, io, ioEvents, socket } = createSocketHarness();
+    registerSetlistHandlers({
+      io,
+      socket,
+      hasPermission: (_socket, permission) => permission === 'setlist:write' || permission === 'setlist:delete',
+      clientType: 'desktop',
+      deviceId: 'desktop-device',
+      sessionId: 'desktop-session',
+    });
+
+    let invalidResult = null;
+    handlers.get('setlistReplace')?.({
+      files: [
+        { name: 'Duplicate.txt', content: 'First' },
+        { name: 'Duplicate.lrc', content: 'Second' },
+      ],
+    }, (result) => {
+      invalidResult = result;
+    });
+
+    assert.equal(invalidResult.success, false);
+    assert.match(invalidResult.error, /already exists/i);
+    assert.equal(state.setlistFiles.length, 1);
+    assert.equal(state.setlistFiles[0].id, 'existing-song');
+
+    let successResult = null;
+    handlers.get('setlistReplace')?.({
+      files: [
+        { name: 'Song One.txt', content: 'First lyric' },
+        { name: 'Song Two.lrc', content: '[00:01.00]Second lyric', fileType: 'lrc' },
+      ],
+    }, (result) => {
+      successResult = result;
+    });
+
+    assert.deepEqual(successResult, {
+      success: true,
+      replacedCount: 1,
+      totalCount: 2,
+    });
+    assert.deepEqual(state.setlistFiles.map((file) => file.displayName), ['Song One', 'Song Two']);
+    assert.equal(ioEvents.some((event) => event.eventName === 'setlistUpdate'), true);
+  } finally {
+    state.connectedClients = previousConnectedClients;
+    state.setlistFiles = previousSetlist;
+    state.liveSafety = previousLiveSafety;
+  }
+});
+
+test('setlist recovery is limited to the current Electron app session', () => {
+  const previousState = {
+    currentLyrics: state.currentLyrics,
+    currentLyricsTimestamps: state.currentLyricsTimestamps,
+    currentLyricsEnhancedTimestamps: state.currentLyricsEnhancedTimestamps,
+    currentLyricsFileName: state.currentLyricsFileName,
+    currentRawLyricsContent: state.currentRawLyricsContent,
+    currentLyricsSource: state.currentLyricsSource,
+    currentSongMetadata: state.currentSongMetadata,
+    currentSelectedLine: state.currentSelectedLine,
+    currentLyricsSections: state.currentLyricsSections,
+    currentLineToSection: state.currentLineToSection,
+    outputSettings: state.outputSettings,
+    outputEnabled: state.outputEnabled,
+    currentStageSettings: state.currentStageSettings,
+    currentIsOutputOn: state.currentIsOutputOn,
+    currentStageEnabled: state.currentStageEnabled,
+    currentStageTimerState: state.currentStageTimerState,
+    currentStageMessages: state.currentStageMessages,
+    registeredOutputs: state.registeredOutputs,
+    liveSafety: state.liveSafety,
+    setlistFiles: state.setlistFiles,
+  };
+
+  state.setlistFiles = [{
+    id: 'session-song',
+    displayName: 'Session Song',
+    originalName: 'Session Song.txt',
+    content: 'Session lyric',
+    lastModified: 123,
+    addedAt: 456,
+    fileType: 'txt',
+    metadata: null,
+    addedBy: { clientType: 'desktop', deviceId: 'device', sessionId: 'session' },
+  }];
+
+  try {
+    const snapshot = createSessionSnapshot({ appSessionId: 'app-session-a' });
+    assert.equal(snapshot.setlistFiles.length, 1);
+
+    state.setlistFiles = [];
+    assert.equal(applySessionSnapshot(snapshot, { appSessionId: 'app-session-a' }), true);
+    assert.equal(state.setlistFiles[0].id, 'session-song');
+
+    assert.equal(applySessionSnapshot(snapshot, { appSessionId: 'app-session-b' }), true);
+    assert.deepEqual(state.setlistFiles, []);
+  } finally {
+    Object.assign(state, previousState);
   }
 });
 
@@ -790,7 +1147,12 @@ test('generic stage clientConnect does not downgrade authenticated time-display 
     assert.equal(state.connectedClients.get('socket-time-display').purpose, 'time-display');
     const currentStateEvents = socketEvents.filter((event) => event.eventName === 'currentState');
     const latestState = currentStateEvents[currentStateEvents.length - 1].payload;
-    assert.deepEqual(latestState.stageTimerState, state.currentStageTimerState);
+    assert.deepEqual(
+      Object.fromEntries(Object.entries(latestState.stageTimerState).filter(([key]) => !['serverNow', 'clockBasis'].includes(key))),
+      Object.fromEntries(Object.entries(state.currentStageTimerState).filter(([key]) => key !== 'clockBasis'))
+    );
+    assert.equal(Number.isFinite(latestState.stageTimerState.serverNow), true);
+    assert.equal(latestState.stageTimerState.clockBasis, 'server');
     assert.equal('rawLyricsContent' in latestState, false);
     assert.equal('setlistFiles' in latestState, false);
 
@@ -895,6 +1257,69 @@ test('preview output metrics are ignored by production readiness tracking', () =
     assert.equal(ioEvents.length, 0);
     assert.equal(socketEvents.length, 0);
     assert.equal(state.outputInstances.get('output1').size, 0);
+  } finally {
+    state.outputInstances = previousOutputInstances;
+    state.outputSettings = previousOutputSettings;
+    state.outputEnabled = previousOutputEnabled;
+  }
+});
+
+test('output metrics cannot target a different authenticated output', () => {
+  const previousOutputInstances = state.outputInstances;
+  const previousOutputSettings = state.outputSettings;
+  const previousOutputEnabled = state.outputEnabled;
+
+  state.outputInstances = new Map([
+    ['output1', new Map()],
+    ['output2', new Map()],
+  ]);
+  state.outputSettings = new Map([
+    ['output1', {}],
+    ['output2', {}],
+  ]);
+  state.outputEnabled = new Map([
+    ['output1', true],
+    ['output2', true],
+  ]);
+
+  try {
+    const handlers = new Map();
+    const socketEvents = [];
+    const ioEvents = [];
+    const socket = {
+      id: 'socket-output1',
+      on(eventName, handler) {
+        handlers.set(eventName, handler);
+      },
+      emit(eventName, payload) {
+        socketEvents.push({ eventName, payload });
+      },
+    };
+
+    registerOutputHandlers({
+      io: { emit: (eventName, payload) => ioEvents.push({ eventName, payload }) },
+      socket,
+      hasPermission: () => true,
+      clientType: 'output1',
+      deviceId: 'output-device',
+      sessionId: 'output-session',
+    });
+
+    handlers.get('outputMetrics')?.({
+      output: 'output2',
+      metrics: {
+        viewportWidth: 1920,
+        viewportHeight: 1080,
+      },
+    });
+
+    assert.deepEqual(socketEvents.at(-1), {
+      eventName: 'permissionError',
+      payload: 'Output metrics target does not match authenticated output',
+    });
+    assert.equal(state.outputInstances.get('output1').size, 0);
+    assert.equal(state.outputInstances.get('output2').size, 0);
+    assert.equal(ioEvents.some((event) => event.eventName === 'outputMetrics'), false);
   } finally {
     state.outputInstances = previousOutputInstances;
     state.outputSettings = previousOutputSettings;
@@ -1029,4 +1454,29 @@ test('current state is trimmed for timer, time display, and output clients', () 
     state.currentStageTimerState = previousStageTimerState;
     state.currentStageMessages = previousStageMessages;
   }
+});
+
+test('persisted active stage timer runtime is reset for a new app session', () => {
+  const sanitized = sanitizePersistedStageTimerState({
+    status: 'running',
+    running: true,
+    paused: false,
+    durationMs: 60_000,
+    startTime: 1_000_000,
+    endTime: 1_060_000,
+    remaining: null,
+    display: {
+      label: 'Service Timer',
+    },
+  });
+
+  assert.equal(sanitized.status, 'idle');
+  assert.equal(sanitized.running, false);
+  assert.equal(sanitized.paused, false);
+  assert.equal(sanitized.finished, false);
+  assert.equal(sanitized.durationMs, 0);
+  assert.equal(sanitized.startTime, null);
+  assert.equal(sanitized.endTime, null);
+  assert.equal(sanitized.remaining, null);
+  assert.deepEqual(sanitized.display, { label: 'Service Timer' });
 });

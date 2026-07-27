@@ -2,6 +2,7 @@ import React from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { ControlSocketProvider } from '../../context/ControlSocketProvider';
 import ConditionalDesktopShell from './ConditionalDesktopShell';
+import StartupReadinessReporter from './StartupReadinessReporter';
 
 const ElectronModalBridge = React.lazy(() => import('../bridges/ElectronModalBridge'));
 const JoinCodePromptBridge = React.lazy(() => import('../bridges/JoinCodePromptBridge'));
@@ -11,7 +12,7 @@ const QRCodeDialogBridge = React.lazy(() => import('../bridges/QRCodeDialogBridg
 const ShortcutsHelpBridge = React.lazy(() => import('../bridges/ShortcutsHelpBridge'));
 const SupportDevelopmentBridge = React.lazy(() => import('../bridges/SupportDevelopmentBridge'));
 const UpdaterBridge = React.lazy(() => import('../bridges/UpdaterBridge'));
-const WelcomeSplashBridge = React.lazy(() => import('../bridges/WelcomeSplashBridge'));
+const FirstRunTourBridge = React.lazy(() => import('../bridges/FirstRunTourBridge'));
 
 function MainWindowBridges() {
   return (
@@ -19,7 +20,7 @@ function MainWindowBridges() {
       <NdiBridge />
       <ElectronModalBridge />
       <JoinCodePromptBridge />
-      <WelcomeSplashBridge />
+      <FirstRunTourBridge />
       <UpdaterBridge />
       <NdiUpdaterBridge />
       <QRCodeDialogBridge />
@@ -41,6 +42,7 @@ export default function MainWindowShell() {
   return (
     <ConditionalDesktopShell>
       <ControlSocketProvider>
+        <StartupReadinessReporter />
         <MainWindowBridges />
         <Outlet />
       </ControlSocketProvider>

@@ -23,7 +23,7 @@ export const ControlPanelHelp = ({ darkMode }) => (
         <HelpSection
             icon={Globe}
             title="Search Online Lyrics"
-            description="Search multiple lyrics databases simultaneously. Find songs from LRCLIB, ChartLyrics, Lyrics.ovh, Open Hymnal, and more. Results include synced LRC files when available."
+            description="Search multiple lyrics databases simultaneously. Find songs from LRCLIB, Lyrics.ovh, and Open Hymnal. Results include synced LRC files when available."
             darkMode={darkMode}
         />
 
@@ -51,7 +51,7 @@ export const ControlPanelHelp = ({ darkMode }) => (
         <HelpSection
             icon={FolderOpen}
             title="Load Lyrics File"
-            description="Import .txt or .lrc files from your computer. Supports plain text lyrics and timestamped LRC format. Files are automatically formatted with smart capitalization and religious term handling."
+            description="Import .txt, .lrc, Markdown, RTF, or DOCX files from your computer. Document formats are converted to editable lyric text before display."
             darkMode={darkMode}
         />
 

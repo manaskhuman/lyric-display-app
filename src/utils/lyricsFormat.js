@@ -1,6 +1,11 @@
 import { preprocessText, splitLongLine } from '../../shared/lineSplitting.js';
-import { NORMAL_GROUP_CONFIG, STRUCTURE_TAGS_CONFIG, STRUCTURE_TAG_PATTERNS, BRACKET_PAIRS } from '../../shared/lyricsParsing.js';
-import { RELIGIOUS_WORDS, LATIN_LETTER_REGEX, ENGLISH_HINT_REGEXES } from '../constants/lyricsFormat.js';
+import { isManualNormalGroupCandidate, STRUCTURE_TAGS_CONFIG, STRUCTURE_TAG_PATTERNS, BRACKET_PAIRS } from '../../shared/lyricsParsing.js';
+
+const RELIGIOUS_WORDS = ['jesus', 'jehovah', 'god', 'yahweh', 'lord', 'christ', 'holy ghost',
+  'holy spirit', 'bible', 'amen', 'hallelujah', 'hosanna', 'savior', 'saviour', 'redeemer', 'messiah'];
+const LATIN_LETTER_REGEX = /[A-Za-z]/;
+const ENGLISH_HINT_WORDS = [...RELIGIOUS_WORDS, 'the', 'and', 'for', 'with', 'praise', 'glory', 'grace', 'mercy', 'love', 'king', 'queen', 'strength', 'light', 'power', 'redeemer', 'savior', 'saviour', 'spirit', 'amen', 'hallelujah', 'we', 'you', 'your', 'our', 'their', 'his', 'her', 'who', 'what', 'where', 'when', 'why', 'how', 'this', 'that', 'these', 'those', 'shall', 'will', 'hope', 'faith', 'joy', 'peace', 'deliver', 'deliverer', 'rescue', 'comfort', 'comforter', 'guide', 'helper'];
+const ENGLISH_HINT_REGEXES = ENGLISH_HINT_WORDS.map((word) => new RegExp(`\\b${word}\\b`, 'i'));
 
 /**
  * Normalize smart/typographic characters to their plain ASCII equivalents.
@@ -303,12 +308,15 @@ export const splitInlineTranslation = (line) => {
  * @param {string} text
  * @returns {string}
  */
-const extractStructureTags = (text) => {
+const extractStructureTags = (text, groupingConfig = {}) => {
   if (!text || typeof text !== 'string') return text;
   if (!STRUCTURE_TAGS_CONFIG.ENABLED) return text;
 
   const lines = text.split(/\r?\n/);
   const processedLines = [];
+  const structureTagMode = ['isolate', 'strip', 'keep'].includes(groupingConfig?.structureTagMode)
+    ? groupingConfig.structureTagMode
+    : STRUCTURE_TAGS_CONFIG.MODE;
 
   for (const line of lines) {
     if (!line || line.trim().length === 0) {
@@ -324,11 +332,11 @@ const extractStructureTags = (text) => {
         const tag = match[0].trim();
         const remainder = line.substring(match[0].length).trim();
 
-        if (STRUCTURE_TAGS_CONFIG.MODE === 'strip') {
+        if (structureTagMode === 'strip') {
           if (remainder) {
             processedLines.push(remainder);
           }
-        } else if (STRUCTURE_TAGS_CONFIG.MODE === 'isolate') {
+        } else if (structureTagMode === 'isolate') {
           processedLines.push(tag);
           if (remainder) {
             processedLines.push(remainder);
@@ -354,14 +362,15 @@ const extractStructureTags = (text) => {
  * Check if two lines could form a normal group (both within char limit, not bracketed)
  * Uses the same config as the parsing logic for consistency
  */
-const couldFormNormalGroup = (line1, line2) => {
+const couldFormNormalGroup = (line1, line2, groupingConfig) => {
   if (!line1 || !line2) return false;
+  if (groupingConfig?.enableAutoLineGrouping === false) return false;
   const trimmed1 = line1.trim();
   const trimmed2 = line2.trim();
   if (trimmed1.length === 0 || trimmed2.length === 0) return false;
   if (isBracketedTranslationLine(trimmed1) || isBracketedTranslationLine(trimmed2)) return false;
-  return trimmed1.length <= NORMAL_GROUP_CONFIG.MAX_LINE_LENGTH &&
-    trimmed2.length <= NORMAL_GROUP_CONFIG.MAX_LINE_LENGTH;
+  return isManualNormalGroupCandidate(trimmed1, groupingConfig)
+    && isManualNormalGroupCandidate(trimmed2, groupingConfig);
 };
 
 /**
@@ -408,6 +417,7 @@ export const formatLyrics = (text, options = {}) => {
     capitalizeFirst = true,
     capitalizeReligious = true,
     normalizeTypographic = true,
+    groupingConfig,
     splitConfig = {
       TARGET_LENGTH: 60,
       MIN_LENGTH: 40,
@@ -423,7 +433,7 @@ export const formatLyrics = (text, options = {}) => {
   }
 
   if (STRUCTURE_TAGS_CONFIG.ENABLED) {
-    workingText = extractStructureTags(workingText);
+    workingText = extractStructureTags(workingText, groupingConfig);
   }
 
   const lines = String(workingText).split(/\r?\n/);
@@ -445,7 +455,7 @@ export const formatLyrics = (text, options = {}) => {
 
     const shouldNotAddBlankLine = nextIsBracketed ||
       isBracketedTranslationLine(nextLine || '') ||
-      couldFormNormalGroup(punctuationNormalized, nextLine);
+      couldFormNormalGroup(punctuationNormalized, nextLine, groupingConfig);
 
     const nextAndNextNextFormTranslation = nextLine && nextNextLine &&
       !isBracketedTranslationLine(nextLine.trim()) &&

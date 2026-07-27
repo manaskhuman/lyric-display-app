@@ -34,6 +34,7 @@ const FRAMERATE_OPTIONS = [
 const NdiOutputSettingsModal = ({ darkMode, outputKey, onClose }) => {
   const [settings, setSettings] = useState(null);
   const companionRunning = useNdiStore((s) => s.companionRunning);
+  const companionReady = useNdiStore((s) => s.companionReady);
   const [loading, setLoading] = useState(true);
   const { showToast } = useToast();
   const { showModal } = useModal();
@@ -127,9 +128,10 @@ const NdiOutputSettingsModal = ({ darkMode, outputKey, onClose }) => {
   }
 
   const inputClass = darkMode ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300';
+  const selectContentClass = darkMode ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300';
   const labelClass = darkMode ? 'text-gray-200' : 'text-gray-700';
   const mutedClass = darkMode ? 'text-gray-400' : 'text-gray-500';
-  const isBroadcasting = settings.enabled && companionRunning;
+  const isBroadcasting = settings.enabled && companionRunning && companionReady;
 
   return (
     <div className="overflow-y-auto px-6 py-5" style={{ maxHeight: 'calc(100vh - 260px)' }}>
@@ -141,8 +143,10 @@ const NdiOutputSettingsModal = ({ darkMode, outputKey, onClose }) => {
             <p className={`text-xs ${mutedClass}`}>
               {isBroadcasting
                 ? `Broadcasting as "${settings.sourceName}"`
-                : settings.enabled && !companionRunning
-                  ? 'Enabled but companion is not running'
+                : settings.enabled && companionRunning && !companionReady
+                  ? 'Enabled while companion is syncing'
+                  : settings.enabled && !companionRunning
+                    ? 'Enabled but companion is not running'
                   : 'Not broadcasting'}
             </p>
           </div>
@@ -193,7 +197,7 @@ const NdiOutputSettingsModal = ({ darkMode, outputKey, onClose }) => {
                 <SelectTrigger className={inputClass}>
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className={darkMode ? 'bg-gray-700 border-gray-600' : ''}>
+                <SelectContent className={selectContentClass}>
                   {RESOLUTION_PRESETS.map((preset) => (
                     <SelectItem key={preset.value} value={preset.value}>
                       {preset.label}
@@ -246,7 +250,7 @@ const NdiOutputSettingsModal = ({ darkMode, outputKey, onClose }) => {
                 <SelectTrigger className={inputClass}>
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className={darkMode ? 'bg-gray-700 border-gray-600' : ''}>
+                <SelectContent className={selectContentClass}>
                   {FRAMERATE_OPTIONS.map((opt) => (
                     <SelectItem key={opt.value} value={String(opt.value)}>
                       {opt.label}

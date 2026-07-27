@@ -3,6 +3,7 @@ import { fileURLToPath } from 'url';
 import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
+import { MAX_SETLIST_SOCKET_PAYLOAD_BYTES } from '../shared/setlistLimits.js';
 import dotenv from 'dotenv';
 import rateLimit from 'express-rate-limit';
 import registerSocketEvents, { getOutputRegistry, hasOutput } from './events.js';
@@ -28,6 +29,9 @@ import { registerIntegrationRoutes } from './routes/integrations.js';
 import { registerAppControlRoutes } from './routes/appControl.js';
 import { registerTemplateRoutes } from './routes/templates.js';
 import { loadPersistedSessionState } from './realtime/sessionPersistence.js';
+import { setLyricsParsingConfig } from './realtime/lyricsParsingConfig.js';
+import { emitControllerEvent } from './realtime/broadcast.js';
+import { REALTIME_EVENTS } from '../shared/apiContractRegistry.js';
 
 dotenv.config();
 
@@ -47,6 +51,14 @@ const __dirname = path.dirname(__filename);
 const secretManager = new SimpleSecretManager();
 const startupSecretRotation = await secretManager.rotateJWTSecretIfStale();
 const secrets = startupSecretRotation.secrets;
+
+if (typeof process.send === 'function') {
+  try {
+    process.send({ type: 'security-admin-key', adminKey: secrets.ADMIN_ACCESS_KEY });
+  } catch (error) {
+    console.warn('Failed to hand admin credentials to the Electron parent process:', error.message);
+  }
+}
 
 if (startupSecretRotation.rotated) {
   console.log('JWT secret auto-rotated during startup because it was stale');
@@ -120,6 +132,7 @@ registerMediaRoutes(app, {
 registerAdminSecretRoutes(app, { localhostOnly, secretManager });
 
 const io = new Server(server, {
+  maxHttpBufferSize: MAX_SETLIST_SOCKET_PAYLOAD_BYTES,
   cors: {
     origin: '*',
   }
@@ -134,6 +147,7 @@ registerSocketEvents(io, { hasPermission });
 registerHealthRoutes(app, {
   io,
   port: PORT,
+  authenticateRequest,
   secretManager,
   startupSecretRotation,
   tokenRateLimit,
@@ -150,6 +164,16 @@ process.on('message', (message) => {
 
   if (message?.type === 'obs-dock-local-auth') {
     process.env.LYRICDISPLAY_OBS_DOCK_LOCAL_AUTH = message.enabled ? '1' : '';
+    return;
+  }
+
+  if (message?.type === 'lyrics-parsing-config') {
+    const parsingOptions = setLyricsParsingConfig(message.config);
+    emitControllerEvent(
+      io,
+      REALTIME_EVENTS.lyricsParsingOptionsUpdate,
+      parsingOptions
+    );
   }
 });
 

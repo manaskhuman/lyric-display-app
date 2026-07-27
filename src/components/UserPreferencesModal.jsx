@@ -34,15 +34,26 @@ import AdvancedPreferencesSection from './UserPreferencesModal/AdvancedPreferenc
 import ExternalControlPreferencesSection from './UserPreferencesModal/ExternalControlPreferencesSection';
 import NdiPreferencesSection from './UserPreferencesModal/NdiPreferencesSection';
 import UserPreferencesLayout from './UserPreferencesModal/UserPreferencesLayout';
+import { normalizeLineSplittingConfig } from '../../shared/lyricsParsing.js';
 
 // Category definitions
 const CATEGORIES = [
   { id: 'general', label: 'General', icon: Settings },
   { id: 'appearance', label: 'Appearance', icon: Palette },
   { id: 'fileHandling', label: 'File Handling', icon: HardDrive },
-  { id: 'parsing', label: 'Lyrics Parsing', icon: FileText },
+  {
+    id: 'parsing',
+    label: 'Lyrics Parsing',
+    icon: FileText,
+    info: 'Controls how imported lyrics are arranged for display. When line splitting is on, it runs first; eligible short lines can then be combined into groups using the limits below.',
+  },
   { id: 'formatting', label: 'Lyrics Formatting', icon: Wand2 },
-  { id: 'lineSplitting', label: 'Line Splitting', icon: Sliders },
+  {
+    id: 'lineSplitting',
+    label: 'Line Splitting',
+    icon: Sliders,
+    info: 'Breaks long imported lyrics at natural word boundaries for easier reading. Minimum sets when a break may happen, Target guides the preferred length, and Maximum prevents lines from running too long.',
+  },
   { id: 'externalControl', label: 'External Control', icon: Radio },
   { id: 'ndi', label: 'NDI', icon: Cast },
   { id: 'autoplay', label: 'Autoplay', icon: Play },
@@ -62,18 +73,17 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
     midiStatus,
     oscStatus,
     preferences,
+    saveError,
     saving,
     setMidiStatus,
     setOscStatus,
     updateNestedPreference,
     updatePreference,
+    updatePreferenceGroup,
   } = usePreferencesPersistence({ showToast });
 
   const {
-    commitNumberPreference,
-    getNumberInputValue,
-    handleNumberInputKeyDown,
-    setNumberInputDraft,
+    getNumberPreferenceInputProps,
   } = useNumberPreferenceDrafts({ preferences, updatePreference });
 
   const {
@@ -103,12 +113,18 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
   const {
     handleOscFeedbackPortChange,
     handleOscFeedbackToggle,
+    handleOscAllowedSourcesChange,
     handleOscPortChange,
+    handleOscRateLimitChange,
+    handleOscRemoteAccessToggle,
     handleOscToggle,
-  } = useOscPreferences({ oscStatus, setOscStatus, updateNestedPreference });
+  } = useOscPreferences({ oscStatus, setOscStatus, updateNestedPreference, showToast });
 
   const {
     companionRunning,
+    companionStarting,
+    companionReady,
+    companionBootstrapError,
     downloadProgress,
     handleNdiAutoLaunchToggle,
     handleNdiCancelDownload,
@@ -138,6 +154,9 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
   const inputClass = darkMode
     ? 'bg-gray-700 border-gray-600 text-gray-300'
     : 'bg-white border-gray-300';
+  const selectContentClass = darkMode
+    ? 'bg-gray-700 border-gray-600 text-gray-200'
+    : 'bg-white border-gray-300';
 
   const labelClass = darkMode ? 'text-gray-300' : 'text-gray-700';
   const mutedClass = darkMode ? 'text-gray-400' : 'text-gray-500';
@@ -146,6 +165,23 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
   const preferenceFieldLabelClass = `block mb-1.5 text-sm font-medium ${labelClass}`;
   const preferenceToggleRowClass = "flex items-center justify-between gap-6 [&>button]:shrink-0";
   const preferenceToggleTextClass = "min-w-0 flex-1";
+  const previewLinesLocked = Boolean(liveSafety?.enabled);
+  const splitMinimum = Number(preferences?.lineSplitting?.minLength ?? 40);
+  const splitTarget = Number(preferences?.lineSplitting?.targetLength ?? 60);
+  const splitMaximum = Number(preferences?.lineSplitting?.maxLength ?? 80);
+  const hasInvalidSplitRelationship = splitMinimum > splitTarget || splitTarget > splitMaximum;
+  const commitLineSplittingPreference = (key, value) => {
+    const normalized = normalizeLineSplittingConfig({
+      ...(preferences?.lineSplitting || {}),
+      [key]: value,
+    });
+    updatePreferenceGroup('lineSplitting', {
+      targetLength: normalized.TARGET_LENGTH,
+      minLength: normalized.MIN_LENGTH,
+      maxLength: normalized.MAX_LENGTH,
+      overflowTolerance: normalized.OVERFLOW_TOLERANCE,
+    });
+  };
 
   // Render category content
   const renderCategoryContent = () => {
@@ -163,7 +199,36 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
               <Switch
                 checked={Boolean(liveSafety?.enabled)}
                 disabled={!isAuthenticated || !ready}
-                onCheckedChange={(checked) => setLiveSafetyEnabled(checked)}
+                onCheckedChange={(checked) => {
+                  updatePreference('general', 'liveSafetyMode', checked);
+                  setLiveSafetyEnabled(checked, { persistPreference: false });
+                }}
+                className={`!h-7 !w-14 !border-0 shadow-sm transition-colors ${darkMode
+                  ? 'data-[state=checked]:bg-green-400 data-[state=unchecked]:bg-gray-600'
+                  : 'data-[state=checked]:bg-black data-[state=unchecked]:bg-gray-300'
+                  }`}
+                thumbClassName="!h-5 !w-6 data-[state=checked]:!translate-x-7 data-[state=unchecked]:!translate-x-1"
+              />
+            </div>
+
+            <div
+              className={`${preferenceToggleRowClass} ${previewLinesLocked ? 'cursor-not-allowed' : ''}`}
+              aria-disabled={previewLinesLocked}
+            >
+              <div className={`${preferenceToggleTextClass} ${previewLinesLocked ? 'opacity-50' : ''}`}>
+                <label className={`text-sm font-medium ${labelClass}`}>Preview Lyric Lines</label>
+                <p className={`text-xs ${mutedClass}`}>
+                  First click previews a lyric line; double-click or Enter sends it live.
+                  {previewLinesLocked ? ' Live Safety requires this setting.' : ''}
+                </p>
+              </div>
+              <Switch
+                checked={previewLinesLocked || (preferences.general?.previewLines ?? false)}
+                disabled={previewLinesLocked}
+                onCheckedChange={(checked) => {
+                  updatePreference('general', 'previewLines', checked);
+                  useLyricsStore.getState().setPreviewLinesEnabled(checked);
+                }}
                 className={`!h-7 !w-14 !border-0 shadow-sm transition-colors ${darkMode
                   ? 'data-[state=checked]:bg-green-400 data-[state=unchecked]:bg-gray-600'
                   : 'data-[state=checked]:bg-black data-[state=unchecked]:bg-gray-300'
@@ -287,7 +352,7 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
                 <SelectTrigger className={inputClass}>
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className={darkMode ? 'bg-gray-700 border-gray-600' : ''}>
+                <SelectContent className={selectContentClass}>
                   <SelectItem value="light">Light Mode</SelectItem>
                   <SelectItem value="dark">Dark Mode</SelectItem>
                   <SelectItem value="system">System Default</SelectItem>
@@ -388,29 +453,24 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
               />
             </div>
 
-            {(preferences.parsing?.enableAutoLineGrouping ?? true) && (
-              <div className="space-y-2">
-                <label className={preferenceFieldLabelClass}>Maximum Number of Lines to Group</label>
-                <Input
-                  type="number"
-                  min="2"
-                  max="12"
-                  value={getNumberInputValue('parsing', 'maxLinesPerGroup', 2)}
-                  onChange={(e) => setNumberInputDraft('parsing', 'maxLinesPerGroup', e.target.value)}
-                  onBlur={() => commitNumberPreference('parsing', 'maxLinesPerGroup', {
-                    min: 2,
-                    max: 12,
-                    fallbackValue: 2,
-                    parse: 'int',
-                  })}
-                  onKeyDown={handleNumberInputKeyDown}
-                  className={inputClass}
-                />
-                <p className={`text-xs ${mutedClass}`}>
-                  Parser groups up to this many consecutive normal lines
-                </p>
-              </div>
-            )}
+            <div className="space-y-2">
+              <label className={preferenceFieldLabelClass}>Maximum Number of Lines per Group</label>
+              <Input
+                type="number"
+                min="2"
+                max="12"
+                {...getNumberPreferenceInputProps('parsing', 'maxLinesPerGroup', {
+                  min: 2,
+                  max: 12,
+                  fallbackValue: 2,
+                  parse: 'int',
+                })}
+                className={inputClass}
+              />
+              <p className={`text-xs ${mutedClass}`}>
+                Used by automatic parsing and manual grouping in the lyrics list
+              </p>
+            </div>
 
             <div className="flex items-center justify-between">
               <div>
@@ -434,19 +494,16 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
                 type="number"
                 min="20"
                 max="100"
-                value={getNumberInputValue('parsing', 'maxLineLength', 45)}
-                onChange={(e) => setNumberInputDraft('parsing', 'maxLineLength', e.target.value)}
-                onBlur={() => commitNumberPreference('parsing', 'maxLineLength', {
+                {...getNumberPreferenceInputProps('parsing', 'maxLineLength', {
                   min: 20,
                   max: 100,
                   fallbackValue: 45,
                   parse: 'int',
                 })}
-                onKeyDown={handleNumberInputKeyDown}
                 className={inputClass}
               />
               <p className={`text-xs ${mutedClass}`}>
-                Lines shorter than this will be considered for auto-grouping
+                Eligibility limit for automatic parsing and manual grouping in the lyrics list
               </p>
             </div>
 
@@ -458,6 +515,7 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
               <Switch
                 checked={preferences.parsing?.enableCrossBlankLineGrouping ?? true}
                 onCheckedChange={(checked) => updatePreference('parsing', 'enableCrossBlankLineGrouping', checked)}
+                disabled={!(preferences.parsing?.enableAutoLineGrouping ?? true)}
                 className={`!h-7 !w-14 !border-0 shadow-sm transition-colors ${darkMode
                   ? 'data-[state=checked]:bg-green-400 data-[state=unchecked]:bg-gray-600'
                   : 'data-[state=checked]:bg-black data-[state=unchecked]:bg-gray-300'
@@ -475,7 +533,7 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
                 <SelectTrigger className={inputClass}>
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className={darkMode ? 'bg-gray-700 border-gray-600' : ''}>
+                <SelectContent className={selectContentClass}>
                   <SelectItem value="isolate">Isolate (separate line)</SelectItem>
                   <SelectItem value="strip">Strip (remove tags)</SelectItem>
                   <SelectItem value="keep">Keep (leave as-is)</SelectItem>
@@ -572,6 +630,13 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
       case 'lineSplitting':
         return (
           <div className="space-y-6">
+            {hasInvalidSplitRelationship && (
+              <div className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-xs ${darkMode ? 'border-amber-700 bg-amber-950/30 text-amber-200' : 'border-amber-300 bg-amber-50 text-amber-800'}`}>
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>The current values overlap. Parsing will safely constrain the target between the configured minimum and maximum.</span>
+              </div>
+            )}
+
             <div className="flex items-center justify-between">
               <div>
                 <label className={`text-sm font-medium ${labelClass}`}>Enable Line Splitting</label>
@@ -594,20 +659,17 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
                 type="number"
                 min="30"
                 max="120"
-                value={getNumberInputValue('lineSplitting', 'targetLength', 60)}
-                onChange={(e) => setNumberInputDraft('lineSplitting', 'targetLength', e.target.value)}
-                onBlur={() => commitNumberPreference('lineSplitting', 'targetLength', {
+                {...getNumberPreferenceInputProps('lineSplitting', 'targetLength', {
                   min: 30,
                   max: 120,
                   fallbackValue: 60,
                   parse: 'int',
-                })}
-                onKeyDown={handleNumberInputKeyDown}
+                }, (value) => commitLineSplittingPreference('targetLength', value))}
                 className={inputClass}
                 disabled={!preferences.lineSplitting?.enabled}
               />
               <p className={`text-xs ${mutedClass}`}>
-                Ideal character count per line
+                Ideal character count per line; related limits are reconciled when changed
               </p>
             </div>
 
@@ -617,15 +679,12 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
                 type="number"
                 min="20"
                 max="80"
-                value={getNumberInputValue('lineSplitting', 'minLength', 40)}
-                onChange={(e) => setNumberInputDraft('lineSplitting', 'minLength', e.target.value)}
-                onBlur={() => commitNumberPreference('lineSplitting', 'minLength', {
+                {...getNumberPreferenceInputProps('lineSplitting', 'minLength', {
                   min: 20,
                   max: 80,
                   fallbackValue: 40,
                   parse: 'int',
-                })}
-                onKeyDown={handleNumberInputKeyDown}
+                }, (value) => commitLineSplittingPreference('minLength', value))}
                 className={inputClass}
                 disabled={!preferences.lineSplitting?.enabled}
               />
@@ -640,15 +699,12 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
                 type="number"
                 min="50"
                 max="150"
-                value={getNumberInputValue('lineSplitting', 'maxLength', 80)}
-                onChange={(e) => setNumberInputDraft('lineSplitting', 'maxLength', e.target.value)}
-                onBlur={() => commitNumberPreference('lineSplitting', 'maxLength', {
+                {...getNumberPreferenceInputProps('lineSplitting', 'maxLength', {
                   min: 50,
                   max: 150,
                   fallbackValue: 80,
                   parse: 'int',
-                })}
-                onKeyDown={handleNumberInputKeyDown}
+                }, (value) => commitLineSplittingPreference('maxLength', value))}
                 className={inputClass}
                 disabled={!preferences.lineSplitting?.enabled}
               />
@@ -663,15 +719,12 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
                 type="number"
                 min="5"
                 max="30"
-                value={getNumberInputValue('lineSplitting', 'overflowTolerance', 15)}
-                onChange={(e) => setNumberInputDraft('lineSplitting', 'overflowTolerance', e.target.value)}
-                onBlur={() => commitNumberPreference('lineSplitting', 'overflowTolerance', {
+                {...getNumberPreferenceInputProps('lineSplitting', 'overflowTolerance', {
                   min: 5,
                   max: 30,
                   fallbackValue: 15,
                   parse: 'int',
-                })}
-                onKeyDown={handleNumberInputKeyDown}
+                }, (value) => commitLineSplittingPreference('overflowTolerance', value))}
                 className={inputClass}
                 disabled={!preferences.lineSplitting?.enabled}
               />
@@ -730,15 +783,12 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
                 type="number"
                 min="5"
                 max="50"
-                value={getNumberInputValue('fileHandling', 'maxRecentFiles', 10)}
-                onChange={(e) => setNumberInputDraft('fileHandling', 'maxRecentFiles', e.target.value)}
-                onBlur={() => commitNumberPreference('fileHandling', 'maxRecentFiles', {
+                {...getNumberPreferenceInputProps('fileHandling', 'maxRecentFiles', {
                   min: 5,
                   max: 50,
                   fallbackValue: 10,
                   parse: 'int',
                 })}
-                onKeyDown={handleNumberInputKeyDown}
                 className={inputClass}
               />
               <p className={`text-xs ${mutedClass}`}>
@@ -752,15 +802,12 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
                 type="number"
                 min={MIN_SETLIST_ITEMS}
                 max={MAX_SETLIST_ITEMS}
-                value={getNumberInputValue('fileHandling', 'maxSetlistFiles', DEFAULT_SETLIST_ITEMS)}
-                onChange={(e) => setNumberInputDraft('fileHandling', 'maxSetlistFiles', e.target.value)}
-                onBlur={() => commitNumberPreference('fileHandling', 'maxSetlistFiles', {
+                {...getNumberPreferenceInputProps('fileHandling', 'maxSetlistFiles', {
                   min: MIN_SETLIST_ITEMS,
                   max: MAX_SETLIST_ITEMS,
                   fallbackValue: DEFAULT_SETLIST_ITEMS,
                   parse: 'int',
                 })}
-                onKeyDown={handleNumberInputKeyDown}
                 className={inputClass}
               />
               <p className={`text-xs ${mutedClass}`}>
@@ -783,15 +830,12 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
                 min="1"
                 max="10"
                 step="0.5"
-                value={getNumberInputValue('fileHandling', 'maxFileSize', 2)}
-                onChange={(e) => setNumberInputDraft('fileHandling', 'maxFileSize', e.target.value)}
-                onBlur={() => commitNumberPreference('fileHandling', 'maxFileSize', {
+                {...getNumberPreferenceInputProps('fileHandling', 'maxFileSize', {
                   min: 1,
                   max: 10,
                   fallbackValue: 2,
                   parse: 'float',
                 })}
-                onKeyDown={handleNumberInputKeyDown}
                 className={inputClass}
               />
               <p className={`text-xs ${mutedClass}`}>
@@ -813,8 +857,12 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
             handleMidiToggle={handleMidiToggle}
             handleOscFeedbackPortChange={handleOscFeedbackPortChange}
             handleOscFeedbackToggle={handleOscFeedbackToggle}
+            handleOscAllowedSourcesChange={handleOscAllowedSourcesChange}
             handleOscPortChange={handleOscPortChange}
+            handleOscRateLimitChange={handleOscRateLimitChange}
+            handleOscRemoteAccessToggle={handleOscRemoteAccessToggle}
             handleOscToggle={handleOscToggle}
+            getNumberPreferenceInputProps={getNumberPreferenceInputProps}
             inputClass={inputClass}
             labelClass={labelClass}
             lastLearnedMidi={lastLearnedMidi}
@@ -833,6 +881,9 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
         return (
           <NdiPreferencesSection
             companionRunning={companionRunning}
+            companionStarting={companionStarting}
+            companionReady={companionReady}
+            companionBootstrapError={companionBootstrapError}
             darkMode={darkMode}
             downloadProgress={downloadProgress}
             handleNdiAutoLaunchToggle={handleNdiAutoLaunchToggle}
@@ -880,15 +931,12 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
                 type="number"
                 min="1"
                 max="60"
-                value={getNumberInputValue('autoplay', 'defaultInterval', 5)}
-                onChange={(e) => setNumberInputDraft('autoplay', 'defaultInterval', e.target.value)}
-                onBlur={() => commitNumberPreference('autoplay', 'defaultInterval', {
+                {...getNumberPreferenceInputProps('autoplay', 'defaultInterval', {
                   min: 1,
                   max: 60,
                   fallbackValue: 5,
                   parse: 'int',
                 }, (value) => updateAutoplaySetting('defaultInterval', value))}
-                onKeyDown={handleNumberInputKeyDown}
                 className={inputClass}
               />
               <p className={`text-xs ${mutedClass}`}>
@@ -949,11 +997,9 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
       case 'advanced':
         return (
           <AdvancedPreferencesSection
-            commitNumberPreference={commitNumberPreference}
             darkMode={darkMode}
             formatSecurityDate={formatSecurityDate}
-            getNumberInputValue={getNumberInputValue}
-            handleNumberInputKeyDown={handleNumberInputKeyDown}
+            getNumberPreferenceInputProps={getNumberPreferenceInputProps}
             handleResetCategory={handleResetCategory}
             handleRotateSecurityTokenKey={handleRotateSecurityTokenKey}
             inputClass={inputClass}
@@ -965,10 +1011,10 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
             securityLoading={securityLoading}
             securityRotating={securityRotating}
             securityStatus={securityStatus}
-            setNumberInputDraft={setNumberInputDraft}
             showModal={showModal}
             showToast={showToast}
             updatePreference={updatePreference}
+            updatePreferenceGroup={updatePreferenceGroup}
           />
         );
 
@@ -983,6 +1029,7 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
       activeCategoryBg={activeCategoryBg}
       categories={CATEGORIES}
       companionRunning={companionRunning}
+      companionStarting={companionStarting}
       darkMode={darkMode}
       handleNdiCheckForUpdate={handleNdiCheckForUpdate}
       handleNdiLaunch={handleNdiLaunch}
@@ -994,6 +1041,7 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
       ndiCheckingUpdate={ndiCheckingUpdate}
       ndiStatus={ndiStatus}
       panelBg={panelBg}
+      saveError={saveError}
       saving={saving}
       setActiveCategory={setActiveCategory}
     >

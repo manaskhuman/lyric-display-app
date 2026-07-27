@@ -13,6 +13,12 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
 import { REQUEST_MODAL_CLOSE_EVENT } from '@/constants/modalEvents';
+import { ModalActionButton, ModalFooter } from '@/components/modal/modalActions';
+import {
+  getLyricFormatLabel,
+  normalizeLyricFileType,
+  stripLyricImportExtension,
+} from '../../shared/lyricImportRegistry.js';
 
 const SETLIST_DROP_ANIMATION = {
   duration: 180,
@@ -26,8 +32,8 @@ const SetlistModal = () => {
   const isDesktopApp = useIsDesktopApp();
   const maxSetlistFiles = getMaxSetlistFiles();
 
-  const { emitSetlistAdd, emitSetlistRemove, emitSetlistLoad, emitSetlistReorder, emitSetlistClear } = useControlSocket();
-  const loadSetlist = useSetlistLoader({ setlistFiles, setSetlistFiles, emitSetlistAdd, emitSetlistClear });
+  const { emitSetlistAdd, emitSetlistRemove, emitSetlistLoad, emitSetlistReorder, emitSetlistClear, replaceSetlist } = useControlSocket();
+  const loadSetlist = useSetlistLoader({ setlistFiles, replaceSetlist });
 
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -139,9 +145,8 @@ const SetlistModal = () => {
       }
 
       pendingAddRef.current = files.map((file) => {
-        const lower = file.name.toLowerCase();
-        const fileType = lower.endsWith('.lrc') ? 'lrc' : 'txt';
-        const displayName = file.name.replace(/\.(txt|lrc)$/i, '') || file.name;
+        const fileType = normalizeLyricFileType({ fileType: file.fileType, fileName: file.name });
+        const displayName = stripLyricImportExtension(file.name) || file.name;
         return {
           displayName,
           originalName: file.name,
@@ -152,6 +157,7 @@ const SetlistModal = () => {
       const filesWithMetadata = files.map((file) => ({
         name: file.name,
         content: file.content,
+        fileType: file.fileType,
         lastModified: file.lastModified,
         metadata: file.filePath ? { filePath: file.filePath } : null
       }));
@@ -192,8 +198,7 @@ const SetlistModal = () => {
     const target = list.find((file) => file.id === fileId);
     const displayName = target?.displayName || target?.name || '';
     const originalName = target?.originalName || '';
-    const normalizedOriginal = originalName.toLowerCase();
-    const fileType = target?.fileType || (normalizedOriginal.endsWith('.lrc') ? 'lrc' : 'txt');
+    const fileType = normalizeLyricFileType({ fileType: target?.fileType, fileName: originalName });
     pendingLoadRef.current = { id: fileId, displayName, originalName, fileType };
     const emitted = emitSetlistLoad(fileId);
     if (!emitted) {
@@ -272,6 +277,7 @@ const SetlistModal = () => {
       title: 'Clear Setlist',
       description: `Are you sure you want to clear all ${list.length} ${list.length === 1 ? 'song' : 'songs'} from the setlist? This action cannot be undone.`,
       variant: 'warn',
+      size: 'sm',
       actions: [
         {
           label: 'Cancel',
@@ -330,9 +336,14 @@ const SetlistModal = () => {
         return;
       }
 
-      const blob = new Blob([JSON.stringify(result.setlistData)], { type: 'application/json' });
-      const file = new File([blob], 'setlist.ldset', { type: 'application/json' });
-      await loadSetlist(file);
+      const loaded = await loadSetlist(result.setlistData);
+      if (loaded && result.recoveredFromBackup) {
+        showToast({
+          title: 'Backup recovered',
+          message: result.recoveryWarning || 'Loaded the last-known-good setlist backup. Save again to repair the primary file.',
+          variant: 'warn',
+        });
+      }
     } catch (error) {
       console.error('Error loading setlist:', error);
       showToast({
@@ -441,11 +452,11 @@ const SetlistModal = () => {
       if (addedCount === 1 && pending.length === 1) {
         const addedFile = pending[0];
         const rawName = addedFile?.displayName || addedFile?.originalName || '';
-        const baseName = rawName.replace(/\.(txt|lrc)$/i, '') || rawName;
-        const type = addedFile?.fileType || (addedFile?.originalName?.toLowerCase?.().endsWith('.lrc') ? 'lrc' : 'txt');
+        const baseName = stripLyricImportExtension(rawName) || rawName;
+        const type = normalizeLyricFileType({ fileType: addedFile?.fileType, fileName: addedFile?.originalName });
         showToast({
           title: 'Added to setlist',
-          message: `${type === 'lrc' ? 'LRC' : 'Text'}: ${baseName}`,
+          message: `${getLyricFormatLabel(type)}: ${baseName}`,
           variant: 'success',
         });
       }
@@ -489,12 +500,11 @@ const SetlistModal = () => {
       }
       const rawName = pending.displayName || detail.fileName || detail.originalName || '';
       const pendingOriginal = pending.originalName || detail.originalName || '';
-      const normalizedOriginal = String(pendingOriginal).toLowerCase();
-      const inferredType = pending.fileType || detail.fileType || (normalizedOriginal.endsWith('.lrc') ? 'lrc' : 'txt');
-      const baseName = rawName.replace(/\.(txt|lrc)$/i, '') || rawName;
+      const inferredType = normalizeLyricFileType({ fileType: pending.fileType || detail.fileType, fileName: pendingOriginal });
+      const baseName = stripLyricImportExtension(rawName) || rawName;
       showToast({
         title: 'File loaded',
-        message: `${inferredType === 'lrc' ? 'LRC' : 'Text'}: ${baseName}`,
+        message: `${getLyricFormatLabel(inferredType)}: ${baseName}`,
         variant: 'success',
       });
       pendingLoadRef.current = { id: null, displayName: '', originalName: '', fileType: null };
@@ -568,8 +578,8 @@ const SetlistModal = () => {
 
         {/* Fixed Header */}
         <div className={`
-          shrink-0 px-6 py-4 border-b flex items-center justify-between gap-4
-          ${darkMode ? 'border-gray-800 bg-gray-900' : 'border-gray-200 bg-white'}
+          shrink-0 px-6 py-4 flex items-center justify-between gap-4
+          ${darkMode ? 'bg-slate-950/45' : 'bg-[#f8fafc]'}
         `}>
           <div className="min-w-0">
             <h2 className="truncate text-xl font-semibold">Setlist Manager</h2>
@@ -747,8 +757,8 @@ const SetlistModal = () => {
 
         {/* Fixed Search Bar */}
         <div className={`
-          shrink-0 px-6 py-4 border-b
-          ${darkMode ? 'border-gray-800 bg-gray-950/35' : 'border-gray-200 bg-[#f8fafc]'}
+          shrink-0 border-b px-6 py-4
+          ${darkMode ? 'border-white/5 bg-gray-950/35' : 'border-slate-900/5 bg-[#f8fafc]'}
         `}>
           <div className="relative">
             <Search className={`absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 ${searchIconClass}`} />
@@ -856,19 +866,16 @@ const SetlistModal = () => {
         </div>
 
         {/* Fixed Footer */}
-        <div className={`
-          shrink-0 px-6 py-4 border-t flex items-center justify-end
-          ${darkMode ? 'border-gray-800 bg-gray-900' : 'border-gray-200 bg-white'}
-        `}>
-          <Button
+        <ModalFooter darkMode={darkMode}>
+          <ModalActionButton
             type="button"
-            variant={darkMode ? 'outline' : 'default'}
+            tone="primary"
+            darkMode={darkMode}
             onClick={closeModal}
-            className={darkMode ? 'min-w-[96px] border-gray-500 bg-transparent text-white hover:border-gray-400 hover:bg-gray-800/40 hover:text-white' : 'min-w-[96px]'}
           >
             Close
-          </Button>
-        </div>
+          </ModalActionButton>
+        </ModalFooter>
       </div>
     </div>
   );

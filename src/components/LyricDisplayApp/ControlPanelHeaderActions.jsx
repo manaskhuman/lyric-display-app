@@ -1,5 +1,5 @@
 import React from 'react';
-import { Globe, ListMusic, Moon, RefreshCw, Settings, Sun, Timer, Video } from 'lucide-react';
+import { Globe, ListMusic, MonitorUp, Moon, RefreshCw, Settings, Sun, Timer } from 'lucide-react';
 import { Tooltip } from '@/components/ui/tooltip';
 import AuthStatusIndicator from '../AuthStatusIndicator';
 
@@ -28,6 +28,8 @@ export default function ControlPanelHeaderActions({
       <div className="grid grid-cols-8 gap-2 w-full">
         <Tooltip content={<span>Search and import lyrics from online providers - <strong>Ctrl+Shift+O</strong></span>} side="bottom">
           <button
+            data-tour="online-lyrics"
+            aria-label="Search online lyrics"
             className={iconButtonClass(false)}
             onClick={handleOpenOnlineLyricsSearch}
           >
@@ -37,6 +39,8 @@ export default function ControlPanelHeaderActions({
 
         <Tooltip content={<span>View and manage your song setlist (up to {maxSetlistFiles} songs) - <strong>Ctrl+Shift+S</strong></span>} side="bottom">
           <button
+            data-tour="setlist-manager"
+            aria-label="Open setlist manager"
             className={iconButtonClass(false)}
             onClick={handleOpenSetlist}
           >
@@ -99,6 +103,8 @@ export default function ControlPanelHeaderActions({
 
         <Tooltip content="Project an output to this monitor or an external display" side="bottom">
           <button
+            data-tour="project-output"
+            aria-label="Project to display"
             className={iconButtonClass(false)}
             onClick={() => {
               showModal({
@@ -113,7 +119,7 @@ export default function ControlPanelHeaderActions({
               });
             }}
           >
-            <Video className="h-4 w-4" />
+            <MonitorUp className="h-4 w-4" />
           </button>
         </Tooltip>
 
