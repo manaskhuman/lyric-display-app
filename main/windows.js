@@ -4,7 +4,12 @@ import { isDev, resolveProductionPath, appRoot } from './paths.js';
 import { getLogPaths, writeLog } from './logging.js';
 import { requestRendererModal } from './modalBridge.js';
 import { isTrustedAppRendererUrl, normalizeBrowserUrl } from './ipc/senderValidation.js';
-import { getWindowPreloadRole } from './windowSecurity.js';
+import {
+  getWindowPreloadRole,
+  isTimeDisplayRoute,
+  resolveWindowBackgroundColor,
+  shouldDisableBackgroundThrottling,
+} from './windowSecurity.js';
 
 const MEMORY_LOG_INTERVAL_MS = 60_000;
 const RENDERER_SNAPSHOT_TIMEOUT_MS = 1_500;
@@ -426,13 +431,16 @@ export function createWindow(route = '/', options = {}) {
     deferShow = false,
   } = options;
   const isTimerControlWindow = route.startsWith('/timer-control');
+  const isTimeDisplayWindow = isTimeDisplayRoute(route);
   const isObsSetupWindow = route.startsWith('/obs-setup');
   const preloadRole = getWindowPreloadRole(route);
   const isControlWindow = route === '/' || route.startsWith('/new-song') || isTimerControlWindow || isObsSetupWindow;
   const windowTitle = title || (isTimerControlWindow ? 'LyricDisplay Timer' : isObsSetupWindow ? 'LyricDisplay OBS Source Creator' : 'LyricDisplay');
-  const defaultBackground = projection
-    ? '#000000'
-    : (backgroundColor || (isDev ? '#ffffff' : '#f9fafb'));
+  const defaultBackground = resolveWindowBackgroundColor(route, {
+    projection,
+    backgroundColor,
+    development: isDev,
+  });
 
   const win = new BrowserWindow({
     width,
@@ -447,8 +455,8 @@ export function createWindow(route = '/', options = {}) {
         : (preloadRole === 'passive'
           ? resolveProductionPath('preloads', 'passive.cjs')
           : resolveProductionPath('preload.js')),
-      backgroundThrottling: projection ? false : true,
-      spellcheck: projection ? false : true,
+      backgroundThrottling: shouldDisableBackgroundThrottling(route, { projection }) ? false : true,
+      spellcheck: projection || isTimeDisplayWindow ? false : true,
     },
     show: false,
     icon: path.join(appRoot, 'public', 'favicon.ico'),

@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import LyricVisualFrame from '../components/output/LyricVisualFrame';
 import IntroOverlay from '../components/LyricVideoStudio/IntroOverlay';
-import { getActiveLyricVideoLine } from '../utils/lyricVideoTimeline';
-import { getLyricVideoLineOutputText } from '../utils/lyricVideoLineText';
+import { getActiveLyricVideoLine, getLyricVideoLineOutputText } from '../utils/lyricVideoTimeline';
 
 export default function LyricVideoExportFrame() {
   const [payload, setPayload] = useState(null);
@@ -10,16 +9,6 @@ export default function LyricVideoExportFrame() {
   const [renderMode, setRenderMode] = useState('overlay');
 
   useEffect(() => {
-    const previousBackground = {
-      html: document.documentElement.style.background,
-      body: document.body.style.background,
-      root: document.getElementById('root')?.style.background,
-    };
-    document.documentElement.style.background = 'transparent';
-    document.body.style.background = 'transparent';
-    const root = document.getElementById('root');
-    if (root) root.style.background = 'transparent';
-
     window.__lyricVideoExportLoad = (nextPayload) => {
       setPayload(nextPayload || null);
       setCurrentTimeMs(0);
@@ -41,9 +30,6 @@ export default function LyricVideoExportFrame() {
       delete window.__lyricVideoExportLoad;
       delete window.__lyricVideoExportSetRenderMode;
       delete window.__lyricVideoExportSeek;
-      document.documentElement.style.background = previousBackground.html;
-      document.body.style.background = previousBackground.body;
-      if (root) root.style.background = previousBackground.root;
     };
   }, []);
 

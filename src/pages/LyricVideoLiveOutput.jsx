@@ -2,8 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import LyricVisualFrame from '../components/output/LyricVisualFrame';
 import IntroOverlay from '../components/LyricVideoStudio/IntroOverlay';
-import { getActiveLyricVideoLine } from '../utils/lyricVideoTimeline';
-import { getLyricVideoLineOutputText } from '../utils/lyricVideoLineText';
+import { getActiveLyricVideoLine, getLyricVideoLineOutputText } from '../utils/lyricVideoTimeline';
 import {
   LYRIC_VIDEO_STUDIO_CHANNEL,
   LYRIC_VIDEO_STUDIO_STATE_KEY,
@@ -30,25 +29,6 @@ export default function LyricVideoLiveOutput() {
   const searchParams = new URLSearchParams(location.search);
   const isProjectionMode = ['1', 'true'].includes((searchParams.get('projection') || '').toLowerCase());
   const showProjectionExitHint = ['1', 'true'].includes((searchParams.get('escapeHint') || '').toLowerCase());
-
-  useEffect(() => {
-    const modeStyle = isProjectionMode
-      ? 'background: #000000 !important'
-      : 'background: transparent !important';
-    const html = document.documentElement;
-    const body = document.body;
-    const root = document.getElementById('root');
-
-    if (html) html.setAttribute('style', modeStyle);
-    if (body) body.setAttribute('style', modeStyle);
-    if (root) root.setAttribute('style', modeStyle);
-
-    return () => {
-      if (html) html.removeAttribute('style');
-      if (body) body.removeAttribute('style');
-      if (root) root.removeAttribute('style');
-    };
-  }, [isProjectionMode]);
 
   useEffect(() => {
     if (typeof BroadcastChannel === 'undefined') return undefined;

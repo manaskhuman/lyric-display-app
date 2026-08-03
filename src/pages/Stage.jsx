@@ -3,13 +3,17 @@ import { motion } from 'framer-motion';
 import { useLocation } from 'react-router-dom';
 import { useLyricsState, useOutputState, useStageSettings, useSetlistState, useIndividualOutputState, useKeyboardNavigationPreferences } from '../hooks/useStoreSelectors';
 import useSocket from '../hooks/useSocket';
-import { getLineOutputText } from '../utils/parseLyrics';
-import { findNavigableLyricLineIndex, isStructureTagLyricLine } from '../utils/lyricLineNavigation';
+import {
+  findNavigableLyricLineIndex,
+  getLineOutputText,
+  isStructureTagLyricLine,
+} from '../utils/parseLyrics';
 import { logDebug } from '../utils/logger';
 import { ChevronRight } from 'lucide-react';
 import { normalizeStageMessages } from '../utils/stageMessages';
 import { getTimerDisplay, getTimerIntensity, isTimerVisiblyActive } from '../utils/timerUtils';
 import { paintToCss } from '../utils/paint';
+import { hasSelectedStageLyricLine, shouldClearStageIdleScreen } from '../context/lyricsStore/stageSlice';
 import ProjectionExitHint from '../components/ProjectionExitHint';
 
 const pulseAnimation = `
@@ -197,29 +201,11 @@ const Stage = () => {
     };
   }, []);
 
-  useEffect(() => {
-    if (!isProjectionMode) return undefined;
-
-    const modeStyle = 'background: #000000 !important';
-    const html = document.documentElement;
-    const body = document.body;
-    const root = document.getElementById('root');
-
-    if (html) html.setAttribute('style', modeStyle);
-    if (body) body.setAttribute('style', modeStyle);
-    if (root) root.setAttribute('style', modeStyle);
-
-    return () => {
-      if (html) html.removeAttribute('style');
-      if (body) body.removeAttribute('style');
-      if (root) root.removeAttribute('style');
-    };
-  }, [isProjectionMode]);
-
   const {
     fontStyle = 'Bebas Neue',
     backgroundColor = '#000000',
     backgroundPaint,
+    clearEmptyLyricsScreen = false,
 
     liveFontSize = 120,
     liveColor = '#FFFFFF',
@@ -472,7 +458,13 @@ const Stage = () => {
   const nextLine = effectiveCurrentLine !== null
     ? findNavigableLyricLineIndex(lyrics, effectiveCurrentLine + 1, 1, { skipSectionTitles: skipSectionTitlesOnKeyboard })
     : null;
-  const isVisible = Boolean((isPreviewMode || (isOutputOn && stageEnabled)) && effectiveCurrentLine !== null && lyrics.length > 0);
+  const hasSelectedLyricLine = hasSelectedStageLyricLine(effectiveCurrentLine, lyrics.length);
+  const isVisible = Boolean((isPreviewMode || (isOutputOn && stageEnabled)) && hasSelectedLyricLine);
+  const shouldClearIdleScreen = shouldClearStageIdleScreen(
+    clearEmptyLyricsScreen,
+    effectiveCurrentLine,
+    lyrics.length
+  );
 
   const getUpcomingSongName = useCallback(() => {
 
@@ -584,9 +576,9 @@ const Stage = () => {
         fontFamily: fontStyle,
       }}
     >
-      <ProjectionExitHint visible={isProjectionMode && showProjectionExitHint} />
+      <ProjectionExitHint visible={!shouldClearIdleScreen && isProjectionMode && showProjectionExitHint} />
       {/* Top Bar - Song Names */}
-      <div className="shrink-0 px-8 sm:px-12 md:px-16 py-6 sm:py-8 flex justify-between items-center">
+      {!shouldClearIdleScreen && <div className="shrink-0 px-8 sm:px-12 md:px-16 py-6 sm:py-8 flex justify-between items-center">
         <div
           className="leading-none"
           style={{
@@ -606,10 +598,10 @@ const Stage = () => {
         >
           {upcomingSong}
         </div>
-      </div>
+      </div>}
 
       {/* Main Content */}
-      <div className="flex-1 relative overflow-hidden">
+      {!shouldClearIdleScreen && <div className="flex-1 relative overflow-hidden">
         {upcomingSongFullScreen ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center px-6 sm:px-10 md:px-16 lg:px-24">
             <div className="w-full h-full relative">
@@ -942,10 +934,10 @@ const Stage = () => {
             </div>
           </div>
         )}
-      </div>
+      </div>}
 
       {/* Bottom Bar - Time and Messages */}
-      <div
+      {!shouldClearIdleScreen && <div
         className="shrink-0 px-8 sm:px-12 md:px-16 py-6 sm:py-8 flex justify-between items-center leading-none"
         style={{
           fontSize: `${responsiveBottomBarSize}px`,
@@ -982,7 +974,7 @@ const Stage = () => {
             </motion.div>
           )}
         </div>
-      </div>
+      </div>}
     </div>
   );
 };
