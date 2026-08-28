@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FolderOpen, FilePlusCorner, FileMusic, Plus, PlusCircle, View } from 'lucide-react';
+import { FolderOpen, FilePlusCorner, FileMusic, Plus, PlusCircle } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useLyricsState, useOutputState, useOutput1Settings, useOutput2Settings, useStageSettings, useDarkModeState, useSetlistState, useIsDesktopApp, useAutoplaySettings, useIntelligentAutoplayState, useAllOutputIds, useKeyboardNavigationPreferences } from '../hooks/useStoreSelectors';
 import { useControlSocket } from '../context/ControlSocketProvider';
@@ -48,6 +48,8 @@ import { VIRTUALIZATION_THRESHOLD } from '../hooks/LyricsList/useLyricsListRows'
 import ControlPanelHeaderActions from './LyricDisplayApp/ControlPanelHeaderActions';
 import ControlPanelModals from './LyricDisplayApp/ControlPanelModals';
 import LyricsWorkspace from './LyricDisplayApp/LyricsWorkspace';
+import ConnectedOutputsStrip from './LyricDisplayApp/ConnectedOutputsStrip';
+import useLyricsStore from '../context/LyricsStore';
 
 const LyricDisplayApp = () => {
   const navigate = useNavigate();
@@ -78,10 +80,26 @@ const LyricDisplayApp = () => {
   const loadSetlist = useSetlistLoader({ setlistFiles, replaceSetlist });
 
   const allOutputIds = useAllOutputIds();
+  const appearanceTransitions = useLyricsStore((state) => state.appearanceTransitions);
   const customOutputIds = React.useMemo(
     () => allOutputIds.filter((id) => id !== 'output1' && id !== 'output2'),
     [allOutputIds]
   );
+
+  const lastAppearanceSyncRef = React.useRef('');
+  React.useEffect(() => {
+    if (!isConnected || !isAuthenticated || !ready || !appearanceTransitions) return;
+    const signature = JSON.stringify(appearanceTransitions);
+    if (lastAppearanceSyncRef.current === signature) return;
+
+    const state = useLyricsStore.getState();
+    let allSent = true;
+    for (const outputId of allOutputIds) {
+      const settings = state[`${outputId}Settings`];
+      if (settings && !emitStyleUpdate(outputId, settings)) allSent = false;
+    }
+    if (allSent) lastAppearanceSyncRef.current = signature;
+  }, [allOutputIds, appearanceTransitions, emitStyleUpdate, isAuthenticated, isConnected, ready]);
 
   const { activeTab, setActiveTab } = useOutputSettings({
     availableTabs: [...allOutputIds, 'stage'],
@@ -125,11 +143,6 @@ const LyricDisplayApp = () => {
   }, [baseHandleSearch, trackAction]);
 
   const hasLyrics = lyrics && lyrics.length > 0;
-  const quickSwitchClassName = `!h-7 !w-14 !border-0 shadow-sm transition-colors ${darkMode
-    ? 'data-[state=checked]:bg-green-400 data-[state=unchecked]:bg-gray-600'
-    : 'data-[state=checked]:bg-black data-[state=unchecked]:bg-gray-300'
-    }`;
-  const quickSwitchThumbClassName = "!h-5 !w-6 data-[state=checked]:!translate-x-7 data-[state=unchecked]:!translate-x-1";
 
   const lineCounterText = useLineCounterText({ hasLyrics, lyrics, selectedLine });
 
@@ -433,7 +446,7 @@ const LyricDisplayApp = () => {
       {isDesktopApp && <DraftApprovalModal darkMode={darkMode} />}
       <div className={`flex h-full font-sans ${darkMode ? 'dark bg-gray-900' : 'bg-gray-50'}`}>
         {/* Left Sidebar - Control Panel */}
-        <div className="control-panel-sidebar-texture w-[420px] shrink-0 shadow-lg flex flex-col h-full">
+        <div className="control-panel-sidebar-texture w-105 shrink-0 shadow-lg flex flex-col h-full">
           {/* Fixed Header Section */}
           <div className="shrink-0 pt-4 px-5 pb-0 bg-transparent">
             <ControlPanelHeaderActions
@@ -444,12 +457,8 @@ const LyricDisplayApp = () => {
               handleOpenOnlineLyricsSearch={handleOpenOnlineLyricsSearch}
               handleOpenSetlist={handleOpenSetlist}
               handleOpenTimerControl={handleOpenTimerControl}
-              handleSyncOutputs={handleSyncOutputs}
               iconButtonClass={iconButtonClass}
-              isAuthenticated={isAuthenticated}
-              isConnected={isConnected}
               maxSetlistFiles={maxSetlistFiles}
-              ready={ready}
               refreshAuthToken={refreshAuthToken}
               setDarkMode={setDarkMode}
               setThemeMode={setThemeMode}
@@ -459,20 +468,20 @@ const LyricDisplayApp = () => {
 
             {/* Load and Create Buttons */}
             <div data-tour="load-lyrics" className={`flex gap-3 ${hasLyrics ? 'mb-3' : 'mb-6'}`}>
-              <Tooltip content={<span>Load a lyrics file from your computer - <strong>Ctrl+O</strong></span>} side="right">
+              <Tooltip content={<span>Search indexed lyric folders - <strong>Ctrl+O</strong></span>} side="right">
                 <button
-                  className="flex-1 py-3 px-4 bg-linear-to-r from-blue-400 to-purple-600 text-white rounded-2xl text-sm font-medium hover:from-blue-500 hover:to-purple-700 transition-all duration-200 flex items-center justify-center gap-2"
+                  className="control-squircle flex-1 py-3 px-4 bg-linear-to-r from-blue-400 to-purple-600 text-white rounded-2xl text-sm font-medium hover:from-blue-500 hover:to-purple-700 transition-all duration-200 flex items-center justify-center gap-2"
                   onClick={openFileDialog}
                 >
                   <FolderOpen className="w-4 h-4" />
-                  Load lyrics file
+                  Load lyrics
                 </button>
               </Tooltip>
               <Tooltip content={<span>Open the song canvas to create new lyrics from scratch - <strong>Ctrl+N</strong></span>} side="right">
                 <button
-                  className={`h-[52px] w-[52px] rounded-2xl text-sm font-medium transition-all duration-200 flex items-center justify-center ${darkMode
+                  className={`control-squircle h-13 w-13 rounded-2xl text-sm font-medium transition-all duration-200 flex items-center justify-center ${darkMode
                     ? 'bg-gray-700 hover:bg-blue-500/10 hover:text-blue-300 text-gray-200'
-                    : 'bg-gray-100 hover:bg-blue-50 hover:text-blue-600 text-gray-700'
+                    : 'bg-muted hover:bg-blue-50 hover:text-blue-600 text-gray-700'
                     }`}
                   onClick={handleCreateNewSong}
                 >
@@ -497,25 +506,24 @@ const LyricDisplayApp = () => {
             )}
 
             {/* Output Toggle */}
-            <div className="flex items-center justify-between mb-6" data-tour="master-output">
-              <div className="flex items-center gap-4 pl-4">
+            <div className="flex items-center justify-between" data-tour="master-output">
+              <div className="flex items-center gap-4">
                 <Switch
                   aria-label="Toggle display output"
                   checked={isOutputOn}
                   onCheckedChange={handleToggle}
-                  className={`
-            scale-[1.8]
-            ${darkMode
-                      ? "data-[state=checked]:bg-green-400 data-[state=unchecked]:bg-gray-600"
-                      : "data-[state=checked]:bg-black"}
-          `}
+                  size="large"
+                  variant="control"
                 />
-                <span className={`ml-5 inline-flex items-center gap-3 text-sm font-semibold ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
-                  <span className="inline-block w-[152px] shrink-0">{isOutputOn ? 'Display Output is ON' : 'Display Output is OFF'}</span>
+                <span className={`inline-flex items-center gap-2 text-[13px] font-semibold ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                  <span className="inline-block w-37 shrink-0">{isOutputOn ? 'Output Display is ON' : 'Output Display is OFF'}</span>
                   <span className="relative inline-flex h-5 w-5 shrink-0 items-center justify-center" aria-hidden="true">
-                    <span className={`absolute h-2 w-2 origin-center rounded-full bg-emerald-500 opacity-20 transition-transform duration-500 ease-out motion-reduce:transition-none ${isOutputOn ? 'scale-[2.6]' : 'scale-100'}`} />
+                    <span className={`absolute h-2 w-2 origin-center rounded-full opacity-20 transition-all duration-500 ease-out motion-reduce:transition-none ${isOutputOn
+                      ? 'scale-[2.6] bg-green-500 dark:bg-green-400'
+                      : `scale-100 ${darkMode ? 'bg-gray-500' : 'bg-gray-400'}`
+                      }`} />
                     <span className={`relative h-2 w-2 rounded-full ${isOutputOn
-                      ? 'bg-emerald-500'
+                      ? 'bg-green-500 dark:bg-green-400'
                       : darkMode ? 'bg-gray-500' : 'bg-gray-400'
                       }`}
                     />
@@ -524,30 +532,6 @@ const LyricDisplayApp = () => {
               </div>
 
               <div className="flex items-center gap-1">
-                <Tooltip content="Preview Outputs" side="bottom">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      showModal({
-                        title: 'Preview Outputs',
-                        headerDescription: 'Preview output, stage, time and custom displays with current output visibility.',
-                        component: 'PreviewOutputs',
-                        variant: 'info',
-                        size: 'large',
-                        dismissLabel: 'Close',
-                        className: 'max-w-4xl'
-                      });
-                    }}
-                    className={`rounded-lg p-2 transition-colors ${darkMode
-                      ? 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'
-                      : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700'
-                      }`}
-                    aria-label="Preview Outputs"
-                  >
-                    <View className="h-4 w-4" />
-                  </button>
-                </Tooltip>
-
                 {/* Help remains the rightmost action. */}
                 <Tooltip content="Control Panel Help" side="bottom">
                   <button
@@ -576,18 +560,22 @@ const LyricDisplayApp = () => {
               </div>
             </div>
 
-            <div className={`border-t my-8 ${darkMode ? 'border-gray-700' : 'border-gray-100'}`}></div>
+            <ConnectedOutputsStrip darkMode={darkMode} isOutputOn={isOutputOn} />
 
             {/* Output Tabs */}
             <Tabs value={activeTab} onValueChange={handleOutputTabSwitch}>
-              <TabsList data-tour="output-settings" className={`w-full p-1.5 h-11 mb-8 gap-1 ${darkMode ? 'bg-gray-700 text-gray-300' : ''}`}>
+              <TabsList
+                data-tour="output-settings"
+                indicatorClassName={darkMode ? 'bg-white shadow' : 'bg-black shadow'}
+                className={`w-full p-1 h-11 mb-8 gap-1 ${darkMode ? 'bg-[#2b3544] text-gray-300' : 'bg-muted'}`}
+              >
                 {allOutputIds.map((id) => {
                   const num = id.replace('output', '');
                   return (
                     <TabsTrigger
                       key={id}
                       value={id}
-                      className={`flex-1 h-full text-sm min-w-0 ${darkMode ? 'data-[state=active]:bg-white data-[state=active]:text-gray-900' : 'data-[state=active]:bg-black data-[state=active]:text-white'}`}
+                      className={`flex-1 h-full text-sm min-w-0 ${darkMode ? 'data-[state=active]:text-gray-900' : 'data-[state=active]:text-white'}`}
                     >
                       {num}
                     </TabsTrigger>
@@ -597,14 +585,14 @@ const LyricDisplayApp = () => {
                   <Tooltip content="Add a new output" side="bottom">
                     <button
                       onClick={(e) => { e.stopPropagation(); handleAddOutput(); }}
-                      className={`flex-1 flex items-center justify-center h-full min-w-0 rounded-md transition-colors ${darkMode ? 'hover:bg-gray-600 text-gray-400 hover:text-gray-200' : 'hover:bg-gray-200 text-gray-400 hover:text-gray-600'}`}
+                      className={`tab-switcher-item-squircle relative z-10 flex-1 flex items-center justify-center h-full min-w-0 rounded-xl transition-colors ${darkMode ? 'hover:bg-gray-600 text-gray-400 hover:text-gray-200' : 'hover:bg-gray-200 text-gray-400 hover:text-gray-600'}`}
                       aria-label="Add output"
                     >
                       <Plus className="w-3.5 h-3.5" />
                     </button>
                   </Tooltip>
                 )}
-                <TabsTrigger value="stage" className={`flex-1 h-full text-sm min-w-0 ${darkMode ? 'data-[state=active]:bg-white data-[state=active]:text-gray-900' : 'data-[state=active]:bg-black data-[state=active]:text-white'}`}>
+                <TabsTrigger value="stage" className={`flex-1 h-full text-sm min-w-0 ${darkMode ? 'data-[state=active]:text-gray-900' : 'data-[state=active]:text-white'}`}>
                   {allOutputIds.length >= 5 ? 'S' : 'Stage'}
                 </TabsTrigger>
               </TabsList>
@@ -614,7 +602,7 @@ const LyricDisplayApp = () => {
           {/* Scrollable Settings Panel */}
           <div
             ref={scrollableSettingsRef}
-            className="flex-1 overflow-y-auto px-6 relative"
+            className="relative flex-1 overflow-y-auto pl-5 pr-3"
             onScroll={(e) => {
               const scrollTop = e.currentTarget.scrollTop;
               const shadow = e.currentTarget.previousElementSibling;
@@ -683,8 +671,6 @@ const LyricDisplayApp = () => {
           quickParserLoading={quickParserLoading}
           quickParserOpen={quickParserOpen}
           quickParserSettings={quickParserSettings}
-          quickSwitchClassName={quickSwitchClassName}
-          quickSwitchThumbClassName={quickSwitchThumbClassName}
           reloadingWithParser={reloadingWithParser}
           remoteAutoplayActive={remoteAutoplayActive}
           searchQuery={searchQuery}

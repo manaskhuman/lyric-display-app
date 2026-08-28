@@ -1,4 +1,8 @@
-import { defaultOutput1Settings, defaultOutput2Settings, defaultStageSettings } from '../context/LyricsStore';
+import {
+  defaultOutput1Settings,
+  defaultOutput2Settings,
+} from '../context/lyricsStore/outputSlice.js';
+import { defaultStageSettings } from '../context/lyricsStore/stageSlice.js';
 
 const baseOutputSettings = { ...defaultOutput1Settings };
 
@@ -186,8 +190,8 @@ export const outputTemplates = [
   },
   {
     id: 'reading-center-band',
-    title: 'Reading Center Band',
-    description: 'Mid-screen band for scripture, responsive readings, schools, and spoken sections',
+    title: 'Centered Lyric Band',
+    description: 'Mid-screen band for longer lyric passages that benefit from extra line capacity',
     settings: {
       ...baseOutputSettings,
       fontStyle: 'Open Sans',

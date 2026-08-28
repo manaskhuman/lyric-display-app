@@ -1,5 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
+import { isStorageCapacityError, toStorageWriteFailure } from '../../shared/storageErrors.js';
 import { state, registerOutputs } from './state.js';
 import { validatePersistedSetlistFiles } from './setlistValidation.js';
 
@@ -11,6 +12,23 @@ let sessionFilePath = null;
 let saveTimer = null;
 let saveInFlight = null;
 let saveQueued = false;
+let lastStorageFailureNoticeAt = 0;
+
+const notifyStorageFailure = (error) => {
+  if (!isStorageCapacityError(error) || typeof process.send !== 'function') return;
+  const now = Date.now();
+  if (now - lastStorageFailureNoticeAt < 60_000) return;
+  lastStorageFailureNoticeAt = now;
+  const failure = toStorageWriteFailure(error, { subject: 'session changes' });
+  try {
+    process.send({
+      type: 'storage-write-failed',
+      operation: 'session-persistence',
+      ...failure,
+    });
+  } catch {
+  }
+};
 let sessionAppId = null;
 
 const mapToObject = (map) => Object.fromEntries(map instanceof Map ? map.entries() : []);
@@ -168,11 +186,21 @@ export const applySessionSnapshot = (snapshot, { appSessionId = sessionAppId } =
   if (Array.isArray(snapshot.registeredOutputs)) {
     registerOutputs(snapshot.registeredOutputs);
     for (const [outputId, settings] of objectToMap(snapshot.outputSettings)) {
-      state.outputSettings.set(outputId, settings || {});
+      if (state.registeredOutputs.has(outputId)) {
+        state.outputSettings.set(outputId, settings || {});
+      }
     }
     for (const [outputId, enabled] of objectToMap(snapshot.outputEnabled)) {
-      state.outputEnabled.set(outputId, enabled !== false);
+      if (state.registeredOutputs.has(outputId)) {
+        state.outputEnabled.set(outputId, enabled !== false);
+      }
     }
+  }
+  for (const outputId of Array.from(state.outputSettings.keys())) {
+    if (!state.registeredOutputs.has(outputId)) state.outputSettings.delete(outputId);
+  }
+  for (const outputId of Array.from(state.outputEnabled.keys())) {
+    if (!state.registeredOutputs.has(outputId)) state.outputEnabled.delete(outputId);
   }
   if (snapshot.liveSafety && typeof snapshot.liveSafety === 'object') {
     state.liveSafety = {
@@ -223,14 +251,19 @@ async function writeSnapshot() {
     const snapshot = createSessionSnapshot();
     await fs.mkdir(path.dirname(sessionFilePath), { recursive: true });
     const tmpPath = `${sessionFilePath}.${process.pid}.tmp`;
-    await fs.writeFile(tmpPath, JSON.stringify(snapshot), 'utf8');
-    await fs.rename(tmpPath, sessionFilePath);
+    try {
+      await fs.writeFile(tmpPath, JSON.stringify(snapshot), 'utf8');
+      await fs.rename(tmpPath, sessionFilePath);
+    } finally {
+      await fs.rm(tmpPath, { force: true }).catch(() => {});
+    }
   })();
 
   try {
     await saveInFlight;
   } catch (error) {
     console.warn('Failed to persist realtime session state:', error);
+    notifyStorageFailure(error);
   } finally {
     saveInFlight = null;
     if (saveQueued) {

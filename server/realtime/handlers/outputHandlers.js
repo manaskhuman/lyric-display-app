@@ -2,20 +2,23 @@ import {
   buildOutputList,
   ensureOutputExists,
   isKnownOrStageOutput,
+  notifyOutputPresenceChange,
   registerOutputs,
   state
 } from '../state.js';
 import { appendActionLog } from '../actionLog.js';
 import {
   emitIndividualOutputEvent,
-  emitOutputMetricsUpdate,
   emitOutputRegistry,
   emitOutputVisibilityEvent
 } from '../broadcast.js';
 import { blockIfLiveSafety } from '../liveSafety.js';
 import { REALTIME_EVENTS, REALTIME_PERMISSIONS } from '../../../shared/apiContractRegistry.js';
+import { normalizePreviewSettings } from '../../../shared/previewSettings.js';
 import { schedulePersistSessionState } from '../sessionPersistence.js';
-import { getPrimaryOutputInstance, isOutputClientType, isPlainObject } from '../utils.js';
+import { getOutputPresenceId, isOutputClientType, isPlainObject } from '../utils.js';
+import { isCustomOutputRouteId } from '../../../shared/outputRegistry.js';
+import { refreshOutputPresenceInstance } from '../outputPresence.js';
 
 const areSettingValuesEqual = (left, right) => {
   if (Object.is(left, right)) return true;
@@ -30,8 +33,33 @@ const getChangedSettingKeys = (currentSettings = {}, nextSettings = {}) => {
   return Object.keys(nextSettings).filter((key) => !areSettingValuesEqual(currentSettings?.[key], nextSettings[key]));
 };
 
-export function registerOutputHandlers({ io, socket, hasPermission, clientType, deviceId, sessionId, isPreview = false }) {
+const disconnectOutputClients = (outputId) => {
+  const sockets = [];
+  state.connectedClients.forEach((client) => {
+    if (client?.type === outputId && client.socket) sockets.push(client.socket);
+  });
+
+  for (const outputSocket of sockets) {
+    try {
+      outputSocket.disconnect(true);
+    } catch (error) {
+      console.warn(`Failed to disconnect removed output ${outputId}:`, error?.message || error);
+    }
+  }
+};
+
+export function registerOutputHandlers({
+  io,
+  socket,
+  hasPermission,
+  clientType,
+  clientPurpose = null,
+  deviceId,
+  sessionId,
+  isPreview = false,
+}) {
   const actor = { clientType, deviceId, sessionId };
+  const metricsOutputId = getOutputPresenceId(clientType, clientPurpose);
 
   socket.on('outputToggle', (nextState) => {
     if (blockIfLiveSafety({ io, socket, clientType, deviceId, sessionId, action: 'outputToggle' })) {
@@ -103,7 +131,8 @@ export function registerOutputHandlers({ io, socket, hasPermission, clientType, 
   });
 
   socket.on('styleUpdate', (payload) => {
-    if (blockIfLiveSafety({ io, socket, clientType, deviceId, sessionId, action: 'styleUpdate' })) {
+    const isPreviewSettingsUpdate = isPlainObject(payload) && payload.output === 'preview';
+    if (!isPreviewSettingsUpdate && blockIfLiveSafety({ io, socket, clientType, deviceId, sessionId, action: 'styleUpdate' })) {
       return;
     }
 
@@ -119,6 +148,7 @@ export function registerOutputHandlers({ io, socket, hasPermission, clientType, 
 
     const { output, settings } = payload;
     let changedKeys = [];
+    let emittedSettings = settings;
     if (isOutputClientType(output)) {
       if (!state.registeredOutputs.has(output)) {
         return;
@@ -130,8 +160,19 @@ export function registerOutputHandlers({ io, socket, hasPermission, clientType, 
     } else if (output === 'stage') {
       changedKeys = getChangedSettingKeys(state.currentStageSettings || {}, settings);
       state.currentStageSettings = { ...state.currentStageSettings, ...settings };
+    } else if (output === 'preview') {
+      const nextSettings = normalizePreviewSettings({
+        ...state.currentPreviewSettings,
+        ...settings,
+      });
+      changedKeys = getChangedSettingKeys(state.currentPreviewSettings, nextSettings);
+      state.currentPreviewSettings = nextSettings;
+      emittedSettings = nextSettings;
+    } else {
+      socket.emit('permissionError', 'Unknown style update target');
+      return;
     }
-    if (changedKeys.length > 0) {
+    if (changedKeys.length > 0 && output !== 'preview') {
       schedulePersistSessionState();
     }
     console.log(`Style updated for ${output} by ${clientType} client`);
@@ -145,7 +186,7 @@ export function registerOutputHandlers({ io, socket, hasPermission, clientType, 
         metadata: { keys: changedKeys.slice(0, 12) },
       });
     }
-    emitIndividualOutputEvent(io, 'styleUpdate', { output, settings });
+    emitIndividualOutputEvent(io, 'styleUpdate', { output, settings: emittedSettings }, { excludeSocket: socket });
   });
 
   socket.on(REALTIME_EVENTS.outputRemove, (payload) => {
@@ -164,11 +205,7 @@ export function registerOutputHandlers({ io, socket, hasPermission, clientType, 
     }
 
     const { output } = payload;
-    if (!isOutputClientType(output)) {
-      return;
-    }
-
-    if (output === 'output1' || output === 'output2') {
+    if (!isCustomOutputRouteId(output) || !state.registeredOutputs.has(output)) {
       return;
     }
 
@@ -190,6 +227,8 @@ export function registerOutputHandlers({ io, socket, hasPermission, clientType, 
     });
     emitIndividualOutputEvent(io, REALTIME_EVENTS.outputRemoved, { output });
     emitOutputRegistry(io, { outputs: buildOutputList() });
+    disconnectOutputClients(output);
+    notifyOutputPresenceChange();
   });
 
   socket.on(REALTIME_EVENTS.outputsRegister, (payload) => {
@@ -207,18 +246,24 @@ export function registerOutputHandlers({ io, socket, hasPermission, clientType, 
       return;
     }
 
-    const outputs = payload.outputs.filter((id) => typeof id === 'string');
-    registerOutputs(outputs);
+    const { removed, outputs: registeredOutputs } = registerOutputs(payload.outputs);
     schedulePersistSessionState();
     appendActionLog(io, {
       type: 'output',
       label: 'Custom outputs registered',
-      detail: `${outputs.length} custom output${outputs.length === 1 ? '' : 's'} registered`,
+      detail: `${registeredOutputs.length - 2} custom output${registeredOutputs.length === 3 ? '' : 's'} registered`,
       actor,
       target: 'outputs',
-      metadata: { outputs },
+      metadata: { outputs: registeredOutputs.filter((output) => output !== 'output1' && output !== 'output2') },
     });
+    for (const removedOutput of removed) {
+      emitIndividualOutputEvent(io, REALTIME_EVENTS.outputRemoved, { output: removedOutput });
+    }
     emitOutputRegistry(io, { outputs: buildOutputList() });
+    for (const removedOutput of removed) {
+      disconnectOutputClients(removedOutput);
+    }
+    notifyOutputPresenceChange();
   });
 
   socket.on('outputMetrics', (payload) => {
@@ -226,7 +271,7 @@ export function registerOutputHandlers({ io, socket, hasPermission, clientType, 
       return;
     }
 
-    if (!isOutputClientType(clientType)) {
+    if (!metricsOutputId) {
       socket.emit('permissionError', 'Insufficient permissions to publish metrics');
       return;
     }
@@ -234,20 +279,16 @@ export function registerOutputHandlers({ io, socket, hasPermission, clientType, 
       return;
     }
 
-    if (Object.hasOwn(payload, 'output') && payload.output !== clientType) {
+    if (Object.hasOwn(payload, 'output') && payload.output !== metricsOutputId) {
       socket.emit('permissionError', 'Output metrics target does not match authenticated output');
       return;
     }
 
-    const output = clientType;
+    const output = metricsOutputId;
     const { metrics } = payload;
 
-    if (!state.outputSettings.has(output) && !state.outputEnabled.has(output)) {
+    if (isOutputClientType(output) && !state.outputSettings.has(output) && !state.outputEnabled.has(output)) {
       return;
-    }
-
-    if (!state.outputInstances.has(output)) {
-      state.outputInstances.set(output, new Map());
     }
 
     const safe = {};
@@ -257,20 +298,11 @@ export function registerOutputHandlers({ io, socket, hasPermission, clientType, 
     if (Number.isFinite(metrics.viewportHeight)) safe.viewportHeight = metrics.viewportHeight;
     if (Number.isFinite(metrics.timestamp)) safe.timestamp = metrics.timestamp;
 
-    state.outputInstances.get(output).set(socket.id, {
-      ...safe,
-      socketId: socket.id,
-      lastUpdate: Date.now()
-    });
-
-    const allInstances = Array.from(state.outputInstances.get(output).values());
-    const primaryInstance = getPrimaryOutputInstance(allInstances);
-
-    emitOutputMetricsUpdate(io, {
+    refreshOutputPresenceInstance({
+      io,
       output,
-      metrics: primaryInstance || safe,
-      allInstances: allInstances,
-      instanceCount: allInstances.length
+      socket,
+      metrics: safe,
     });
   });
 }

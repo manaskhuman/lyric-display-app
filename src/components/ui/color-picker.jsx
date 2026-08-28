@@ -97,13 +97,53 @@ const ColorPicker = React.forwardRef(({
   const [color, setColor] = React.useState(value || "#000000")
   const [format, setFormat] = React.useState("hex")
   const contentRef = React.useRef(null)
+  const liveChangeFrameRef = React.useRef(null)
+  const pendingLiveColorRef = React.useRef(null)
+  const lastEmittedColorRef = React.useRef(value || "#000000")
   const sheetMode = presentation === 'sheet'
+
+  const emitLiveColor = React.useCallback((nextColor) => {
+    if (!nextColor || lastEmittedColorRef.current.toLowerCase() === nextColor.toLowerCase()) {
+      return
+    }
+    lastEmittedColorRef.current = nextColor
+    onChange?.(nextColor)
+  }, [onChange])
+
+  const flushLiveColor = React.useCallback((fallbackColor) => {
+    if (liveChangeFrameRef.current !== null) {
+      window.cancelAnimationFrame(liveChangeFrameRef.current)
+      liveChangeFrameRef.current = null
+    }
+    const nextColor = pendingLiveColorRef.current || fallbackColor
+    pendingLiveColorRef.current = null
+    emitLiveColor(nextColor)
+  }, [emitLiveColor])
+
+  const scheduleLiveColor = React.useCallback((nextColor) => {
+    pendingLiveColorRef.current = nextColor
+    if (liveChangeFrameRef.current !== null) return
+
+    liveChangeFrameRef.current = window.requestAnimationFrame(() => {
+      liveChangeFrameRef.current = null
+      const pendingColor = pendingLiveColorRef.current
+      pendingLiveColorRef.current = null
+      emitLiveColor(pendingColor)
+    })
+  }, [emitLiveColor])
 
   React.useEffect(() => {
     if (value) {
       setColor(value)
+      lastEmittedColorRef.current = value
     }
   }, [value])
+
+  React.useEffect(() => () => {
+    if (liveChangeFrameRef.current !== null) {
+      window.cancelAnimationFrame(liveChangeFrameRef.current)
+    }
+  }, [])
 
   React.useEffect(() => {
     if (!open) return undefined
@@ -127,6 +167,9 @@ const ColorPicker = React.forwardRef(({
   }, [open])
 
   const handleOpenChange = (nextOpen) => {
+    if (!nextOpen && !sheetMode) {
+      flushLiveColor(color)
+    }
     setOpen(nextOpen)
     if (nextOpen || sheetMode) {
       setColor(value || "#000000")
@@ -136,8 +179,15 @@ const ColorPicker = React.forwardRef(({
   const handleColorChange = (newColor) => {
     setColor(newColor)
     if (!sheetMode) {
-      onChange?.(newColor)
+      scheduleLiveColor(newColor)
     }
+  }
+
+  const handleColorChangeEnd = (newColor) => {
+    if (sheetMode) return
+    setColor(newColor)
+    pendingLiveColorRef.current = newColor
+    flushLiveColor(newColor)
   }
 
   const handleApply = () => {
@@ -165,7 +215,11 @@ const ColorPicker = React.forwardRef(({
 
   const pickerPanel = (
     <div className={`${presentation === 'sheet' ? 'mx-auto max-w-sm' : ''} space-y-3`}>
-      <HexColorPicker color={color} onChange={handleColorChange} />
+      <HexColorPicker
+        color={color}
+        onChange={handleColorChange}
+        onChangeEnd={handleColorChangeEnd}
+      />
 
       <div className="flex gap-2">
         <Button
@@ -326,6 +380,7 @@ const ColorPicker = React.forwardRef(({
           {...props}
         >
           <div
+            data-color-picker-preview
             className={cn(
               "rounded border border-border shrink-0",
               showHex ? "h-5 w-5" : "h-6 w-full"
@@ -345,7 +400,7 @@ const ColorPicker = React.forwardRef(({
           <div
             ref={contentRef}
             data-popover-scroll-lock-allow="true"
-            className={`flex h-full flex-col overflow-hidden rounded-lg border shadow-2xl ${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}
+            className={`flex h-full flex-col overflow-hidden rounded-2xl border shadow-2xl ${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}
           >
             <div className={`flex items-center justify-between border-b px-4 py-3 ${darkMode ? 'border-gray-700' : 'border-gray-200'}`}>
               <div className={`text-sm font-semibold ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>Choose Colour</div>
@@ -376,7 +431,7 @@ const ColorPicker = React.forwardRef(({
         <PopoverContent
           ref={contentRef}
           data-popover-scroll-lock-allow="true"
-          className={`w-56 p-3 ${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}
+          className={`w-56 rounded-2xl p-3 ${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}
           align="start"
         >
           {pickerPanel}

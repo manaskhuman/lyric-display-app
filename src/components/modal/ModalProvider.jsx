@@ -24,6 +24,8 @@ import TelemetryConsentModal from '../TelemetryConsentModal';
 import ScheduleCreatorWizard from '../ScheduleCreatorWizard';
 import ScheduleStartReconciliationWizard from '../ScheduleStartReconciliationWizard';
 import TimerDisplaySettingsModal from '../TimerDisplaySettingsModal';
+import NetworkAddressChangedModal from '../NetworkAddressChangedModal';
+import AppAnnouncementModal from '../AppAnnouncementModal';
 import { cn } from '@/lib/utils';
 import { REQUEST_MODAL_CLOSE_EVENT } from '@/constants/modalEvents';
 import { ModalActionButton, ModalFooter } from './modalActions';
@@ -459,15 +461,19 @@ export function ModalProvider({ children, isDark = false }) {
         const zIndex = 1300 + index;
         const isTopModal = index === modals.length - 1;
         const sizeClass =
-          modal.size === 'lg' || modal.size === 'large'
+          modal.size === 'xl'
+            ? 'max-w-4xl'
+            : modal.size === 'lg' || modal.size === 'large'
             ? 'max-w-3xl'
-            : modal.size === 'sm'
-              ? 'max-w-md'
-              : modal.size === 'xs'
-                ? 'max-w-sm'
-                : modal.size === 'auto'
-                  ? 'max-w-xl'
-                  : 'max-w-2xl';
+            : modal.size === 'announcement'
+              ? 'max-w-xl'
+              : modal.size === 'sm'
+                ? 'max-w-md'
+                : modal.size === 'xs'
+                  ? 'max-w-sm'
+                  : modal.size === 'auto'
+                    ? 'max-w-xl'
+                    : 'max-w-2xl';
         const widthClass = modal.size === 'auto' ? 'w-auto max-w-full' : 'w-full';
         const anyAutoFocus = modal.actions.some((action) => action.autoFocus);
         const defaultFocusIndex = anyAutoFocus ? -1 : Math.max(0, modal.actions.length - 1);
@@ -477,6 +483,16 @@ export function ModalProvider({ children, isDark = false }) {
           : isTopModal
             ? 'opacity-100'
             : 'translate-y-2 opacity-90 scale-[0.98]';
+        const panelStyle = {
+          maxHeight: modalMaxHeight,
+          ...(modal.component === 'UserMedia'
+            ? { height: `min(620px, ${modalMaxHeight})` }
+            : modal.component === 'AppAnnouncement'
+              ? { height: `min(560px, ${modalMaxHeight})` }
+              : modal.component === 'OutputTemplates' || modal.component === 'StageTemplates'
+                ? { height: `min(700px, ${modalMaxHeight})` }
+              : {}),
+        };
 
         return (
           <div
@@ -486,7 +502,8 @@ export function ModalProvider({ children, isDark = false }) {
             aria-modal={isTopModal ? 'true' : undefined}
             aria-hidden={isTopModal ? undefined : 'true'}
             role={isTopModal ? 'dialog' : undefined}
-            aria-labelledby={isTopModal ? `modal-${modal.id}-title` : undefined}
+            aria-label={isTopModal && modal.hideHeader ? modal.title || undefined : undefined}
+            aria-labelledby={isTopModal && !modal.hideHeader ? `modal-${modal.id}-title` : undefined}
             aria-describedby={isTopModal ? `modal-${modal.id}-description` : undefined}
           >
             <div
@@ -517,10 +534,10 @@ export function ModalProvider({ children, isDark = false }) {
                   modal.className
                 )}
                 data-modal-root="true"
-                style={{ maxHeight: modalMaxHeight }}
+                style={panelStyle}
               >
                 {/* Fixed Header */}
-                <div className={cn(
+                {!modal.hideHeader && <div className={cn(
                   'flex shrink-0 gap-3 border-b px-4 py-4 sm:gap-4 sm:px-6 sm:py-5',
                   modal.headerDescription ? 'items-start' : 'items-center',
                   isDark ? 'border-white/5 bg-slate-950/45' : 'border-slate-900/5 bg-[#f8fafc]'
@@ -564,7 +581,7 @@ export function ModalProvider({ children, isDark = false }) {
                       <X className="h-5 w-5" aria-hidden />
                     </button>
                   )}
-                </div>
+                </div>}
 
                 {/* Scrollable Content */}
                 <div className={cn(
@@ -662,6 +679,7 @@ export function ModalProvider({ children, isDark = false }) {
                       {modal.component === 'OutputTemplates' && (
                         <OutputTemplatesModal
                           darkMode={isDark}
+                          outputKey={modal.outputKey}
                           onApplyTemplate={(template) => {
                             if (modal.onApplyTemplate) modal.onApplyTemplate(template);
                             closeModal(modal.id, { action: 'applied', template });
@@ -770,6 +788,23 @@ export function ModalProvider({ children, isDark = false }) {
                           darkMode={isDark}
                         />
                       )}
+                      {modal.component === 'NetworkAddressChanged' && (
+                        <NetworkAddressChangedModal
+                          darkMode={isDark}
+                          previousIPAddress={modal.previousIPAddress}
+                          newIPAddress={modal.newIPAddress}
+                          serverPort={modal.serverPort}
+                          affectedRemoteOutputCount={modal.affectedRemoteOutputCount}
+                        />
+                      )}
+                      {modal.component === 'AppAnnouncement' && (
+                        <AppAnnouncementModal
+                          announcement={modal.announcement}
+                          darkMode={isDark}
+                          modalId={modal.id}
+                          onClose={(result) => closeModal(modal.id, result || { dismissed: true })}
+                        />
+                      )}
 
                       {/* Render standard description/body modals */}
                       {!modal.component && modal.description && (
@@ -790,7 +825,7 @@ export function ModalProvider({ children, isDark = false }) {
                 </div>
 
                 {/* Fixed Footer with Actions */}
-                {modal.actions.length > 0 && (
+                {!modal.hideFooter && modal.actions.length > 0 && (
                   <ModalFooter darkMode={isDark}>
                     {modal.actions.map((action, idx) => {
                       return (

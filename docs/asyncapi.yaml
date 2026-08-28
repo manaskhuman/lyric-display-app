@@ -4,7 +4,7 @@ asyncapi: 3.0.0
 
 info:
   title: LyricDisplay App Socket.IO API
-  version: 6.7.1
+  version: 6.8.6
   description: |
     Real-time control surface for LyricDisplay over Socket.IO. All connections must provide
     a JWT in the Socket.IO auth payload (`auth.token`), minted via `/api/auth/token`.
@@ -633,10 +633,10 @@ components:
         properties:
           output:
             type: string
-            enum: ['output1', 'output2', 'stage']
+            enum: ['output1', 'output2', 'stage', 'preview']
           settings:
             type: object
-      description: Update styling for a specific output. Mirrors to all clients.
+      description: Update styling for a specific output or the Preview operator layout. Mirrors to relevant render clients.
       x-permissions: ['settings:write']
     stageTimerUpdate:
       name: stageTimerUpdate
@@ -668,8 +668,8 @@ components:
         properties:
           output:
             type: string
-            pattern: '^output'
-            description: Optional compatibility field; when present it must match the authenticated output client type.
+            pattern: '^(output[0-9]+|stage|time)$'
+            description: Must match the output id authorized by the authenticated client type and display purpose.
           metrics:
             type: object
             properties:
@@ -684,11 +684,12 @@ components:
               timestamp:
                 type: integer
       description: >
-        Output instances publish autosizer and viewport metrics.
-        Metrics are recorded under the authenticated output client type;
-        clients cannot publish metrics for another output.
+        Output, Stage, and Time display instances publish viewport metrics.
+        Standard outputs may also publish autosizer metrics. Metrics are recorded
+        under the authenticated client type and display purpose; clients cannot
+        publish metrics for another output.
       x-permissions: []
-      x-client-types: ['output*']
+      x-client-types: ['output*', 'stage']
     fileNameUpdate:
       name: fileNameUpdate
       payload:

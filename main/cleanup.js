@@ -5,6 +5,7 @@ import { getLoadingWindow } from './loadingWindow.js';
 import { destroyExternalControl } from './externalControl.js';
 import { cleanupNdiManager } from './ndiManager.js';
 import { stopObsDockDevServer } from './devServer.js';
+import { cleanupFileNavigator } from './fileNavigator.js';
 
 const isOutputRoute = (url) => /(?:#\/|\/)(stage|time|output\d+)(?:\?|$)/i.test(String(url || ''));
 
@@ -31,10 +32,11 @@ export function closeOutputWindows() {
 }
 
 let isCleaningUp = false;
+let cleanupPromise = null;
 
 export function performCleanup() {
   if (isCleaningUp) {
-    return;
+    return cleanupPromise || Promise.resolve();
   }
 
   isCleaningUp = true;
@@ -68,8 +70,9 @@ export function performCleanup() {
     console.error('[Cleanup] Error destroying external control:', error);
   }
 
+  let ndiCleanupPromise = Promise.resolve();
   try {
-    cleanupNdiManager();
+    ndiCleanupPromise = Promise.resolve(cleanupNdiManager());
   } catch (error) {
     console.error('[Cleanup] Error cleaning up NDI manager:', error);
   }
@@ -80,7 +83,20 @@ export function performCleanup() {
     console.error('[Cleanup] Error stopping LyricDisplay Dock dev server:', error);
   }
 
+  try {
+    cleanupFileNavigator();
+  } catch (error) {
+    console.error('[Cleanup] Error cleaning up file navigator:', error);
+  }
+
   closeOutputWindows();
 
-  console.log('[Cleanup] Cleanup process completed');
+  cleanupPromise = ndiCleanupPromise
+    .catch((error) => {
+      console.error('[Cleanup] Error waiting for NDI manager cleanup:', error);
+    })
+    .finally(() => {
+      console.log('[Cleanup] Cleanup process completed');
+    });
+  return cleanupPromise;
 }

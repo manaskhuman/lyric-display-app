@@ -7,7 +7,7 @@
  * NDI® is a registered trademark of Vizrt NDI AB. https://ndi.video
  */
 
-import { app, ipcMain, BrowserWindow } from 'electron';
+import { app, ipcMain, BrowserWindow, dialog, net } from 'electron';
 import Store from 'electron-store';
 import {
   NDI_FOLDER_NAME,
@@ -23,7 +23,11 @@ import { randomBytes } from 'crypto';
 import { createNdiIpcClient } from './ndi/ipcClient.js';
 import { createOutputSettingsManager } from './ndi/outputSettings.js';
 import { createNdiInstaller } from './ndi/installer.js';
-import { createCompanionLaunchConfig } from './ndi/launchConfig.js';
+import { createElectronNetworkFetch } from './ndi/electronNetworkFetch.js';
+import {
+  createCompanionLaunchConfig,
+  resolveAuthoritativeCompanionLocation,
+} from './ndi/launchConfig.js';
 import { DEFAULT_OUTPUT_IDS } from '../shared/outputRegistry.js';
 
 const isDev = !app.isPackaged;
@@ -203,8 +207,10 @@ const installer = createNdiInstaller({
   getRemovableLegacyInstallPaths,
   getUninstallPaths,
   getCompanionEntryPath,
+  resolveCompanionEntryPath: findCompanionEntryPath,
   getPlatformAssetName,
   stopCompanion,
+  networkFetch: createElectronNetworkFetch(net),
 });
 
 const normalizeOutputList = outputSettingsManager.normalizeOutputList;
@@ -228,11 +234,11 @@ function destroyPersistentSocket() {
 // ============ Path Helpers ============
 
 function getInstallPath() {
-  if (isDev) {
-    return path.join(app.getAppPath(), LEGACY_NDI_FOLDER_NAME);
-  }
-
   return path.join(app.getPath('userData'), NDI_FOLDER_NAME, NDI_INSTALL_FOLDER_NAME);
+}
+
+function getDevelopmentSourcePath() {
+  return path.join(app.getAppPath(), LEGACY_NDI_FOLDER_NAME);
 }
 
 function getNdiRootPath() {
@@ -257,7 +263,7 @@ function getRemovableLegacyInstallPaths() {
 }
 
 function getUninstallPaths() {
-  if (isDev) return [];
+  if (isDev) return [getInstallPath()];
   return [
     getNdiRootPath(),
     ...getRemovableLegacyInstallPaths(),
@@ -272,38 +278,24 @@ function getCompanionBinaryName() {
 }
 
 function getCompanionEntryPath() {
-  const installPath = getInstallPath();
-
-  if (isDev) {
-    return path.join(installPath, 'src', 'main.js');
-  }
-
-  const currentEntryPath = findCompanionEntryPath(installPath);
-  if (fs.existsSync(currentEntryPath)) return currentEntryPath;
-
-  for (const legacyInstallPath of getLegacyInstallPaths()) {
-    const legacyEntryPath = findCompanionEntryPath(legacyInstallPath);
-    if (fs.existsSync(legacyEntryPath)) return legacyEntryPath;
-  }
-
-  return currentEntryPath;
+  return getResolvedCompanionLocation().companionPath;
 }
 
 function getResolvedInstallPath() {
-  const installPath = getInstallPath();
-  if (isDev) return installPath;
+  return getResolvedCompanionLocation().installPath;
+}
 
-  if (fs.existsSync(findCompanionEntryPath(installPath))) {
-    return installPath;
-  }
-
-  for (const legacyInstallPath of getLegacyInstallPaths()) {
-    if (fs.existsSync(findCompanionEntryPath(legacyInstallPath))) {
-      return legacyInstallPath;
-    }
-  }
-
-  return installPath;
+function getResolvedCompanionLocation() {
+  const developmentInstallPath = getDevelopmentSourcePath();
+  return resolveAuthoritativeCompanionLocation({
+    isDevelopment: isDev,
+    developmentInstallPath,
+    developmentEntryPath: path.join(developmentInstallPath, 'src', 'main.js'),
+    managedInstallPath: getInstallPath(),
+    legacyInstallPaths: getLegacyInstallPaths(),
+    resolveEntryPath: findCompanionEntryPath,
+    entryExists: fs.existsSync,
+  });
 }
 
 function findCompanionEntryPath(installPath) {
@@ -359,6 +351,10 @@ function resetUpdateCache() {
 
 function downloadCompanion(updateInfo = null) {
   return installer.downloadCompanion(updateInfo);
+}
+
+function installCompanionFromZip(zipPath) {
+  return installer.installCompanionFromZip(zipPath);
 }
 
 function cancelDownload() {
@@ -567,7 +563,8 @@ async function launchCompanion() {
     return { success: true, message: 'Already running' };
   }
 
-  const entryPath = getCompanionEntryPath();
+  const companionLocation = getResolvedCompanionLocation();
+  const entryPath = companionLocation.companionPath;
   const ipcConfig = getIpcConfig();
   companionAuthToken = createCompanionAuthToken();
   companionStarting = true;
@@ -583,7 +580,9 @@ async function launchCompanion() {
     return { success: false, error: `Could not prepare NDI companion data directory: ${error.message}` };
   }
 
-  if (isDev) {
+  const usingDevelopmentSource = companionLocation.source === 'development';
+
+  if (usingDevelopmentSource) {
     // In dev mode, launch via the running Electron binary pointing at the companion source.
     if (!fs.existsSync(entryPath)) {
       resetCompanionRuntimeState();
@@ -591,7 +590,7 @@ async function launchCompanion() {
     }
 
     const electronBin = process.execPath;
-    const companionDir = getInstallPath();
+    const companionDir = companionLocation.installPath;
     const launchConfig = createCompanionLaunchConfig({
       userDataPath: companionUserDataPath,
       appPath: companionDir,
@@ -631,7 +630,8 @@ async function launchCompanion() {
       host: ipcConfig.host,
       port: ipcConfig.port,
       authToken: companionAuthToken,
-      appUrl: 'http://127.0.0.1:4000',
+      appUrl: isDev ? 'http://localhost:5173' : 'http://127.0.0.1:4000',
+      hashRouting: false,
     });
     const args = launchConfig.args;
 
@@ -888,11 +888,37 @@ export function registerNdiIpcHandlers() {
     }
   });
 
+  ipcMain.handle('ndi:install-from-zip', async () => {
+    try {
+      const focusedWindow = BrowserWindow.getFocusedWindow();
+      const result = await dialog.showOpenDialog(focusedWindow || undefined, {
+        title: 'Install NDI Companion from ZIP',
+        properties: ['openFile'],
+        filters: [
+          { name: 'LyricDisplay NDI Companion', extensions: ['zip'] },
+        ],
+      });
+      if (result.canceled || result.filePaths.length === 0) {
+        return { success: false, cancelled: true, selectionCancelled: true };
+      }
+      return await installCompanionFromZip(result.filePaths[0]);
+    } catch (err) {
+      console.error('[NDI] Local ZIP install handler error:', err);
+      return {
+        success: false,
+        error: err?.message || 'Could not install the selected NDI Companion ZIP',
+        stage: err?.stage || 'local-archive-selection',
+        code: err?.code || 'LOCAL_INSTALL_FAILED',
+      };
+    }
+  });
+
   ipcMain.handle('ndi:update-companion', async () => {
     try {
-      const updateInfo = await checkForCompanionUpdate();
-      await stopCompanion();
-      return await downloadCompanion(updateInfo);
+      // Keep the running companion alive until the replacement archive has
+      // downloaded and passed integrity verification. The installer owns the
+      // full cancellable lifecycle, including the release lookup.
+      return await downloadCompanion();
     } catch (err) {
       console.error('[NDI] Update handler error:', err);
       return { success: false, error: err?.message || 'Update failed' };
@@ -986,8 +1012,9 @@ export function registerNdiIpcHandlers() {
 }
 
 export function cleanupNdiManager() {
-  stopCompanion();
-  console.log('[NDI] Manager cleaned up');
+  return stopCompanion().finally(() => {
+    console.log('[NDI] Manager cleaned up');
+  });
 }
 
 export default {

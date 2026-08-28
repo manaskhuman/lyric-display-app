@@ -11,13 +11,23 @@ import { registerStageHandlers } from './realtime/handlers/stageHandlers.js';
 import { registerDraftHandlers } from './realtime/handlers/draftHandlers.js';
 import { registerLiveSafetyHandlers } from './realtime/handlers/liveSafetyHandlers.js';
 import { registerActionLogHandlers } from './realtime/handlers/actionLogHandlers.js';
+import { startOutputPresenceMonitor } from './realtime/outputPresence.js';
 
 export { getOutputRegistry, hasOutput };
 
 export default function registerSocketEvents(io, { hasPermission }) {
   io.on('connection', (socket) => {
-    const { clientType, deviceId, sessionId, clientPurpose, isPreview } = socket.userData;
-    const connected = registerConnectionHandlers({ io, socket, clientType, deviceId, sessionId, clientPurpose, isPreview });
+    const { clientType, deviceId, sessionId, clientPurpose, clientInstanceId, isPreview } = socket.userData;
+    const connected = registerConnectionHandlers({
+      io,
+      socket,
+      clientType,
+      deviceId,
+      sessionId,
+      clientPurpose,
+      clientInstanceId,
+      isPreview,
+    });
 
     if (!connected) {
       return;
@@ -28,6 +38,7 @@ export default function registerSocketEvents(io, { hasPermission }) {
       socket,
       hasPermission,
       clientType,
+      clientPurpose,
       deviceId,
       sessionId,
       isPreview,
@@ -44,4 +55,5 @@ export default function registerSocketEvents(io, { hasPermission }) {
   });
 
   startConnectionStatsLogger();
+  startOutputPresenceMonitor(io);
 }

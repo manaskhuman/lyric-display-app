@@ -7,7 +7,7 @@ import { Tooltip } from '@/components/ui/tooltip';
 import { ColorPicker } from "@/components/ui/color-picker";
 import { PaintPicker } from "@/components/ui/paint-picker";
 import useStageDisplayControls from '../hooks/OutputSettingsPanel/useStageDisplayControls';
-import { Type, PaintBucket, Square, ScreenShare, ListMusic, ChevronRight, Languages, Palette, Power, TextAlignJustify, SquareMenu, Timer, GalleryVerticalEnd, ArrowRightLeft, Gauge, Save, BetweenVerticalEnd, ListIndentIncrease, Eye } from 'lucide-react';
+import { Type, Square, ScreenShare, ListMusic, ChevronRight, Languages, Palette, Power, TextAlignJustify, SquareMenu, Timer, GalleryVerticalEnd, ArrowRightLeft, Gauge, Save, BetweenVerticalEnd, ListIndentIncrease, Eye } from 'lucide-react';
 import FontSelect from './FontSelect';
 import { blurInputOnEnter, AdvancedCollapse, AdvancedToggle, FontSettingsRow, EmphasisRow, AlignmentRow, LabelWithIcon } from './OutputSettingsShared';
 import { Slider } from '@/components/ui/slider';
@@ -131,11 +131,6 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
     }
   };
 
-  const switchBaseClasses = `!h-7 !w-14 !border-0 shadow-sm transition-colors ${darkMode
-    ? 'data-[state=checked]:bg-green-400 data-[state=unchecked]:bg-gray-600'
-    : 'data-[state=checked]:bg-black data-[state=unchecked]:bg-gray-300'
-    }`;
-  const switchThumbClass = "!h-5 !w-6 data-[state=checked]:!translate-x-7 data-[state=unchecked]:!translate-x-1";
   const customMessagePrimaryButtonClass = darkMode
     ? 'h-9 border border-blue-500/35 bg-blue-500/15 px-3 text-xs font-semibold text-blue-100 shadow-none hover:border-blue-400/60 hover:bg-blue-500/25'
     : 'h-9 border border-gray-900 bg-gray-900 px-3 text-xs font-semibold text-white shadow-none hover:bg-gray-800';
@@ -156,12 +151,12 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
     : 'h-8 border border-transparent px-2 text-xs font-semibold text-red-600 hover:bg-red-50 hover:text-red-700';
 
   const SettingsToggleRow = ({ label, checked, onChange, disabled, ariaLabel }) => (
-    <div className="flex items-center justify-between w-full">
+    <div className="flex items-center justify-between gap-3" data-output-setting-subrow>
       <label className={`text-[13px] leading-5 whitespace-nowrap ${darkMode ? 'text-gray-200' : 'text-gray-700'} ${disabled ? 'opacity-50' : ''}`}>
         {label}
       </label>
       <div className="flex items-center gap-3">
-        <span className={`text-[13px] leading-5 ${darkMode ? 'text-gray-300' : 'text-gray-600'} ${disabled ? 'opacity-50' : ''}`}>
+        <span className={`text-[10px] leading-4 ${darkMode ? 'text-gray-300' : 'text-gray-600'} ${disabled ? 'opacity-50' : ''}`}>
           {checked ? 'Enabled' : 'Disabled'}
         </span>
         <Switch
@@ -169,8 +164,8 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
           onCheckedChange={onChange}
           disabled={disabled}
           aria-label={ariaLabel}
-          className={`${switchBaseClasses} ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-          thumbClassName={switchThumbClass}
+          size="medium"
+          variant="control"
         />
       </div>
     </div>
@@ -191,7 +186,7 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
       tooltip: 'Font size and color for current lyric line',
       alignTooltip: 'Text alignment for current line',
       extra: () => (
-        <div className="flex items-center justify-between gap-4 mt-4">
+        <div className="flex items-center justify-between gap-4" data-output-setting-row>
           <Tooltip content="Color for translation lines in grouped lyrics" side="right">
             <LabelWithIcon icon={Languages} text="Translation Colour" darkMode={darkMode} />
           </Tooltip>
@@ -219,12 +214,12 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
       tooltip: 'Font size and color for upcoming lyric line',
       alignTooltip: 'Text alignment for upcoming line',
       extra: ({ sectionDisabled }) => (
-        <div className="flex items-center justify-between gap-4 mt-4">
+        <div className="flex items-center justify-between gap-4" data-output-setting-row>
           <Tooltip content="Show arrow indicator before upcoming line" side="right">
             <LabelWithIcon icon={ChevronRight} text="Arrow" darkMode={darkMode} />
           </Tooltip>
           <div className="flex items-center gap-2 justify-end w-full">
-            <span className={`text-[13px] leading-5 ${darkMode ? 'text-gray-300' : 'text-gray-600'} ${sectionDisabled ? 'opacity-50' : ''}`}>
+            <span className={`text-[10px] leading-4 ${darkMode ? 'text-gray-300' : 'text-gray-600'} ${sectionDisabled ? 'opacity-50' : ''}`}>
               {settings.showNextArrow ? 'Enabled' : 'Disabled'}
             </span>
             <Switch
@@ -232,10 +227,9 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
               onCheckedChange={(checked) => update('showNextArrow', checked)}
               disabled={sectionDisabled}
               aria-label="Toggle show arrow"
-              className={`${switchBaseClasses} ${sectionDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-              thumbClassName={switchThumbClass}
+              size="medium"
+              variant="control"
             />
-            <PaintBucket className={`h-3.5 w-3.5 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`} />
             <ColorPicker
               value={settings.nextArrowColor}
               onChange={(val) => update('nextArrowColor', val)}
@@ -272,38 +266,37 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
       : section.extra;
 
     return (
-      <div className="space-y-4">
-        <h4 className={`text-[13px] font-semibold leading-5 ${darkMode ? 'text-gray-300' : 'text-gray-700'} mt-2`}>{section.title}</h4>
+      <div className="space-y-2">
+        <h4 className={`stage-settings-section-title ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>{section.title}</h4>
 
         {section.settingsToggleKey && (
-          <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center justify-between gap-4" data-output-setting-row>
             <Tooltip
               content={`Show or hide the ${section.title.toLowerCase()} and its styling on stage output`}
               side="right"
             >
-              <div className="flex items-center gap-2 min-w-[170px]">
-                <Eye className={`h-3.5 w-3.5 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`} />
-                <label className={`text-[13px] leading-5 whitespace-nowrap ${darkMode ? 'text-gray-200' : 'text-gray-700'}`}>
-                  {section.settingsToggleKey === 'showNextLine' ? 'Show Next Line' : 'Show Previous Line'}
-                </label>
-              </div>
+              <LabelWithIcon
+                icon={Eye}
+                text={section.settingsToggleKey === 'showNextLine' ? 'Show Next Line' : 'Show Previous Line'}
+                darkMode={darkMode}
+              />
             </Tooltip>
             <div className="flex items-center gap-3 justify-end w-full">
-              <span className={`text-[13px] leading-5 ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+              <span className={`text-[10px] leading-4 ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
                 {sectionEnabled ? 'Enabled' : 'Disabled'}
               </span>
               <Switch
                 checked={sectionEnabled}
                 onCheckedChange={(checked) => update(section.settingsToggleKey, checked)}
                 aria-label={`Toggle ${section.settingsToggleKey === 'showNextLine' ? 'next line' : 'previous line'} visibility`}
-                className={switchBaseClasses}
-                thumbClassName={switchThumbClass}
+                size="medium"
+                variant="control"
               />
             </div>
           </div>
         )}
 
-        <div className={`space-y-4 ${sectionDisabled ? 'opacity-50' : ''}`} aria-disabled={sectionDisabled}>
+        <div className={`space-y-2 ${sectionDisabled ? 'opacity-50' : ''}`} aria-disabled={sectionDisabled}>
           <FontSettingsRow
             darkMode={darkMode}
             sizeValue={settings[section.sizeKey]}
@@ -342,7 +335,7 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
           />
 
           {/* Letter Spacing */}
-          <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center justify-between gap-4" data-output-setting-row>
             <Tooltip content="Adjust letter spacing (-5 to 20 pixels)" side="right">
               <LabelWithIcon icon={BetweenVerticalEnd} text="Letter Spacing" darkMode={darkMode} />
             </Tooltip>
@@ -375,7 +368,7 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
             </div>
           </div>
 
-          <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center justify-between gap-4" data-output-setting-row>
             <Tooltip content="Adjust line spacing (0.8 to 3.0)" side="right">
               <LabelWithIcon icon={ListIndentIncrease} text="Line Spacing" darkMode={darkMode} />
             </Tooltip>
@@ -415,10 +408,10 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
   };
 
   return (
-    <div className="stage-settings-panel space-y-4" onKeyDown={blurInputOnEnter}>
+    <div className="stage-settings-panel" data-theme={darkMode ? 'dark' : 'light'} onKeyDown={blurInputOnEnter}>
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
-        <h3 className={`text-[13px] font-medium uppercase leading-5 tracking-wide ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+        <h3 className={`text-xs font-medium uppercase leading-5 tracking-wide ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
           Stage Settings
         </h3>
 
@@ -525,13 +518,14 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
             <button
               onClick={() => {
                 showModal({
-                  title: 'Stage Display Templates',
-                  headerDescription: 'Choose from professionally designed stage display presets',
+                  title: 'Choose a stage display look',
+                  headerDescription: 'Preview a layout, then apply it to the Stage Display',
                   component: 'StageTemplates',
                   variant: 'info',
-                  size: 'large',
-                  scrollBehavior: 'scroll',
-                  dismissLabel: 'Close',
+                  size: 'xl',
+                  icon: <Palette className="h-6 w-6" />,
+                  customLayout: true,
+                  actions: [],
                   onApplyTemplate: (template) => {
                     applySettings(template.settings);
                     showToast({
@@ -577,8 +571,9 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
         </div>
       </div>
 
+      <div className="space-y-2">
       {/* Font Style */}
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex items-center justify-between gap-4" data-output-setting-row>
         <Tooltip content="Select font family for stage display" side="right">
           <LabelWithIcon icon={Type} text="Font Style" darkMode={darkMode} />
         </Tooltip>
@@ -592,8 +587,8 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
       </div>
 
       {/* Background */}
-      <div>
-        <div className="flex items-center justify-between gap-4">
+      <div data-output-setting-group data-expanded={backgroundAdvancedExpanded}>
+        <div className="flex items-center justify-between gap-4" data-output-setting-row>
           <Tooltip content="Set background color or gradient for stage display" side="right">
             <LabelWithIcon icon={Square} text="Background" darkMode={darkMode} />
           </Tooltip>
@@ -621,7 +616,7 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
           </div>
         </div>
 
-        <AdvancedCollapse expanded={backgroundAdvancedExpanded}>
+        <AdvancedCollapse expanded={backgroundAdvancedExpanded} openMarginTop={0}>
           <SettingsToggleRow
             label="Clear Empty Lyrics Screen"
             checked={settings.clearEmptyLyricsScreen || false}
@@ -631,9 +626,9 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
         </AdvancedCollapse>
       </div>
 
-      <div>
+      <div data-output-setting-group data-expanded={upcomingSongAdvancedExpanded}>
         {/* Upcoming Song */}
-        <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center justify-between gap-4" data-output-setting-row>
           <Tooltip content="Configure upcoming song display mode" side="right">
             <LabelWithIcon icon={ListMusic} text="Upcoming Song" darkMode={darkMode} />
           </Tooltip>
@@ -650,7 +645,7 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
               value={settings.upcomingSongMode || 'automatic'}
               onValueChange={(val) => update('upcomingSongMode', val)}
             >
-              <SelectTrigger className={`w-[140px] ${darkMode ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300'}`}>
+              <SelectTrigger className={`w-35 ${darkMode ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300'}`}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className={darkMode ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300'}>
@@ -662,14 +657,14 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
         </div>
 
         {/* Upcoming Song Advanced Settings Row */}
-        <AdvancedCollapse expanded={upcomingSongAdvancedExpanded}>
-          <div className="space-y-3">
+        <AdvancedCollapse expanded={upcomingSongAdvancedExpanded} openMarginTop={0}>
+          <div className="space-y-0">
             {/* Custom Name Input with OK Button */}
-            <div className="flex items-center justify-between w-full gap-2">
+            <div className="flex items-center justify-between gap-2" data-output-setting-subrow>
               <label className={`text-[13px] leading-5 whitespace-nowrap ${darkMode ? 'text-gray-200' : 'text-gray-700'} ${settings.upcomingSongMode !== 'custom' ? 'opacity-50' : ''}`}>
                 Custom Name
               </label>
-              <div className="flex items-center gap-2">
+              <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
                 <Input
                   type="text"
                   value={customUpcomingSongName}
@@ -681,7 +676,7 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
                       handleConfirmUpcomingSongName();
                     }
                   }}
-                  className={`w-full ${darkMode ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300'} ${settings.upcomingSongMode !== 'custom' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  className={`min-w-0 flex-1 text-xs placeholder:text-[11px] ${darkMode ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300'} ${settings.upcomingSongMode !== 'custom' ? 'opacity-50 cursor-not-allowed' : ''}`}
                 />
                 {hasUnsavedUpcomingSongName && settings.upcomingSongMode === 'custom' && (
                   <Button
@@ -706,17 +701,14 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
         </AdvancedCollapse>
       </div>
 
-      <div className={`border-t my-4 ${darkMode ? 'border-gray-700' : 'border-gray-100'}`}></div>
-
       {lineSections.map((section) => (
         <React.Fragment key={section.title}>
           {renderLineSection(section)}
-          <div className={`border-t my-4 ${darkMode ? 'border-gray-700' : 'border-gray-100'}`}></div>
         </React.Fragment>
       ))}
 
       {/* Song Info Settings */}
-      <h4 className={`text-[13px] font-semibold leading-5 ${darkMode ? 'text-gray-300' : 'text-gray-700'} mt-2`}>Top Bar</h4>
+      <h4 className={`stage-settings-section-title ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>Top Bar</h4>
 
       <FontSettingsRow
         darkMode={darkMode}
@@ -742,32 +734,30 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
         tooltip="Font size and color for upcoming song name"
       />
 
-      <div className={`border-t my-4 ${darkMode ? 'border-gray-700' : 'border-gray-100'}`}></div>
-
       {/* Bottom Bar Settings */}
-      <h4 className={`text-[13px] font-semibold leading-5 ${darkMode ? 'text-gray-300' : 'text-gray-700'} mt-2`}>Bottom Bar</h4>
+      <h4 className={`stage-settings-section-title ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>Bottom Bar</h4>
 
-      <div className="flex items-center justify-between gap-4 mt-4">
+      <div className="flex items-center justify-between gap-4" data-output-setting-row>
         <Tooltip content="Display current real-world time" side="right">
           <LabelWithIcon icon={ScreenShare} text="Show Time" darkMode={darkMode} />
         </Tooltip>
         <div className="flex items-center gap-3 justify-end w-full">
-          <span className={`text-[13px] leading-5 ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+          <span className={`text-[10px] leading-4 ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
             {settings.showTime ? 'Enabled' : 'Disabled'}
           </span>
           <Switch
             checked={settings.showTime}
             onCheckedChange={(checked) => update('showTime', checked)}
             aria-label="Toggle show time"
-            className={switchBaseClasses}
-            thumbClassName={switchThumbClass}
+            size="medium"
+            variant="control"
           />
         </div>
       </div>
 
-      <div>
+      <div data-output-setting-group data-expanded={timerAdvancedExpanded}>
         {/* Timer Controls */}
-        <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center justify-between gap-4" data-output-setting-row>
           <Tooltip content="Set countdown timer duration in minutes" side="right">
             <LabelWithIcon icon={Timer} text="Countdown Timer" darkMode={darkMode} />
           </Tooltip>
@@ -794,8 +784,8 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
         </div>
 
         {/* Timer Advanced Settings Row */}
-        <AdvancedCollapse expanded={timerAdvancedExpanded}>
-          <div className="space-y-3">
+        <AdvancedCollapse expanded={timerAdvancedExpanded} openMarginTop={0}>
+          <div className="space-y-0">
             <SettingsToggleRow
               label="Send Full Screen"
               checked={settings.timerFullScreen || false}
@@ -808,9 +798,9 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
       </div>
 
       {/* Timer Control Buttons Row */}
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex items-center justify-between gap-4" data-output-setting-row>
         {/* Left: Timer Display */}
-        <div className={`flex items-center justify-center px-4 py-2 rounded-lg min-w-[120px] ${darkMode ? 'bg-gray-700' : 'bg-gray-100'}`}>
+        <div className={`flex items-center justify-center px-4 py-2 rounded-lg min-w-30 ${darkMode ? 'bg-gray-700' : 'bg-gray-100'}`}>
           <div className={`text-xl font-mono font-bold ${timerRunning && !timerPaused ? (darkMode ? 'text-green-400' : 'text-green-600') : (darkMode ? 'text-gray-400' : 'text-gray-500')}`}>
             <StageTimerValue
               timerRunning={timerRunning}
@@ -876,15 +866,13 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
         tooltip="Font size and color for bottom bar text"
       />
 
-      <div className={`border-t my-4 ${darkMode ? 'border-gray-700' : 'border-gray-100'}`}></div>
-
       {/* Custom Messages */}
-      <h4 className={`text-[13px] font-semibold leading-5 ${darkMode ? 'text-gray-300' : 'text-gray-700'} mt-2`}>Custom Messages</h4>
+      <h4 className={`stage-settings-section-title ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>Custom Messages</h4>
 
-      <div>
-        <div className="flex items-center justify-between gap-4 mt-4">
-          <Tooltip content="Time between message transitions (1000-10000ms)" side="right">
-            <LabelWithIcon icon={GalleryVerticalEnd} text="Scroll Speed (ms)" darkMode={darkMode} />
+      <div data-output-setting-group data-expanded={customMessagesAdvancedExpanded}>
+        <div className="flex items-center justify-between gap-4" data-output-setting-row>
+          <Tooltip content="How long each message remains visible (1000-10000ms)" side="right">
+            <LabelWithIcon icon={GalleryVerticalEnd} text="Message Duration (ms)" darkMode={darkMode} />
           </Tooltip>
           <div className="flex items-center gap-2 justify-end">
             <Tooltip content={(customMessagesAdvancedExpanded ? "Hide" : "Show") + " advanced settings"} side="top">
@@ -915,8 +903,8 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
         </div>
 
         {/* Custom Messages Advanced Settings Row */}
-        <AdvancedCollapse expanded={customMessagesAdvancedExpanded}>
-          <div className="space-y-3">
+        <AdvancedCollapse expanded={customMessagesAdvancedExpanded} openMarginTop={0}>
+          <div className="space-y-0">
             <SettingsToggleRow
               label="Send Full Screen"
               checked={settings.customMessagesFullScreen || false}
@@ -928,7 +916,7 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
         </AdvancedCollapse>
       </div>
 
-      <div className="space-y-2">
+      <div className="stage-settings-message-composer space-y-2">
         <div className="flex gap-2">
           <Input
             type="text"
@@ -937,7 +925,7 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
             onKeyDown={(e) => e.key === 'Enter' && handleAddMessage()}
             placeholder="Enter custom message..."
             maxLength={MAX_STAGE_MESSAGE_LENGTH}
-            className={`flex-1 ${darkMode ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300'}`}
+            className={`flex-1 rounded-full! text-xs placeholder:text-[11px] ${darkMode ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300'}`}
           />
           <Button onClick={handleAddMessage} className={customMessagePrimaryButtonClass}>
             Add
@@ -956,9 +944,9 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
         </div>
 
         {customMessages.length > 0 && (
-          <div className={`space-y-2 max-h-40 overflow-y-auto p-2 rounded ${darkMode ? 'bg-gray-700' : 'bg-gray-50'}`}>
+          <div className={`max-h-40 space-y-2 overflow-y-auto rounded-xl p-2 ${darkMode ? 'bg-gray-800/70' : 'bg-white/70'}`}>
             {customMessages.map((msg) => (
-              <div key={msg.id} className={`flex items-center justify-between p-2 rounded ${darkMode ? 'bg-gray-600' : 'bg-white'}`}>
+              <div key={msg.id} className={`flex items-center justify-between rounded-lg p-2 ${darkMode ? 'bg-gray-700' : 'bg-gray-100'}`}>
                 {editingMessageId === msg.id ? (
                   <>
                     <Input
@@ -1021,17 +1009,15 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
         )}
       </div>
 
-      <div className={`border-t my-4 ${darkMode ? 'border-gray-700' : 'border-gray-100'}`}></div>
-
       {/* Transition Settings */}
-      <h4 className={`text-[13px] font-semibold leading-5 ${darkMode ? 'text-gray-300' : 'text-gray-700'} mt-2`}>Transition Style</h4>
+      <h4 className={`stage-settings-section-title ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>Transition Style</h4>
 
-      <div className="flex items-center justify-between gap-4 mt-4">
+      <div className="flex items-center justify-between gap-4" data-output-setting-row>
         <Tooltip content="Choose animation style when lyrics change" side="right">
           <LabelWithIcon icon={ArrowRightLeft} text="Animation" darkMode={darkMode} />
         </Tooltip>
         <Select value={settings.transitionAnimation} onValueChange={(val) => update('transitionAnimation', val)}>
-          <SelectTrigger className={`w-[140px] ${darkMode ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300'}`}>
+          <SelectTrigger className={`w-35 ${darkMode ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300'}`}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent className={darkMode ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300'}>
@@ -1043,7 +1029,7 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
       </div>
 
       {settings.transitionAnimation !== 'none' && (
-        <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center justify-between gap-4" data-output-setting-row>
           <Tooltip content="Animation duration (100-1000ms)" side="right">
             <LabelWithIcon icon={Gauge} text="Speed (ms)" darkMode={darkMode} />
           </Tooltip>
@@ -1065,6 +1051,7 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
           />
         </div>
       )}
+      </div>
     </div>
   );
 };

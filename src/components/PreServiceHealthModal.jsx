@@ -62,7 +62,7 @@ const getDashboardState = ({ failCount, warnCount, checks, loading }) => {
     return {
       status: 'warn',
       label: 'Checking readiness',
-      detail: 'Running service-critical checks before reporting status.',
+      detail: 'Running event-critical checks before reporting status.',
     };
   }
   if (failCount > 0) {
@@ -75,26 +75,44 @@ const getDashboardState = ({ failCount, warnCount, checks, loading }) => {
   if (warnCount > 0) {
     return {
       status: 'warn',
-      label: 'Review before service',
+      label: 'Review before going live',
       detail: `${warnCount} advisory check${warnCount === 1 ? '' : 's'} should be reviewed before production.`,
     };
   }
   return {
     status: 'pass',
     label: 'Production ready',
-    detail: 'Service-critical systems are reporting healthy status.',
+    detail: 'Event-critical systems are reporting healthy status.',
   };
 };
 
 const collectMediaReferences = (storeState) => {
   const refs = [];
   const outputIds = ['output1', 'output2', ...(storeState.customOutputIds || [])];
+
+  const addReference = (output, media) => {
+    if (!media) return;
+    const source = typeof media === 'string' ? media : (media.dataUrl || media.url);
+    if (!source) return;
+    refs.push({
+      output,
+      source,
+      bundled: typeof media === 'object' && media.bundled === true,
+      embedded: typeof source === 'string' && source.startsWith('data:'),
+    });
+  };
+
   for (const id of outputIds) {
     const settings = storeState[`${id}Settings`] || {};
-    if (settings.fullScreenBackgroundMedia) refs.push({ output: id, url: settings.fullScreenBackgroundMedia });
-    if (settings.fullScreenElementMedia) refs.push({ output: id, url: settings.fullScreenElementMedia });
+    addReference(id, settings.fullScreenBackgroundMedia);
+    addReference(id, settings.fullScreenElementMedia);
   }
   return refs;
+};
+
+const resolveMediaReferenceUrl = ({ source, bundled }) => {
+  if (bundled || /^(?:https?:|blob:)/i.test(source)) return source;
+  return resolveBackendUrl(source);
 };
 
 export default function PreServiceHealthModal({ darkMode }) {
@@ -187,8 +205,9 @@ export default function PreServiceHealthModal({ darkMode }) {
     } else {
       const missing = [];
       await Promise.all(mediaRefs.map(async (media) => {
+        if (media.embedded) return;
         try {
-          const response = await fetch(resolveBackendUrl(media.url), { method: 'HEAD' });
+          const response = await fetch(resolveMediaReferenceUrl(media), { method: 'HEAD' });
           if (!response.ok) missing.push(media);
         } catch {
           missing.push(media);

@@ -249,17 +249,15 @@ const MobileLayout = () => {
               </button>
 
               {/* Toggle Display Switch */}
-              <div className="flex shrink-0 items-center gap-4">
+              <div className="grid w-33 shrink-0 grid-cols-[3.75rem_minmax(0,1fr)] items-center gap-4">
                 <Switch
                   checked={isOutputOn}
                   onCheckedChange={handleToggle}
-                  className={`scale-[1.45] ${darkMode
-                    ? 'data-[state=checked]:bg-green-500 data-[state=unchecked]:bg-gray-600'
-                    : 'data-[state=checked]:bg-black'
-                    }`}
+                  size="medium"
+                  variant="control"
                 />
                 <span
-                  className={`text-xs whitespace-nowrap ${darkMode ? 'text-gray-300' : 'text-gray-600'
+                  className={`text-[10px] whitespace-nowrap ${darkMode ? 'text-gray-300' : 'text-gray-600'
                     }`}
                 >
                   {isOutputOn ? 'Output ON' : 'Output OFF'}

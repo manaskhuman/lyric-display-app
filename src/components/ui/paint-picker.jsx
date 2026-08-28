@@ -5,6 +5,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ColorPicker } from "@/components/ui/color-picker";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import {
   createLinearGradientPaint,
@@ -16,16 +17,91 @@ import {
 
 const STOP_LABELS = ['Start', 'End'];
 
-const activeButtonClass = (darkMode) => (
-  darkMode
-    ? "!bg-white !text-gray-900 hover:!bg-white !border-gray-300 !transition-none"
-    : "!bg-black !text-white hover:!bg-black !border-gray-300 !transition-none"
-);
+const clampGradientAngle = (value) => Math.min(360, Math.max(0, Number(value) || 0));
+
+const GradientAngleDial = ({ value, onChange, darkMode }) => {
+  const angle = clampGradientAngle(value);
+  const dialAngle = angle === 360 ? 0 : angle;
+  const radians = dialAngle * (Math.PI / 180);
+  const handlePosition = {
+    left: `${50 + (Math.sin(radians) * 30)}%`,
+    top: `${50 - (Math.cos(radians) * 30)}%`,
+  };
+
+  const updateFromPointer = (event) => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const x = event.clientX - (bounds.left + (bounds.width / 2));
+    const y = event.clientY - (bounds.top + (bounds.height / 2));
+    const degrees = (Math.atan2(x, -y) * 180) / Math.PI;
+    onChange(Math.round((degrees + 360) % 360));
+  };
+
+  const handlePointerDown = (event) => {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    updateFromPointer(event);
+  };
+
+  const handlePointerMove = (event) => {
+    if (!event.currentTarget.hasPointerCapture?.(event.pointerId)) return;
+    updateFromPointer(event);
+  };
+
+  const handleKeyDown = (event) => {
+    const step = event.shiftKey ? 15 : 1;
+    let nextAngle = null;
+
+    if (event.key === 'ArrowUp' || event.key === 'ArrowRight') nextAngle = angle + step;
+    if (event.key === 'ArrowDown' || event.key === 'ArrowLeft') nextAngle = angle - step;
+    if (event.key === 'Home') nextAngle = 0;
+    if (event.key === 'End') nextAngle = 360;
+    if (nextAngle === null) return;
+
+    event.preventDefault();
+    onChange(clampGradientAngle(nextAngle));
+  };
+
+  return (
+    <div
+      role="slider"
+      tabIndex={0}
+      aria-label="Gradient angle"
+      aria-valuemin={0}
+      aria-valuemax={360}
+      aria-valuenow={angle}
+      aria-valuetext={`${angle} degrees`}
+      onKeyDown={handleKeyDown}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={(event) => event.currentTarget.releasePointerCapture?.(event.pointerId)}
+      onPointerCancel={(event) => event.currentTarget.releasePointerCapture?.(event.pointerId)}
+      className={cn(
+        "relative h-7.5 w-7.5 shrink-0 touch-none cursor-pointer rounded-full border outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+        darkMode ? "border-gray-500 bg-gray-700" : "border-gray-400 bg-white"
+      )}
+    >
+      <span
+        aria-hidden="true"
+        className={cn("pointer-events-none absolute left-1/2 top-1/2 h-px w-2 origin-left rounded-full", darkMode ? "bg-blue-300" : "bg-blue-600")}
+        style={{ transform: `translateY(-50%) rotate(${dialAngle - 90}deg)` }}
+      />
+      <span
+        aria-hidden="true"
+        className={cn("pointer-events-none absolute left-1/2 top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full", darkMode ? "bg-blue-200" : "bg-blue-700")}
+      />
+      <span
+        aria-hidden="true"
+        className={cn("pointer-events-none absolute h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full border", darkMode ? "border-blue-200 bg-gray-800" : "border-blue-700 bg-white")}
+        style={handlePosition}
+      />
+    </div>
+  );
+};
 
 const inactiveButtonClass = (darkMode) => (
   darkMode
-    ? "!bg-transparent !border-gray-600 !text-gray-200 hover:!bg-gray-700 !transition-none"
-    : "!bg-transparent !border-gray-300 !text-gray-700 hover:!bg-gray-100 !transition-none"
+    ? "bg-transparent! border-gray-600! text-gray-200! hover:bg-gray-700! transition-none!"
+    : "bg-transparent! border-gray-300! text-gray-700! hover:bg-gray-100! transition-none!"
 );
 
 const PaintPicker = React.forwardRef(({
@@ -37,6 +113,8 @@ const PaintPicker = React.forwardRef(({
   showValue = false,
   darkMode = false,
   presentation = "default",
+  popoverAlign = "start",
+  popoverSide = "top",
   ...props
 }, ref) => {
   const normalizedValue = React.useMemo(() => normalizePaint(value, fallbackColor), [fallbackColor, value]);
@@ -126,7 +204,7 @@ const PaintPicker = React.forwardRef(({
 
   const updateGradientAngle = (rawValue) => {
     if (localPaint.type !== 'linear') return;
-    const nextAngle = Math.min(360, Math.max(0, Number(rawValue) || 0));
+    const nextAngle = clampGradientAngle(rawValue);
     commitPaint({ ...localPaint, angle: nextAngle });
   };
 
@@ -145,28 +223,30 @@ const PaintPicker = React.forwardRef(({
 
   const paintPanel = (
     <div className={`${presentation === 'sheet' ? 'mx-auto max-w-sm' : ''} space-y-3`}>
-      <div className="grid grid-cols-2 gap-2">
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => setMode('solid')}
-          className={cn(localPaint.type === 'solid' ? activeButtonClass(darkMode) : inactiveButtonClass(darkMode))}
+      <Tabs value={localPaint.type} onValueChange={setMode}>
+        <TabsList
+          aria-label="Fill type"
+          indicatorClassName={darkMode ? 'bg-white shadow' : 'bg-black shadow'}
+          className={`grid h-10 w-full grid-cols-2 gap-1 p-1 ${darkMode ? 'bg-[#2b3544] text-gray-300' : 'bg-[#f8fafc] text-gray-500'}`}
         >
-          <Droplet className="mr-1.5 h-4 w-4" />
-          Solid
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => setMode('linear')}
-          className={cn(localPaint.type === 'linear' ? activeButtonClass(darkMode) : inactiveButtonClass(darkMode))}
-        >
-          <SquareDashed className="mr-1.5 h-4 w-4" />
-          Gradient
-        </Button>
-      </div>
+          <TabsTrigger
+            value="solid"
+            className={`h-full min-w-0 gap-1.5 px-2 text-xs ${darkMode ? 'data-[state=active]:text-gray-900' : 'data-[state=active]:text-white'}`}
+          >
+            <Droplet className="h-4 w-4" />
+            Solid
+          </TabsTrigger>
+          <TabsTrigger
+            value="linear"
+            className={`h-full min-w-0 gap-1.5 px-2 text-xs ${darkMode ? 'data-[state=active]:text-gray-900' : 'data-[state=active]:text-white'}`}
+          >
+            <SquareDashed className="h-4 w-4" />
+            Gradient
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
 
-      <div className="h-8 w-full rounded-md border border-border" style={{ background: previewBackground }} />
+      <div data-paint-picker-preview className="h-8 w-full rounded-xl border border-border" style={{ background: previewBackground }} />
 
       {localPaint.type === 'solid' && (
         <div className="space-y-2">
@@ -216,25 +296,35 @@ const PaintPicker = React.forwardRef(({
             ))}
           </div>
 
-          <div className="flex items-center gap-2">
-            <span className={`text-sm font-medium w-12 ${darkMode ? 'text-gray-200' : 'text-gray-700'}`}>Angle</span>
-            <Input
-              type="number"
-              value={localPaint.angle}
-              onChange={(event) => updateGradientAngle(event.target.value)}
-              min={0}
-              max={360}
-              className={`flex-1 ${darkMode ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300'}`}
-            />
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={reverseGradient}
-              className={darkMode ? inactiveButtonClass(darkMode) : ""}
-            >
-              Flip
-            </Button>
+          <div className="space-y-2">
+            <div className={`text-xs font-semibold uppercase tracking-wide ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+              Angle
+            </div>
+            <div className="flex items-center gap-3">
+              <GradientAngleDial
+                value={localPaint.angle}
+                onChange={updateGradientAngle}
+                darkMode={darkMode}
+              />
+              <Input
+                type="number"
+                value={localPaint.angle}
+                onChange={(event) => updateGradientAngle(event.target.value)}
+                min={0}
+                max={360}
+                aria-label="Gradient angle in degrees"
+                className={`min-w-0 flex-1 ${darkMode ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300'}`}
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={reverseGradient}
+                className={cn("shrink-0", darkMode ? inactiveButtonClass(darkMode) : "")}
+              >
+                Reverse
+              </Button>
+            </div>
           </div>
         </div>
       )}
@@ -256,6 +346,7 @@ const PaintPicker = React.forwardRef(({
           {...props}
         >
           <div
+            data-paint-picker-preview
             className={cn(
               "rounded border border-border shrink-0",
               showValue ? "h-5 w-5" : "h-6 w-full"
@@ -274,7 +365,7 @@ const PaintPicker = React.forwardRef(({
 
       {sheetMode && open && typeof document !== 'undefined' ? createPortal(
         <div
-          className="fixed inset-0 z-[2350] bg-black/35 p-2"
+          className="fixed inset-0 z-2350 bg-black/35 p-2"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) handleOpenChange(false);
           }}
@@ -282,7 +373,7 @@ const PaintPicker = React.forwardRef(({
           <div
             ref={contentRef}
             data-popover-scroll-lock-allow="true"
-            className={`flex h-full flex-col overflow-hidden rounded-lg border shadow-2xl ${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}
+            className={`flex h-full flex-col overflow-hidden rounded-2xl border shadow-2xl ${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}
           >
             <div className={`flex items-center justify-between border-b px-4 py-3 ${darkMode ? 'border-gray-700' : 'border-gray-200'}`}>
               <div className={`text-sm font-semibold ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>Choose Fill</div>
@@ -313,10 +404,11 @@ const PaintPicker = React.forwardRef(({
         <PopoverContent
           ref={contentRef}
           data-popover-scroll-lock-allow="true"
-          className={`w-[272px] p-3 ${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}
-          align="start"
-          side="top"
-          avoidCollisions={false}
+          className={`w-68 rounded-2xl p-3 ${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}
+          align={popoverAlign}
+          side={popoverSide}
+          avoidCollisions
+          collisionPadding={12}
         >
           {paintPanel}
         </PopoverContent>

@@ -21,9 +21,9 @@ const BackgroundBandSettingsSection = ({
   settings,
   update,
 }) => (
-  <AdvancedCollapse expanded={backgroundAdvancedExpanded && !fullScreenModeChecked}>
-    <div className="flex items-center justify-between w-full">
-      <div className="flex items-center gap-2">
+  <AdvancedCollapse expanded={backgroundAdvancedExpanded && !fullScreenModeChecked} openMarginTop={0}>
+    <div className="flex flex-wrap items-center gap-2" data-output-setting-subrow>
+      <div className="flex min-w-37.5 flex-1 items-center gap-2">
         <label className={`text-[13px] leading-5 whitespace-nowrap ${darkMode ? 'text-gray-200' : 'text-gray-700'}`}>
           Mode
         </label>
@@ -32,7 +32,7 @@ const BackgroundBandSettingsSection = ({
           onValueChange={handleBackgroundHeightModeChange}
         >
           <SelectTrigger
-            className={`w-[110px] ${darkMode
+            className={`w-27.5 ${darkMode
               ? 'bg-gray-700 border-gray-600 text-gray-200'
               : 'bg-white border-gray-300'
               }`}
@@ -54,7 +54,7 @@ const BackgroundBandSettingsSection = ({
               ? `Locked to Max Lines (${maxLinesValue}). Click to unlock`
               : `Click to lock to Max Lines (${maxLinesValue})`
         } side="top">
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-24 items-center gap-2">
             <button
               onClick={() => {
                 if (maxLinesEnabled) {
@@ -101,7 +101,7 @@ const BackgroundBandSettingsSection = ({
       )}
 
       <Tooltip content="Vertical padding for background band (in pixels)" side="top">
-        <div className="flex items-center gap-2">
+        <div className="ml-auto flex min-w-22 items-center justify-end gap-2">
           <ArrowUpDown className={`h-3.5 w-3.5 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`} />
           <Input
             type="number"

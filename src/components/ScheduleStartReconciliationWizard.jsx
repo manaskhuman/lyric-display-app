@@ -282,18 +282,6 @@ const ScheduleStartReconciliationWizard = ({
     ? 'border-slate-700 bg-slate-900 hover:border-slate-500 hover:bg-slate-800'
     : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50';
 
-  const expectedText = position.kind === 'item'
-    ? `${schedule.items[position.suggestedItemIndex]?.label || 'the current item'} · ${formatDuration(position.remainingMs)} remaining`
-    : position.kind === 'manual'
-      ? `${schedule.items[position.suggestedItemIndex]?.label || 'a manual item'} · position needs confirmation`
-      : position.kind === 'transition'
-        ? `Transition to ${schedule.items[position.suggestedItemIndex]?.label || 'the next item'} · ${formatDuration(position.remainingMs)} remaining`
-        : position.kind === 'gap'
-          ? `Waiting for ${schedule.items[position.suggestedItemIndex]?.label || 'the next item'}`
-          : position.kind === 'finished'
-            ? `The planned schedule ended ${formatOffset(position.elapsedAfterEndMs)} ago`
-            : 'The first schedule item';
-
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className={`border-b py-3 ${darkMode ? 'border-slate-800' : 'border-slate-200'}`}>
@@ -364,12 +352,6 @@ const ScheduleStartReconciliationWizard = ({
 
         {step === 1 && (
           <div className="mx-auto max-w-3xl space-y-4">
-            <section className={`rounded-xl border p-4 ${inset}`}>
-              <p className={`text-[10px] font-semibold uppercase tracking-wide ${muted}`}>Expected current position</p>
-              <p className="mt-1 text-sm font-semibold">{expectedText}</p>
-              <p className={`mt-1 text-[10px] ${muted}`}>{position.exact ? 'Calculated from the timed schedule.' : 'A manual or unbounded item requires operator confirmation.'}</p>
-            </section>
-
             <div>
               <h3 className="text-sm font-semibold">What is happening now?</h3>
               <p className={`mt-1 text-xs ${muted}`}>The suggestion is preselected. Choose a different item if the live event has moved away from plan.</p>
@@ -388,7 +370,7 @@ const ScheduleStartReconciliationWizard = ({
                       {value === getSuggestedChoice(position) && <span className="rounded-full bg-blue-600/10 px-2 py-1 text-[9px] font-semibold text-blue-600 dark:text-blue-300">Suggested</span>}
                     </button>
                     {index < schedule.items.length - 1 && transitionMs > 0 && position.timeline.segments.some((segment) => segment.type === 'transition' && segment.fromItemIndex === index) && (
-                      <button type="button" role="radio" aria-checked={selectedChoice === transitionChoiceValue(index)} onClick={() => choosePosition(transitionChoiceValue(index))} className={`ml-8 flex w-[calc(100%_-_2rem)] items-center gap-2 rounded-lg border px-3 py-2 text-left text-[10px] transition-colors ${selectedChoice === transitionChoiceValue(index) ? selectedClass : optionClass}`}>
+                      <button type="button" role="radio" aria-checked={selectedChoice === transitionChoiceValue(index)} onClick={() => choosePosition(transitionChoiceValue(index))} className={`ml-8 flex w-[calc(100%-2rem)] items-center gap-2 rounded-lg border px-3 py-2 text-left text-[10px] transition-colors ${selectedChoice === transitionChoiceValue(index) ? selectedClass : optionClass}`}>
                         <ArrowRight className="h-3 w-3" /> Transition to {schedule.items[index + 1].label}
                       </button>
                     )}

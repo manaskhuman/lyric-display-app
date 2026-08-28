@@ -6,7 +6,7 @@
 
 Real-time lyric control and multi-output display for live events, worship services, streaming, and production environments.
 
-**Version:** 6.7.1 · **License:** GPL-3.0-or-later
+**Version:** 6.8.6 · **License:** GPL-3.0-or-later
 
 [Download LyricDisplay](https://github.com/PeterAlaks/lyric-display-app/releases/latest) · [Installation guide](INSTALLATION.md) · [Contributing](CONTRIBUTING.md) · [Architecture map](docs/PROJECT_STRUCTURE.md)
 
@@ -19,6 +19,9 @@ Key capabilities include:
 - Two default lyric outputs, up to four custom outputs, a stage display, and a timer display.
 - Independent typography, positioning, transitions, backgrounds, media, and full-screen styling per output.
 - Text, LRC, Markdown, RTF, and DOCX imports, plus `.ldset` setlists and `.ldsch` event schedules.
+- A keyboard-first local file navigator with indexed filename/path search, TXT/LRC lyric search and previews, recent files, and watched source folders.
+- A compact indexed-folder save picker with keyboard navigation, safe overwrite confirmation, and an optional native Save As escape hatch.
+- Bounded indexing safeguards: up to 10 focused source folders, 512 MB of supported files per folder, and capped searchable TXT/LRC content memory.
 - Built-in song editing, translation grouping, timestamps, search, autoplay, and lyric video export.
 - Online lyric providers and EasyWorship/presentation import workflows.
 - OBS Browser Source creation, a compact OBS Dock mode, and generic browser URLs for other production software.
@@ -46,7 +49,7 @@ The [installation and integration guide](INSTALLATION.md) covers platform trust 
 5. In OBS, use **Output > OBS Source Creator** or add a Browser Source manually:
 
 ```text
-http://localhost:4000/#/output1
+http://localhost:4000/output1
 ```
 
 LyricDisplay must remain running while browser sources or remote controllers are in use. See the [integration guide](INSTALLATION.md#browser-output-urls) for all output routes.

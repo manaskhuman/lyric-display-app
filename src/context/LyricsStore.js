@@ -1,7 +1,10 @@
 ﻿import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { DEFAULT_SETLIST_ITEMS } from '../../shared/setlistLimits.js';
-import { buildLyricsParsingOptions } from '../../shared/lyricsParsing.js';
+import { DEFAULT_OUTPUT_IDS } from '../../shared/outputRegistry.js';
+import { buildLyricsParsingOptions } from '../../shared/lyricsParsing/preferenceOptions.js';
+import { normalizeAppearanceTransitions } from '../../shared/transitionSettings.js';
+import { normalizePreviewSettings } from '../../shared/previewSettings.js';
 import { normalizeTimerControlSettings, normalizeTimerDisplaySettings } from '../utils/timerUtils';
 import { createSolidPaint } from '../utils/paint';
 import { createAppShellSlice } from './lyricsStore/appShellSlice.js';
@@ -16,9 +19,6 @@ import { createPreferencesSlice } from './lyricsStore/preferencesSlice.js';
 import { createSetlistSlice } from './lyricsStore/setlistSlice.js';
 import { createStageSlice } from './lyricsStore/stageSlice.js';
 import { createTimerSlice } from './lyricsStore/timerSlice.js';
-
-export { createDefaultOutputSettings, defaultOutput1Settings, defaultOutput2Settings } from './lyricsStore/outputSlice.js';
-export { defaultStageSettings } from './lyricsStore/stageSlice.js';
 
 const normalizePaintSettingUpdates = (settings = {}) => {
   if (!settings || typeof settings !== 'object' || Array.isArray(settings)) return {};
@@ -67,6 +67,34 @@ export async function loadPreferencesIntoStore(store) {
       if (result.success && result.settings) {
         store.getState().updateMaxFileSize(result.settings.maxFileSize ?? 2);
         store.getState().updateMaxSetlistFiles(result.settings.maxSetlistFiles ?? DEFAULT_SETLIST_ITEMS);
+      }
+    }
+
+    if (window.electronAPI?.preferences?.getCategory) {
+      const result = await window.electronAPI.preferences.getCategory('appearance');
+      if (result?.success && result.data) {
+        const transitions = normalizeAppearanceTransitions(result.data);
+        const currentState = store.getState();
+        currentState.setAppearanceTransitions(transitions);
+        currentState.setPreviewSettings(result.data.preview);
+        currentState.updateTimerDisplaySettings({
+          stateTransitionAnimation: transitions.timerStateTransitionAnimation,
+          stateTransitionDuration: transitions.timerStateTransitionDuration,
+        });
+
+        const outputIds = [...DEFAULT_OUTPUT_IDS, ...(currentState.customOutputIds || [])];
+        for (const outputId of outputIds) {
+          currentState.updateOutputSettings(outputId, {
+            backgroundMediaTransitionAnimation: transitions.backgroundMediaTransitionAnimation,
+            backgroundMediaTransitionDuration: transitions.backgroundMediaTransitionDuration,
+            outputVisibilityTransitionAnimation: transitions.outputVisibilityTransitionAnimation,
+            outputVisibilityTransitionDuration: transitions.outputVisibilityTransitionDuration,
+          });
+        }
+
+        window.dispatchEvent?.(new CustomEvent('appearance-transitions-updated', {
+          detail: transitions,
+        }));
       }
     }
 
@@ -132,6 +160,12 @@ export async function loadPreferencesIntoStore(store) {
       }
     }
     if (window.electronAPI?.preferences?.get) {
+      const result = await window.electronAPI.preferences.get('formatting.capitalizedWords');
+      if (result.success) {
+        store.getState().setFormattingCapitalizedWords(result.value);
+      }
+    }
+    if (window.electronAPI?.preferences?.get) {
       const result = await window.electronAPI.preferences.get('formatting.normalizeTypographicChars');
       if (result.success && typeof result.value === 'boolean') {
         store.getState().setFormattingNormalizeTypographicChars(result.value);
@@ -187,6 +221,7 @@ const useLyricsStore = create(
           stageEnabled: state.stageEnabled,
           darkMode: state.darkMode,
           themeMode: state.themeMode,
+          previewSettings: state.previewSettings,
           skipSectionTitlesOnKeyboard: state.skipSectionTitlesOnKeyboard,
           hasSeenWelcome: state.hasSeenWelcome,
           stageSettings: state.stageSettings,
@@ -204,6 +239,7 @@ const useLyricsStore = create(
       onRehydrateStorage: () => (state) => {
         if (state) {
           rehydrateOutputState(state);
+          state.previewSettings = normalizePreviewSettings(state.previewSettings);
           state.timerDisplaySettings = normalizeTimerDisplaySettings(state.timerDisplaySettings);
           state.timerControlSettings = normalizeTimerControlSettings(state.timerControlSettings);
         }

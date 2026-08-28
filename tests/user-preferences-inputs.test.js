@@ -34,6 +34,7 @@ test('every numeric field in User Preferences uses the shared change-and-blur pe
   const paths = [
     '../src/components/UserPreferencesModal.jsx',
     '../src/components/UserPreferencesModal/AdvancedPreferencesSection.jsx',
+    '../src/components/UserPreferencesModal/DisplayTransitionsPreferencesPage.jsx',
     '../src/components/UserPreferencesModal/ExternalControlPreferencesSection.jsx',
   ];
 
@@ -82,6 +83,27 @@ test('Live Safety uses the preferences autosave status while keeping its realtim
   assert.match(bridgeSource, /persistPreference && window\.electronAPI\?\.preferences\?\.set/);
   assert.match(persistenceSource, /setSaveError\(true\)/);
   assert.match(layoutSource, /Settings could not be saved/);
+});
+
+test('Preview preferences flow from LyricsStore over the render socket path', async () => {
+  const [preferencesPageSource, storeSource, shellSource, socketEventsSource, previewSource] = await Promise.all([
+    readFile(new URL('../src/components/UserPreferencesModal/PreviewPreferencesPage.jsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/context/LyricsStore.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/components/routes/MainWindowShell.jsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/hooks/useSocketEvents.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/pages/Preview.jsx', import.meta.url), 'utf8'),
+  ]);
+
+  assert.match(
+    preferencesPageSource,
+    /setPreviewSettings\(nextSettings\)[\s\S]*updatePreference\('appearance', 'preview', nextSettings\)/
+  );
+  assert.match(storeSource, /previewSettings:\s*state\.previewSettings/);
+  assert.match(storeSource, /setPreviewSettings\(result\.data\.preview\)/);
+  assert.match(shellSource, /emitStyleUpdate\('preview', previewSettings\)/);
+  assert.match(socketEventsSource, /if \(output === 'preview'\) \{\s*setPreviewSettings\(settings\)/);
+  assert.match(previewSource, /const storedSettings = usePreviewSettings\(\)/);
+  assert.doesNotMatch(previewSource, /BroadcastChannel|preferences\?\.onUpdated|persist\.rehydrate|addEventListener\(['"]storage/);
 });
 
 test('parser guidance is available from the preferences category header', async () => {

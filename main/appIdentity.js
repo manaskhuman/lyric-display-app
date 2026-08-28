@@ -1,16 +1,31 @@
 import electron from 'electron';
 import fs from 'fs';
 import path from 'path';
+import {
+  DEVELOPMENT_RUNTIME_PROFILE,
+  PRODUCTION_RUNTIME_PROFILE,
+  RUNTIME_PROFILE_ENV,
+  USER_DATA_DIR_ENV,
+  getProfiledName,
+} from '../shared/runtimeProfile.js';
+import {
+  consumeAppDataResetRequest,
+  hasCompletedAppDataReset,
+} from './appReset.js';
 
 const { app } = typeof electron === 'object' && electron ? electron : {};
 
 export const APP_NAME = 'LyricDisplay';
+export const DEV_APP_NAME = getProfiledName(APP_NAME, DEVELOPMENT_RUNTIME_PROFILE);
 export const LEGACY_APP_NAME = 'lyric-display-app';
 export const NDI_FOLDER_NAME = 'NDI';
 export const NDI_INSTALL_FOLDER_NAME = 'Companion';
 export const NDI_USER_DATA_FOLDER_NAME = 'User Data';
 export const NDI_MANAGED_INSTALL_MARKER = '.managed-install-complete';
 export const LEGACY_NDI_FOLDER_NAME = 'lyricdisplay-ndi';
+export const LEGACY_EASYWORSHIP_IMPORT_FOLDER_NAME = 'Imported Songs from EW';
+export const EASYWORSHIP_IMPORT_FOLDER_NAME = 'Imported Lyrics from EW';
+export const PRESENTATION_IMPORT_FOLDER_NAME = 'Imported Lyrics from Presentations';
 
 const MIGRATION_MARKER = 'user-data-migration.json';
 const NDI_RUNTIME_ENTRY_NAMES = new Set([
@@ -63,6 +78,18 @@ const NDI_INSTALL_ENTRY_NAMES = new Set([
 
 let configured = false;
 let migrationResult = null;
+let appDataResetResult = { requested: false, reset: false };
+
+export function resolveAppIdentityProfile(isPackaged) {
+  const runtimeProfile = isPackaged
+    ? PRODUCTION_RUNTIME_PROFILE
+    : DEVELOPMENT_RUNTIME_PROFILE;
+  return {
+    runtimeProfile,
+    profileName: getProfiledName(APP_NAME, runtimeProfile),
+    shouldMigrateProductionData: runtimeProfile === PRODUCTION_RUNTIME_PROFILE,
+  };
+}
 
 function pathExists(filePath) {
   try {
@@ -215,7 +242,7 @@ function copyMissingRecursive(sourcePath, targetPath, summary) {
   }
 }
 
-function migrateUserData(appDataPath) {
+function migrateUserData(appDataPath, documentsPath = null) {
   const sourcePath = path.join(appDataPath, LEGACY_APP_NAME);
   const targetPath = path.join(appDataPath, APP_NAME);
   const markerPath = path.join(targetPath, MIGRATION_MARKER);
@@ -224,6 +251,24 @@ function migrateUserData(appDataPath) {
   const targetNdiPath = path.join(targetPath, NDI_FOLDER_NAME);
   const targetNdiInstallPath = path.join(targetNdiPath, NDI_INSTALL_FOLDER_NAME);
   const targetNdiUserDataPath = path.join(targetNdiPath, NDI_USER_DATA_FOLDER_NAME);
+  const legacyEasyWorshipSongsPath = documentsPath
+    ? path.join(documentsPath, LEGACY_EASYWORSHIP_IMPORT_FOLDER_NAME)
+    : null;
+  const targetEasyWorshipSongsPath = documentsPath
+    ? path.join(documentsPath, APP_NAME, LEGACY_EASYWORSHIP_IMPORT_FOLDER_NAME)
+    : null;
+  const legacyEasyWorshipLyricsPath = documentsPath
+    ? path.join(documentsPath, EASYWORSHIP_IMPORT_FOLDER_NAME)
+    : null;
+  const targetEasyWorshipLyricsPath = documentsPath
+    ? path.join(documentsPath, APP_NAME, EASYWORSHIP_IMPORT_FOLDER_NAME)
+    : null;
+  const legacyPresentationLyricsPath = documentsPath
+    ? path.join(documentsPath, PRESENTATION_IMPORT_FOLDER_NAME)
+    : null;
+  const targetPresentationLyricsPath = documentsPath
+    ? path.join(documentsPath, APP_NAME, PRESENTATION_IMPORT_FOLDER_NAME)
+    : null;
 
   const summary = {
     sourcePath,
@@ -242,11 +287,26 @@ function migrateUserData(appDataPath) {
     legacyNdi: createLegacyNdiSummary(legacyNdiPath, targetNdiUserDataPath),
     legacyUserDataNdi: createLegacyNdiSummary(legacyUserDataNdiPath, targetNdiInstallPath),
     flatNdiInstall: createLegacyNdiSummary(targetNdiPath, targetNdiInstallPath),
+    legacyEasyWorshipSongs: documentsPath
+      ? createLegacyNdiSummary(legacyEasyWorshipSongsPath, targetEasyWorshipSongsPath)
+      : null,
+    legacyEasyWorshipLyrics: documentsPath
+      ? createLegacyNdiSummary(legacyEasyWorshipLyricsPath, targetEasyWorshipLyricsPath)
+      : null,
+    legacyPresentationLyrics: documentsPath
+      ? createLegacyNdiSummary(legacyPresentationLyricsPath, targetPresentationLyricsPath)
+      : null,
     errors: [],
+  };
+  let auxiliaryMigrationsRun = false;
+  const runAuxiliaryMigrations = () => {
+    if (auxiliaryMigrationsRun) return;
+    auxiliaryMigrationsRun = true;
+    migrateAuxiliaryLegacyFolders(summary);
   };
 
   if (sourcePath === targetPath) {
-    migrateLegacyNdiFolders(summary);
+    runAuxiliaryMigrations();
     return summary;
   }
 
@@ -258,7 +318,7 @@ function migrateUserData(appDataPath) {
       summary.conflicts = [];
       summary.errors = getMigrationErrors(summary);
     }
-    migrateLegacyNdiFolders(summary);
+    runAuxiliaryMigrations();
     if (pathExists(markerPath)) {
       updateMigrationMarker(markerPath, summary);
     }
@@ -281,7 +341,7 @@ function migrateUserData(appDataPath) {
     }
     deleteLegacyUserData(sourcePath, summary);
     updateMigrationMarker(markerPath, summary);
-    migrateLegacyNdiFolders(summary);
+    runAuxiliaryMigrations();
     updateMigrationMarker(markerPath, summary);
     return summary;
   }
@@ -297,7 +357,7 @@ function migrateUserData(appDataPath) {
       summary.migratedAt = new Date().toISOString();
       updateMigrationMarker(markerPath, summary);
       deleteLegacyUserData(sourcePath, summary);
-      migrateLegacyNdiFolders(summary);
+      runAuxiliaryMigrations();
       updateMigrationMarker(markerPath, summary);
     } else if (!summary.legacyDeleteSkippedReason) {
       summary.legacyDeleteSkippedReason = 'Migration did not complete cleanly';
@@ -309,6 +369,7 @@ function migrateUserData(appDataPath) {
     }
   }
 
+  runAuxiliaryMigrations();
   return summary;
 }
 
@@ -331,7 +392,7 @@ function createLegacyNdiSummary(sourcePath, targetPath) {
   };
 }
 
-function migrateLegacyNdiFolders(summary) {
+function migrateAuxiliaryLegacyFolders(summary) {
   migrateLegacyNdiFolder(summary.legacyNdi);
   migrateLegacyNdiFolder(summary.legacyUserDataNdi);
   migrateFlatNdiInstall(
@@ -339,6 +400,9 @@ function migrateLegacyNdiFolders(summary) {
     summary.legacyNdi?.targetPath,
     Boolean(summary.legacyNdi?.attempted && summary.legacyNdi?.deletedLegacy)
   );
+  migrateLegacyNdiFolder(summary.legacyEasyWorshipSongs);
+  migrateLegacyNdiFolder(summary.legacyEasyWorshipLyrics);
+  migrateLegacyNdiFolder(summary.legacyPresentationLyrics);
 }
 
 function migrateFlatNdiInstall(ndi, userDataPath, managedUserDataIsAuthoritative = false) {
@@ -517,12 +581,12 @@ function migrateLegacyNdiFolder(ndi) {
     if (isLegacyNdiMigrationComplete(ndi)) {
       deleteLegacyNdiFolder(ndi);
     } else if (!ndi.legacyDeleteSkippedReason) {
-      ndi.legacyDeleteSkippedReason = 'Legacy NDI migration did not complete cleanly';
+      ndi.legacyDeleteSkippedReason = 'Legacy folder migration did not complete cleanly';
     }
   } catch (error) {
     ndi.errors.push({ path: ndi.targetPath, message: error.message });
     if (!ndi.legacyDeleteSkippedReason) {
-      ndi.legacyDeleteSkippedReason = 'Legacy NDI migration failed';
+      ndi.legacyDeleteSkippedReason = 'Legacy folder migration failed';
     }
   }
 }
@@ -541,7 +605,7 @@ function getLegacyNdiMigrationErrors(ndi) {
 function deleteLegacyNdiFolder(ndi) {
   if (!isLegacyNdiMigrationComplete(ndi)) {
     if (!ndi.legacyDeleteSkippedReason) {
-      ndi.legacyDeleteSkippedReason = 'Legacy NDI migration did not complete cleanly';
+      ndi.legacyDeleteSkippedReason = 'Legacy folder migration did not complete cleanly';
     }
     return;
   }
@@ -553,12 +617,12 @@ function deleteLegacyNdiFolder(ndi) {
     });
     ndi.deletedLegacy = !pathExists(ndi.sourcePath);
     if (!ndi.deletedLegacy) {
-      ndi.legacyDeleteSkippedReason = 'Legacy NDI folder still exists after delete attempt';
+      ndi.legacyDeleteSkippedReason = 'Legacy folder still exists after delete attempt';
     } else {
       ndi.legacyDeleteSkippedReason = null;
     }
   } catch (error) {
-    ndi.legacyDeleteSkippedReason = 'Failed to delete legacy NDI folder';
+    ndi.legacyDeleteSkippedReason = 'Failed to delete legacy folder';
     ndi.errors.push({ path: ndi.sourcePath, message: error.message });
   }
 }
@@ -604,6 +668,27 @@ function applyExistingMarker(markerPath, summary) {
     }
     if (marker.flatNdiInstall && typeof marker.flatNdiInstall === 'object') {
       applyLegacyNdiMarker(summary.flatNdiInstall, marker.flatNdiInstall);
+    }
+    if (
+      summary.legacyEasyWorshipSongs &&
+      marker.legacyEasyWorshipSongs &&
+      typeof marker.legacyEasyWorshipSongs === 'object'
+    ) {
+      applyLegacyNdiMarker(summary.legacyEasyWorshipSongs, marker.legacyEasyWorshipSongs);
+    }
+    if (
+      summary.legacyEasyWorshipLyrics &&
+      marker.legacyEasyWorshipLyrics &&
+      typeof marker.legacyEasyWorshipLyrics === 'object'
+    ) {
+      applyLegacyNdiMarker(summary.legacyEasyWorshipLyrics, marker.legacyEasyWorshipLyrics);
+    }
+    if (
+      summary.legacyPresentationLyrics &&
+      marker.legacyPresentationLyrics &&
+      typeof marker.legacyPresentationLyrics === 'object'
+    ) {
+      applyLegacyNdiMarker(summary.legacyPresentationLyrics, marker.legacyPresentationLyrics);
     }
   } catch (error) {
     summary.errors.push({ path: markerPath, message: error.message });
@@ -676,6 +761,9 @@ function updateMigrationMarker(markerPath, summary) {
         legacyNdi: summary.legacyNdi,
         legacyUserDataNdi: summary.legacyUserDataNdi,
         flatNdiInstall: summary.flatNdiInstall,
+        legacyEasyWorshipSongs: summary.legacyEasyWorshipSongs,
+        legacyEasyWorshipLyrics: summary.legacyEasyWorshipLyrics,
+        legacyPresentationLyrics: summary.legacyPresentationLyrics,
         errors: summary.errors,
       }, null, 2),
       'utf8'
@@ -706,11 +794,47 @@ export function configureAppIdentity() {
 
   try {
     const appDataPath = app.getPath('appData');
-    const userDataPath = path.join(appDataPath, APP_NAME);
+    const {
+      runtimeProfile,
+      profileName,
+      shouldMigrateProductionData,
+    } = resolveAppIdentityProfile(app.isPackaged);
+    const userDataPath = path.join(appDataPath, profileName);
 
-    migrationResult = migrateUserData(appDataPath);
+    process.env[RUNTIME_PROFILE_ENV] = runtimeProfile;
+    process.env[USER_DATA_DIR_ENV] = userDataPath;
+
+    appDataResetResult = consumeAppDataResetRequest({
+      appDataPath,
+      userDataPath,
+    });
+    const legacyMigrationSuppressed = appDataResetResult.reset || hasCompletedAppDataReset({
+      appDataPath,
+      userDataPath,
+    });
+
+    if (shouldMigrateProductionData && !legacyMigrationSuppressed) {
+      const documentsPath = app.getPath('documents');
+      migrationResult = migrateUserData(appDataPath, documentsPath);
+    } else {
+      migrationResult = {
+        profile: runtimeProfile,
+        targetPath: userDataPath,
+        attempted: false,
+        copiedFiles: 0,
+        skippedExisting: 0,
+        skippedSymlinks: 0,
+        skippedOther: 0,
+        skippedReason: legacyMigrationSuppressed
+          ? 'Legacy migration is disabled because the app data was reset.'
+          : 'Development uses an isolated profile; production migration was not run.',
+        errors: [],
+      };
+    }
+
     fs.mkdirSync(userDataPath, { recursive: true });
     app.setPath('userData', userDataPath);
+    app.setPath('sessionData', userDataPath);
   } catch (error) {
     migrationResult = {
       attempted: false,
@@ -729,8 +853,12 @@ export function getUserDataMigrationResult() {
   return migrationResult;
 }
 
-export function migrateUserDataForTests(appDataPath) {
-  return migrateUserData(appDataPath);
+export function getAppDataResetResult() {
+  return appDataResetResult;
+}
+
+export function migrateUserDataForTests(appDataPath, documentsPath = null) {
+  return migrateUserData(appDataPath, documentsPath);
 }
 
 configureAppIdentity();

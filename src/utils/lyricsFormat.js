@@ -1,10 +1,20 @@
-import { preprocessText, splitLongLine } from '../../shared/lineSplitting.js';
-import { isManualNormalGroupCandidate, STRUCTURE_TAGS_CONFIG, STRUCTURE_TAG_PATTERNS, BRACKET_PAIRS } from '../../shared/lyricsParsing.js';
+import { preprocessText, splitLongLine } from '../../shared/lyricsParsing/lineSplitting.js';
+import {
+  BRACKET_PAIRS,
+  STRUCTURE_TAGS_CONFIG,
+} from '../../shared/lyricsParsing/constants.js';
+import { isManualNormalGroupCandidate } from '../../shared/lyricsParsing/lineClassification.js';
+import {
+  extractStructureTags,
+  isStructureTag,
+} from '../../shared/lyricsParsing/structureTags.js';
+import {
+  DEFAULT_CAPITALIZED_WORDS,
+  normalizeCapitalizedWords,
+} from '../../shared/capitalizedWords.js';
 
-const RELIGIOUS_WORDS = ['jesus', 'jehovah', 'god', 'yahweh', 'lord', 'christ', 'holy ghost',
-  'holy spirit', 'bible', 'amen', 'hallelujah', 'hosanna', 'savior', 'saviour', 'redeemer', 'messiah'];
 const LATIN_LETTER_REGEX = /[A-Za-z]/;
-const ENGLISH_HINT_WORDS = [...RELIGIOUS_WORDS, 'the', 'and', 'for', 'with', 'praise', 'glory', 'grace', 'mercy', 'love', 'king', 'queen', 'strength', 'light', 'power', 'redeemer', 'savior', 'saviour', 'spirit', 'amen', 'hallelujah', 'we', 'you', 'your', 'our', 'their', 'his', 'her', 'who', 'what', 'where', 'when', 'why', 'how', 'this', 'that', 'these', 'those', 'shall', 'will', 'hope', 'faith', 'joy', 'peace', 'deliver', 'deliverer', 'rescue', 'comfort', 'comforter', 'guide', 'helper'];
+const ENGLISH_HINT_WORDS = [...DEFAULT_CAPITALIZED_WORDS, 'the', 'and', 'for', 'with', 'praise', 'glory', 'grace', 'mercy', 'love', 'king', 'queen', 'strength', 'light', 'power', 'redeemer', 'savior', 'saviour', 'spirit', 'amen', 'hallelujah', 'we', 'you', 'your', 'our', 'their', 'his', 'her', 'who', 'what', 'where', 'when', 'why', 'how', 'this', 'that', 'these', 'those', 'shall', 'will', 'hope', 'faith', 'joy', 'peace', 'deliver', 'deliverer', 'rescue', 'comfort', 'comforter', 'guide', 'helper'];
 const ENGLISH_HINT_REGEXES = ENGLISH_HINT_WORDS.map((word) => new RegExp(`\\b${word}\\b`, 'i'));
 
 /**
@@ -42,7 +52,7 @@ const normalizeMetadataTag = (line) => {
   if (!line) return line;
   const trimmed = line.trim();
   // Match LRC metadata tags: [key: value] with optional extra spaces
-  const metaMatch = trimmed.match(/^\[\s*(ti|ar|al|by|offset|length|au|lr|re|tool|ve|#)\s*:\s*(.*?)\s*\]$/i);
+  const metaMatch = trimmed.match(/^\[\s*(ti|ar|al|by|offset|length|au|lr|re|tool|ve|id|#)\s*:\s*(.*?)\s*\]$/i);
   if (!metaMatch) return line;
   const key = metaMatch[1].toLowerCase();
   const value = metaMatch[2].trim();
@@ -56,7 +66,7 @@ const normalizeMetadataTag = (line) => {
  */
 const isMetadataTag = (line) => {
   if (!line) return false;
-  return /^\s*\[\s*(ti|ar|al|by|offset|length|au|lr|re|tool|ve|#)\s*:.*\]\s*$/i.test(line.trim());
+  return /^\s*\[\s*(ti|ar|al|by|offset|length|au|lr|re|tool|ve|id|#)\s*:.*\]\s*$/i.test(line.trim());
 };
 
 /**
@@ -65,7 +75,7 @@ const isMetadataTag = (line) => {
  * @param {string} line
  * @returns {{ text: string, bracketsRepaired: number }}
  */
-const repairOrphanedBrackets = (line) => {
+const repairOrphanedBrackets = (line, sectionTagPhrases) => {
   if (!line || typeof line !== 'string') return { text: line, bracketsRepaired: 0 };
 
   const trimmed = line.trim();
@@ -73,7 +83,7 @@ const repairOrphanedBrackets = (line) => {
 
   if (/^\[\d{1,2}:/.test(trimmed) || isMetadataTag(trimmed)) return { text: line, bracketsRepaired: 0 };
 
-  if (STRUCTURE_TAG_PATTERNS.some(p => p.test(trimmed))) return { text: line, bracketsRepaired: 0 };
+  if (isStructureTag(trimmed, sectionTagPhrases)) return { text: line, bracketsRepaired: 0 };
 
   let result = trimmed;
   let bracketsRepaired = 0;
@@ -110,13 +120,8 @@ const repairOrphanedBrackets = (line) => {
  * @param {string[]} lines
  * @returns {{ lines: string[], emptySectionsRemoved: number }}
  */
-const removeEmptySectionTags = (lines) => {
+const removeEmptySectionTags = (lines, sectionTagPhrases) => {
   if (!Array.isArray(lines) || lines.length === 0) return { lines, emptySectionsRemoved: 0 };
-
-  const isStructureTag = (line) => {
-    if (!line || typeof line !== 'string') return false;
-    return STRUCTURE_TAG_PATTERNS.some(p => p.test(line.trim()));
-  };
 
   const result = [];
   let emptySectionsRemoved = 0;
@@ -124,13 +129,13 @@ const removeEmptySectionTags = (lines) => {
   for (let i = 0; i < lines.length; i++) {
     const current = (lines[i] || '').trim();
 
-    if (isStructureTag(current)) {
+    if (isStructureTag(current, sectionTagPhrases)) {
 
       let hasContent = false;
       for (let j = i + 1; j < lines.length; j++) {
         const ahead = (lines[j] || '').trim();
         if (ahead.length === 0) continue;
-        if (isStructureTag(ahead)) break;
+        if (isStructureTag(ahead, sectionTagPhrases)) break;
         hasContent = true;
         break;
       }
@@ -179,8 +184,8 @@ const collapseExcessiveBlankLines = (lines) => {
 const normalizePunctuation = (line) => {
   if (!line) return '';
 
-  const standardTimestampRegex = /\[(\d{1,2}):(\d{2})(?:\.(\d{1,2}))?\]/g;
-  const enhancedTimestampRegex = /<(\d{1,2}):(\d{2})(?:\.(\d{1,2}))?>/g;
+  const standardTimestampRegex = /\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]/g;
+  const enhancedTimestampRegex = /<(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?>/g;
   const timestamps = [];
   let match;
   let workingLine = line;
@@ -210,36 +215,6 @@ const normalizePunctuation = (line) => {
   return workingLine;
 };
 
-const capitalizeFirstCharacter = (line) => {
-  if (!line) return line;
-  const corrected = line.replace(/\bi\b/g, 'I');
-  const timestampPrefixMatch = corrected.match(/^((?:\[\d{1,2}:\d{2}(?:\.\d{1,2})?\])+)(\s*)/);
-  if (timestampPrefixMatch) {
-    const prefix = `${timestampPrefixMatch[1]}${timestampPrefixMatch[2] || ''}`;
-    const rest = corrected.slice(timestampPrefixMatch[0].length);
-    if (!rest) return corrected;
-    return prefix + rest.charAt(0).toUpperCase() + rest.slice(1);
-  }
-  return corrected.charAt(0).toUpperCase() + corrected.slice(1);
-};
-
-const toTitleCase = (phrase) => {
-  if (!phrase) return phrase;
-  return phrase
-    .split(/\s+/)
-    .map((part) => part ? part.charAt(0).toUpperCase() + part.slice(1).toLowerCase() : part)
-    .join(' ');
-};
-
-const capitalizeReligiousTerms = (line) => {
-  if (!line) return line;
-
-  return RELIGIOUS_WORDS.reduce((current, word) => {
-    const regex = new RegExp(`\\b${word}\\b`, 'gi');
-    return current.replace(regex, (match) => toTitleCase(match));
-  }, line);
-};
-
 const isBracketedTranslationLine = (line) => {
   if (!line || typeof line !== 'string') return false;
 
@@ -247,6 +222,55 @@ const isBracketedTranslationLine = (line) => {
   if (trimmed.length <= 2) return false;
 
   return BRACKET_PAIRS.some(([open, close]) => trimmed.startsWith(open) && trimmed.endsWith(close));
+};
+
+const capitalizeFirstCharacter = (line, sectionTagPhrases) => {
+  if (!line) return line;
+  const corrected = line.replace(/\bi\b/g, 'I');
+
+  const capitalizeVisibleContent = (value) => {
+    const trimmed = value.trim();
+    if (
+      !isBracketedTranslationLine(trimmed)
+      || isMetadataTag(trimmed)
+      || isStructureTag(trimmed, sectionTagPhrases)
+    ) {
+      return value.charAt(0).toUpperCase() + value.slice(1);
+    }
+
+    const leadingWhitespaceLength = value.indexOf(trimmed);
+    const leadingWhitespace = value.slice(0, leadingWhitespaceLength);
+    const trailingWhitespace = value.slice(leadingWhitespaceLength + trimmed.length);
+    const innerContent = trimmed.slice(1, -1);
+    const firstLetterIndex = innerContent.search(/\p{L}/u);
+    if (firstLetterIndex === -1) return value;
+
+    const capitalizedInner = innerContent.slice(0, firstLetterIndex)
+      + innerContent.charAt(firstLetterIndex).toLocaleUpperCase()
+      + innerContent.slice(firstLetterIndex + 1);
+    return `${leadingWhitespace}${trimmed.charAt(0)}${capitalizedInner}${trimmed.slice(-1)}${trailingWhitespace}`;
+  };
+
+  const timestampPrefixMatch = corrected.match(/^((?:\[\d{1,2}:\d{2}(?:\.\d{1,3})?\])+)(\s*)/);
+  if (timestampPrefixMatch) {
+    const prefix = `${timestampPrefixMatch[1]}${timestampPrefixMatch[2] || ''}`;
+    const rest = corrected.slice(timestampPrefixMatch[0].length);
+    if (!rest) return corrected;
+    return prefix + capitalizeVisibleContent(rest);
+  }
+  return capitalizeVisibleContent(corrected);
+};
+
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const capitalizeReligiousTerms = (line, capitalizedWords) => {
+  if (!line) return line;
+
+  return capitalizedWords.reduce((current, word) => {
+    const escapedWord = escapeRegExp(word).replace(/\s+/g, '\\s+');
+    const regex = new RegExp(`(^|[^\\p{L}\\p{N}_])(${escapedWord})(?=$|[^\\p{L}\\p{N}_])`, 'giu');
+    return current.replace(regex, (_match, prefix) => `${prefix}${word}`);
+  }, line);
 };
 
 const containsLatinCharacters = (text) => Boolean(text && LATIN_LETTER_REGEX.test(text));
@@ -304,61 +328,6 @@ export const splitInlineTranslation = (line) => {
 };
 
 /**
- * Extract and isolate structure tags from text (for cleanup operations)
- * @param {string} text
- * @returns {string}
- */
-const extractStructureTags = (text, groupingConfig = {}) => {
-  if (!text || typeof text !== 'string') return text;
-  if (!STRUCTURE_TAGS_CONFIG.ENABLED) return text;
-
-  const lines = text.split(/\r?\n/);
-  const processedLines = [];
-  const structureTagMode = ['isolate', 'strip', 'keep'].includes(groupingConfig?.structureTagMode)
-    ? groupingConfig.structureTagMode
-    : STRUCTURE_TAGS_CONFIG.MODE;
-
-  for (const line of lines) {
-    if (!line || line.trim().length === 0) {
-      processedLines.push(line);
-      continue;
-    }
-
-    let processed = false;
-
-    for (const pattern of STRUCTURE_TAG_PATTERNS) {
-      const match = line.match(pattern);
-      if (match) {
-        const tag = match[0].trim();
-        const remainder = line.substring(match[0].length).trim();
-
-        if (structureTagMode === 'strip') {
-          if (remainder) {
-            processedLines.push(remainder);
-          }
-        } else if (structureTagMode === 'isolate') {
-          processedLines.push(tag);
-          if (remainder) {
-            processedLines.push(remainder);
-          }
-        } else {
-          processedLines.push(line);
-        }
-
-        processed = true;
-        break;
-      }
-    }
-
-    if (!processed) {
-      processedLines.push(line);
-    }
-  }
-
-  return processedLines.join('\n');
-};
-
-/**
  * Check if two lines could form a normal group (both within char limit, not bracketed)
  * Uses the same config as the parsing logic for consistency
  */
@@ -380,7 +349,7 @@ const couldFormNormalGroup = (line1, line2, groupingConfig) => {
 const moveTimestampsToStart = (line) => {
   if (!line || typeof line !== 'string') return line;
 
-  const standardTimestampRegex = /\[(\d{1,2}):(\d{2})(?:\.(\d{1,2}))?\]/g;
+  const standardTimestampRegex = /\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]/g;
 
   const standardTimestamps = [];
   let match;
@@ -416,6 +385,7 @@ export const formatLyrics = (text, options = {}) => {
     enableSplitting = false,
     capitalizeFirst = true,
     capitalizeReligious = true,
+    capitalizedWords = DEFAULT_CAPITALIZED_WORDS,
     normalizeTypographic = true,
     groupingConfig,
     splitConfig = {
@@ -425,6 +395,8 @@ export const formatLyrics = (text, options = {}) => {
       OVERFLOW_TOLERANCE: 15,
     }
   } = options;
+
+  const normalizedCapitalizedWords = normalizeCapitalizedWords(capitalizedWords);
 
   let workingText = enableSplitting ? preprocessText(text) : text;
 
@@ -472,8 +444,8 @@ export const formatLyrics = (text, options = {}) => {
         .filter(Boolean)
         .map((segment) => {
           let result = segment;
-          if (capitalizeFirst) result = capitalizeFirstCharacter(result);
-          if (capitalizeReligious) result = capitalizeReligiousTerms(result);
+          if (capitalizeFirst) result = capitalizeFirstCharacter(result, groupingConfig?.sectionTagPhrases);
+          if (capitalizeReligious) result = capitalizeReligiousTerms(result, normalizedCapitalizedWords);
           return result;
         });
 
@@ -561,14 +533,20 @@ export const formatLyricsWithStats = (text, options = {}) => {
   resultLines = resultLines.map((line) => {
     const trimmed = (line || '').trim();
     if (trimmed.length === 0) return line;
-    const { text: fixed, bracketsRepaired } = repairOrphanedBrackets(line);
+    const { text: fixed, bracketsRepaired } = repairOrphanedBrackets(
+      line,
+      options.groupingConfig?.sectionTagPhrases,
+    );
     totalBrackets += bracketsRepaired;
     return fixed;
   });
   stats.bracketsRepaired = totalBrackets;
 
   // 4b: Remove empty section tags
-  const emptySections = removeEmptySectionTags(resultLines);
+  const emptySections = removeEmptySectionTags(
+    resultLines,
+    options.groupingConfig?.sectionTagPhrases,
+  );
   resultLines = emptySections.lines;
   stats.emptySectionsRemoved = emptySections.emptySectionsRemoved;
 

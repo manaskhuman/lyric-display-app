@@ -22,14 +22,10 @@ function LiveSafetyStatusCell({ darkMode }) {
           checked={on}
           disabled={!isAuthenticated || !ready}
           onCheckedChange={(checked) => setLiveSafetyEnabled(checked)}
-          className={`h-6! w-11! border-0! transition-colors ${
-            d
-              ? 'data-[state=checked]:bg-emerald-500 data-[state=unchecked]:bg-gray-700'
-              : 'data-[state=checked]:bg-emerald-500 data-[state=unchecked]:bg-gray-200'
-          }`}
-          thumbClassName="!h-4 !w-4 data-[state=checked]:!translate-x-5.5 data-[state=unchecked]:!translate-x-1"
+          size="small"
+          variant="success"
         />
-        <span className={`text-xs font-semibold ${on ? 'text-emerald-500' : (d ? 'text-gray-500' : 'text-gray-400')}`}>
+        <span className={`text-[10px] font-semibold ${on ? 'text-green-500 dark:text-green-400' : (d ? 'text-gray-500' : 'text-gray-400')}`}>
           {on ? 'On' : 'Off'}
         </span>
       </div>
@@ -207,7 +203,7 @@ const AuthStatusIndicator = ({
     const handleOpenPreServiceHealth = () => {
       showModal({
         title: 'Production Readiness Check',
-        headerDescription: 'Review service-critical connection, output, NDI, display, media, and safety status',
+        headerDescription: 'Review event-critical connection, output, NDI, display, media, and safety status',
         component: 'PreServiceHealth',
         variant: 'info',
         size: 'lg',
@@ -310,7 +306,7 @@ const AuthStatusIndicator = ({
                 onSelect: () => {
                   showModal({
                     title: 'Production Readiness Check',
-                    headerDescription: 'Review service-critical connection, output, NDI, display, media, and safety status',
+                    headerDescription: 'Review event-critical connection, output, NDI, display, media, and safety status',
                     component: 'PreServiceHealth',
                     variant: 'info',
                     size: 'lg',

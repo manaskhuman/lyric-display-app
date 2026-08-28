@@ -17,6 +17,7 @@ test('passive display preload excludes control, file, NDI, and update mutation c
   const source = read('preloads/passive.cjs');
   for (const forbidden of [
     'write-file',
+    'file-navigator:',
     'display:project-output',
     'ndi:set-output-enabled',
     'osc:enable',
@@ -24,11 +25,14 @@ test('passive display preload excludes control, file, NDI, and update mutation c
     'updater:install',
     'updater:set-session-active',
     'app:renderer-ready',
+    'app:logs:clear',
+    'app:data:reset-and-relaunch',
   ]) {
     assert.equal(source.includes(forbidden), false, forbidden);
   }
   assert.equal(source.includes('token-store:get'), true);
   assert.equal(source.includes('preferences:get-advanced-settings'), true);
+  assert.equal(source.includes('preferences:get-category'), false);
 });
 
 test('only the control preload can report main-window startup readiness', () => {
@@ -36,6 +40,8 @@ test('only the control preload can report main-window startup readiness', () => 
   const loading = read('preloads/loading.cjs');
 
   assert.equal(control.includes("ipcRenderer.send('app:renderer-ready'"), true);
+  assert.equal(control.includes("ipcRenderer.invoke('app:logs:clear')"), true);
+  assert.equal(control.includes("ipcRenderer.invoke('app:data:reset-and-relaunch')"), true);
   assert.equal(loading.includes('app:renderer-ready'), false);
 });
 
@@ -52,10 +58,11 @@ test('data-document preloads expose only their role-specific IPC channels', () =
   assert.equal(updater.includes('write-file'), false);
 });
 
-test('packaging includes and unpacks role-specific preload files', () => {
+test('packaging includes role-specific preload files inside ASAR', () => {
   const pkg = JSON.parse(read('package.json'));
   assert.equal(pkg.build.files.includes('preloads/**/*'), true);
-  assert.equal(pkg.build.asarUnpack.includes('preloads/**/*'), true);
+  assert.equal(pkg.build.asarUnpack, undefined);
+  assert.equal(pkg.build.directories.output, 'release');
 });
 
 test('window routes receive control, passive, or no preload by role', () => {
@@ -65,6 +72,7 @@ test('window routes receive control, passive, or no preload by role', () => {
   assert.equal(getWindowPreloadRole('/output12'), 'passive');
   assert.equal(getWindowPreloadRole('/stage'), 'passive');
   assert.equal(getWindowPreloadRole('/time'), 'passive');
+  assert.equal(getWindowPreloadRole('/preview?projection=1'), 'passive');
   assert.equal(getWindowPreloadRole('/lyric-video-live-output'), 'passive');
   assert.equal(getWindowPreloadRole('/lyric-video-export-frame'), 'none');
 });
@@ -81,7 +89,7 @@ test('time displays remain unthrottled with or without projection mode', () => {
 });
 
 test('native output preview windows use a black backing surface', () => {
-  for (const route of ['/output1', '/output6', '/stage', '/time', '/lyric-video-live-output']) {
+  for (const route of ['/output1', '/output6', '/stage', '/time', '/preview', '/lyric-video-live-output']) {
     assert.equal(resolveWindowBackgroundColor(route), '#000000', route);
   }
 

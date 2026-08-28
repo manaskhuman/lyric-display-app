@@ -1,11 +1,21 @@
 import { BrowserWindow, app, dialog, ipcMain } from 'electron';
 import { spawn } from 'child_process';
 import { createHash } from 'crypto';
-import { access, mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'fs/promises';
+import { access, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'fs/promises';
 import { constants as fsConstants } from 'fs';
 import path from 'path';
 import { isDev, resolveProductionPath } from '../paths.js';
+import {
+  grantLyricVideoMediaFile,
+  revokeLyricVideoMediaFile,
+} from '../lyricVideoMediaProtocol.js';
 import * as userPreferences from '../userPreferences.js';
+import {
+  isButterchurnBackground,
+  normalizeLyricVideoVisualizer,
+} from '../../shared/lyricVideoVisualizer.js';
+import { extractZipArchive } from '../archiveExtraction.js';
+import { runProbeProcess } from './ffmpegProbe.js';
 
 let activeExport = null;
 let captureRawFormatCache = null;
@@ -24,6 +34,12 @@ const VALID_GAP_BEHAVIORS = new Set([
   'show-title',
   'keep-previous-line',
 ]);
+const AUDIO_MIME_TYPES = {
+  '.aac': 'audio/aac',
+  '.m4a': 'audio/mp4',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+};
 
 const clampNumber = (value, fallback, min, max) => {
   const parsed = Number(value);
@@ -87,43 +103,6 @@ const writeToStream = async (stream, chunk) => {
   });
 };
 
-const runProbeProcess = async (command, args, timeoutMs, label) => new Promise((resolve) => {
-  const startedAt = Date.now();
-  const child = spawn(command, args, { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
-  let stderr = '';
-  let settled = false;
-  const finish = (result) => {
-    if (settled) return;
-    settled = true;
-    clearTimeout(timeout);
-    resolve({
-      ...result,
-      durationMs: Date.now() - startedAt,
-      stderr: stderr.trim().slice(-1200),
-    });
-  };
-  const timeout = setTimeout(() => {
-    try {
-      child.kill('SIGTERM');
-    } catch { }
-    finish({ ok: false, reason: `${label} timed out` });
-  }, timeoutMs);
-
-  child.stderr.on('data', (chunk) => {
-    stderr += chunk.toString();
-    if (stderr.length > 3000) stderr = stderr.slice(-3000);
-  });
-  child.once('error', (error) => {
-    finish({ ok: false, reason: error?.message || `${label} failed to start` });
-  });
-  child.once('exit', (code) => {
-    finish({
-      ok: code === 0,
-      reason: code === 0 ? 'ok' : `${label} exited with code ${code}`,
-    });
-  });
-});
-
 const getFfmpegExecutableNames = () => (
   process.platform === 'win32' ? ['ffmpeg.exe', 'ffmpeg'] : ['ffmpeg']
 );
@@ -167,6 +146,12 @@ const getBundledFfmpegCandidates = () => {
   return roots.flatMap((root) => names.map((name) => path.join(root, name)));
 };
 
+// Single trust boundary for choosing the FFmpeg executable. Configured paths
+// (advanced.ffmpegPath) are validated by name (isFfmpegExecutableName) and existence before
+// use; FFMPEG_PATH is an operator-supplied escape hatch; bundled candidates are validated by
+// construction. The final `return 'ffmpeg'` is the intentional bare-command fallback that must
+// stay unmodified so FFmpeg is discovered via the OS PATH — never wrap it in path.resolve() at
+// a spawn site, which would turn it into <cwd>/ffmpeg and defeat PATH lookup.
 const resolveFfmpegPath = async () => {
   const savedPath = userPreferences.getPreference('advanced.ffmpegPath');
   if (typeof savedPath === 'string' && savedPath.trim()) {
@@ -265,8 +250,7 @@ const extractAndFindFfmpegExecutable = async (zipPath) => {
   if (!await fileExists(markerPath)) {
     await rm(targetDir, { recursive: true, force: true });
     await mkdir(targetDir, { recursive: true });
-    const extractZip = (await import('extract-zip')).default;
-    await extractZip(zipPath, { dir: targetDir });
+    await extractZipArchive(zipPath, { dir: targetDir });
     await writeFile(markerPath, new Date().toISOString(), 'utf8');
   }
 
@@ -356,7 +340,7 @@ const getFfmpegReadiness = async () => {
 const getExportFrameUrl = () => (
   isDev
     ? 'http://localhost:5173/lyric-video-export-frame'
-    : 'http://127.0.0.1:4000#/lyric-video-export-frame'
+    : 'http://127.0.0.1:4000/lyric-video-export-frame'
 );
 
 const getHardwareEncoderCandidates = async () => {
@@ -715,10 +699,10 @@ const getBackgroundPlan = async (settings = {}) => {
   if (fullScreenMode && backgroundType === 'media' && media) {
     const filePath = await resolveMediaFilePath(media);
     if (filePath && isVideoMedia(media)) {
-      return { type: 'video', filePath, source: media.url };
+      return { type: 'video', filePath, source: media.url, bundled: media.bundled === true };
     }
     if (filePath && isImageMedia(media)) {
-      return { type: 'image', filePath, source: media.url };
+      return { type: 'image', filePath, source: media.url, bundled: media.bundled === true };
     }
     if (isVideoMedia(media)) {
       throw new Error('The selected background video could not be resolved to a local media file for export. Re-select it from User Media and try again.');
@@ -734,6 +718,24 @@ const getBackgroundPlan = async (settings = {}) => {
   }
 
   return { type: 'capture' };
+};
+
+const materializeBundledBackground = async ({ plan, exportState }) => {
+  if (!plan?.bundled || !plan.filePath) return plan;
+
+  // Electron can read files inside app.asar, but FFmpeg is an external process and
+  // cannot traverse the archive. Copy bundled media to a real temporary path first.
+  const tempDir = await mkdtemp(path.join(app.getPath('temp'), 'lyric-video-media-'));
+  exportState.tempDirs.push(tempDir);
+  const sourceExtension = path.extname(plan.filePath).toLowerCase();
+  const safeExtension = /^\.[a-z0-9]{1,10}$/.test(sourceExtension) ? sourceExtension : '';
+  const materializedPath = path.join(tempDir, `background${safeExtension}`);
+  await writeFile(materializedPath, await readFile(plan.filePath));
+
+  return {
+    ...plan,
+    filePath: materializedPath,
+  };
 };
 
 const setExportRenderMode = async (win, mode) => {
@@ -799,7 +801,7 @@ const waitForExportApi = async (win) => {
     }
 
     const ready = await win.webContents.executeJavaScript(
-      'typeof window.__lyricVideoExportLoad === "function" && typeof window.__lyricVideoExportSeek === "function"',
+      'typeof window.__lyricVideoExportLoad === "function" && typeof window.__lyricVideoExportReset === "function" && typeof window.__lyricVideoExportSeek === "function"',
       true
     ).catch(() => false);
 
@@ -857,10 +859,12 @@ const sanitizeExportPayload = (payload = {}) => {
     clearAfterMs: clampNumber(payload.clearAfterMs, 2500, 0, 300_000),
     title: sanitizeFileNamePart(payload.title || 'Lyric Video', 'Lyric Video'),
     settings: payload.settings || {},
+    visualizer: normalizeLyricVideoVisualizer(payload.visualizer),
     intro,
     audio: {
       filePath: typeof payload.audio?.filePath === 'string' ? payload.audio.filePath : '',
       durationMs: audioDurationMs,
+      sourceUrl: '',
     },
     exportSettings: {
       format: 'mp4',
@@ -1065,6 +1069,7 @@ export function registerLyricVideoExportHandlers() {
       donePromise,
       resolveDone: resolveExportDone,
       tempDirs: [],
+      mediaSourceUrls: [],
     };
     activeExport = exportState;
 
@@ -1084,12 +1089,27 @@ export function registerLyricVideoExportHandlers() {
       await loadPromise;
       await waitForExportApi(exportWindow);
 
+      if (isButterchurnBackground(normalized.visualizer)) {
+        const extension = path.extname(normalized.audio.filePath).toLowerCase();
+        normalized.audio.sourceUrl = grantLyricVideoMediaFile(
+          normalized.audio.filePath,
+          AUDIO_MIME_TYPES[extension] || 'audio/*'
+        );
+        exportState.mediaSourceUrls.push(normalized.audio.sourceUrl);
+      }
+
       await exportWindow.webContents.executeJavaScript(
         `window.__lyricVideoExportLoad(${JSON.stringify(normalized)})`,
         true
       );
 
-      let backgroundPlan = await getBackgroundPlan(normalized.settings);
+      let backgroundPlan = isButterchurnBackground(normalized.visualizer)
+        ? { type: 'color', color: '#000000' }
+        : await getBackgroundPlan(normalized.settings);
+      backgroundPlan = await materializeBundledBackground({
+        plan: backgroundPlan,
+        exportState,
+      });
       if (backgroundPlan.type === 'capture') {
         const filePath = await captureStaticBackground({ win: exportWindow, exportState });
         backgroundPlan = { ...backgroundPlan, filePath };
@@ -1134,6 +1154,13 @@ export function registerLyricVideoExportHandlers() {
 
         if (exportState.canceled) {
           throw new Error('Export canceled');
+        }
+
+        if (isButterchurnBackground(normalized.visualizer)) {
+          await exportWindow.webContents.executeJavaScript(
+            'window.__lyricVideoExportReset()',
+            true
+          );
         }
 
         const allowRawPipeline = requestedMode === 'faster' && Boolean(encoderPlan.hardware);
@@ -1436,6 +1463,9 @@ export function registerLyricVideoExportHandlers() {
       await Promise.allSettled((exportState.tempDirs || []).map((tempDir) => (
         rm(tempDir, { recursive: true, force: true })
       )));
+      (exportState.mediaSourceUrls || []).forEach((sourceUrl) => {
+        revokeLyricVideoMediaFile(sourceUrl);
+      });
       if (activeExport === exportState) {
         activeExport = null;
       }

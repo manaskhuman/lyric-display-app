@@ -5,6 +5,8 @@ import useToast from '@/hooks/useToast';
 import { useDarkModeState } from '@/hooks/useStoreSelectors';
 import useLyricsStore from '@/context/LyricsStore';
 import { confirmAndLaunchHeadlessMode, createLyricDisplayDockSetupActions } from '@/utils/lyricDisplayDock';
+import { openFileNavigator } from '@/utils/fileNavigatorEvents';
+import { CHECK_APP_ANNOUNCEMENTS_EVENT } from '@/constants/modalEvents';
 
 const useMenuHandlers = (closeMenu) => {
   const navigate = useNavigate();
@@ -13,6 +15,7 @@ const useMenuHandlers = (closeMenu) => {
   const { showToast } = useToast();
   const { darkMode, setDarkMode } = useDarkModeState();
   const isNewSongCanvas = location.pathname === '/new-song';
+  const isLyricVideoStudio = location.pathname === '/lyric-video-studio';
   const isDevMode = import.meta.env.MODE === 'development';
 
   const handleNewLyrics = useCallback(() => {
@@ -23,6 +26,10 @@ const useMenuHandlers = (closeMenu) => {
 
   const handleOpenLyrics = useCallback(async () => {
     closeMenu();
+
+    if (openFileNavigator({
+      destination: isNewSongCanvas ? 'canvas' : isLyricVideoStudio ? 'video' : 'control',
+    })) return;
 
     if (isNewSongCanvas) {
       try {
@@ -78,7 +85,7 @@ const useMenuHandlers = (closeMenu) => {
     } else {
       window.dispatchEvent(new Event('trigger-file-load'));
     }
-  }, [closeMenu, isNewSongCanvas, showModal, showToast, navigate]);
+  }, [closeMenu, isLyricVideoStudio, isNewSongCanvas, showModal, showToast, navigate]);
 
   const handleOpenRecent = useCallback(async (filePath) => {
     closeMenu();
@@ -218,7 +225,7 @@ const useMenuHandlers = (closeMenu) => {
     closeMenu();
     showModal({
       title: 'Preview Outputs',
-      headerDescription: 'Preview output, stage, time and custom displays with current output visibility.',
+      headerDescription: 'Preview output, stage, time, and custom displays regardless of live visibility.',
       component: 'PreviewOutputs',
       variant: 'info',
       size: 'large',
@@ -388,7 +395,7 @@ const useMenuHandlers = (closeMenu) => {
     closeMenu();
     showModal({
       title: 'Production Readiness Check',
-      headerDescription: 'Review service-critical connection, output, NDI, display, media, and safety status',
+      headerDescription: 'Review event-critical connection, output, NDI, display, media, and safety status',
       component: 'PreServiceHealth',
       variant: 'info',
       size: 'lg',
@@ -456,7 +463,7 @@ const useMenuHandlers = (closeMenu) => {
           onSelect: () => {
             showModal({
               title: 'Production Readiness Check',
-              headerDescription: 'Review service-critical connection, output, NDI, display, media, and safety status',
+              headerDescription: 'Review event-critical connection, output, NDI, display, media, and safety status',
               component: 'PreServiceHealth',
               variant: 'info',
               size: 'lg',
@@ -481,6 +488,15 @@ const useMenuHandlers = (closeMenu) => {
       dismissLabel: 'Close'
     });
   }, [closeMenu, showModal]);
+
+  const handleCheckAnnouncements = useCallback(() => {
+    closeMenu();
+    window.setTimeout(() => {
+      window.dispatchEvent(new CustomEvent(CHECK_APP_ANNOUNCEMENTS_EVENT, {
+        detail: { manual: true },
+      }));
+    }, 0);
+  }, [closeMenu]);
 
   const handleSupportDev = useCallback(() => {
     closeMenu();
@@ -514,11 +530,13 @@ const useMenuHandlers = (closeMenu) => {
       component: 'AboutApp',
       variant: 'info',
       size: 'md',
+      className: 'border-slate-700/70 bg-slate-950 text-white ring-slate-700/60',
+      customLayout: true,
+      scrollBehavior: 'none',
+      hideHeader: true,
+      hideFooter: true,
       version: appVersion,
-      actions: [
-        { label: 'Close', value: { action: 'close' }, variant: 'outline' },
-        { label: 'Check for Updates', value: { action: 'checkUpdates' } }
-      ]
+      actions: [],
     });
 
     if (result?.action === 'checkUpdates') {
@@ -582,6 +600,7 @@ const useMenuHandlers = (closeMenu) => {
     handleRepo,
     handleConnectionDiagnostics,
     handleIntegrationGuide,
+    handleCheckAnnouncements,
     handleAbout,
     handleSupportDev,
     handleCheckUpdates,

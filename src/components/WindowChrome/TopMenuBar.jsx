@@ -20,7 +20,7 @@ const TOP_MENU_CONFIG = {
   output: { count: 6, sub: [] },
   tools: { count: 8, sub: [] },
   window: { count: 3, sub: [] },
-  help: { count: 9, sub: [] },
+  help: { count: 10, sub: [] },
 };
 
 const MenuItem = React.forwardRef(({ label, shortcut, onClick, disabled, active, ...rest }, ref) => (
@@ -363,7 +363,7 @@ const TopMenuBar = () => {
     return (
       <div
         ref={barRef}
-        className={`relative z-[1500] h-9 flex items-center justify-center border-b text-[12px] ${darkMode ? 'bg-slate-900/90 border-slate-800 text-slate-100' : 'bg-slate-50/95 border-slate-200 text-slate-900'}`}
+        className={`relative z-1500 h-9 flex items-center justify-center border-b text-[12px] ${darkMode ? 'bg-slate-900/90 border-slate-800 text-slate-100' : 'bg-slate-50/95 border-slate-200 text-slate-900'}`}
         style={dragRegion}
       >
         <button
@@ -387,13 +387,13 @@ const TopMenuBar = () => {
   return (
     <div
       ref={barRef}
-      className={`relative z-[1500] h-9 flex items-center justify-between ${isMac ? 'pl-[78px]' : 'pl-2.5'} pr-0 border-b text-[12px] ${darkMode ? 'bg-slate-900/90 border-slate-800 text-slate-100' : 'bg-slate-50/95 border-slate-200 text-slate-900'}`}
+      className={`relative z-1500 h-9 flex items-center justify-between ${isMac ? 'pl-19.5' : 'pl-2.5'} pr-0 border-b text-[12px] ${darkMode ? 'bg-slate-900/90 border-slate-800 text-slate-100' : 'bg-slate-50/95 border-slate-200 text-slate-900'}`}
       onDoubleClickCapture={handleBarDoubleClick}
       style={dragRegion}
     >
       <div className="flex items-center gap-2 flex-1 min-w-0">
         <div className="flex items-center gap-2 pr-2" style={noDrag}>
-          {showFallbackIcon && <div className="h-3.5 w-3.5 rounded-sm bg-gradient-to-br from-blue-500 to-indigo-600" aria-hidden />}
+          {showFallbackIcon && <div className="h-3.5 w-3.5 rounded-sm bg-linear-to-br from-blue-500 to-indigo-600" aria-hidden />}
           <img
             src="/LyricDisplay-icon.png"
             alt="LyricDisplay"
@@ -428,7 +428,7 @@ const TopMenuBar = () => {
                 onMouseLeave={() => scheduleCloseMenu('file')}
               >
                 <MenuItem ref={(el) => registerItemRef('file', 0, el)} label="New Lyrics" shortcut="Ctrl/Cmd + N" onClick={menuHandlers.handleNewLyrics} active={openMenu?.startsWith('file') && activeIndex === 0} />
-                <MenuItem ref={(el) => registerItemRef('file', 1, el)} label="Load Lyrics File" shortcut="Ctrl/Cmd + O" onClick={menuHandlers.handleOpenLyrics} disabled={isLyricVideoStudio} active={openMenu?.startsWith('file') && activeIndex === 1} title={isLyricVideoStudio ? 'Use Import LRC inside Lyric Video Studio' : undefined} />
+                <MenuItem ref={(el) => registerItemRef('file', 1, el)} label="Load Lyrics" shortcut="Ctrl/Cmd + O" onClick={menuHandlers.handleOpenLyrics} active={openMenu?.startsWith('file') && activeIndex === 1} />
                 <div
                   className="relative"
                   onMouseEnter={() => {
@@ -765,10 +765,11 @@ const TopMenuBar = () => {
                 <MenuItem ref={(el) => registerItemRef('help', 3, el)} label="Take the Product Tour" onClick={handleTakeProductTour} disabled={!isControlPanelRoute} active={openMenu === 'help' && activeIndex === 3} title={!isControlPanelRoute ? controlPanelOnlyTitle : undefined} />
                 <MenuItem ref={(el) => registerItemRef('help', 4, el)} label="GitHub Repository" onClick={menuHandlers.handleRepo} active={openMenu === 'help' && activeIndex === 4} />
                 <Separator />
-                <MenuItem ref={(el) => registerItemRef('help', 5, el)} label="More About Author" onClick={() => window.open('https://linktr.ee/peteralaks', '_blank', 'noopener,noreferrer')} active={openMenu === 'help' && activeIndex === 5} />
-                <MenuItem ref={(el) => registerItemRef('help', 6, el)} label="About LyricDisplay" onClick={handleAbout} active={openMenu === 'help' && activeIndex === 6} />
-                <MenuItem ref={(el) => registerItemRef('help', 7, el)} label="Support Development" onClick={menuHandlers.handleSupportDev} active={openMenu === 'help' && activeIndex === 7} />
-                <MenuItem ref={(el) => registerItemRef('help', 8, el)} label="Check for Updates" onClick={menuHandlers.handleCheckUpdates} active={openMenu === 'help' && activeIndex === 8} />
+                <MenuItem ref={(el) => registerItemRef('help', 5, el)} label="Notifications" onClick={menuHandlers.handleCheckAnnouncements} active={openMenu === 'help' && activeIndex === 5} />
+                <MenuItem ref={(el) => registerItemRef('help', 6, el)} label="More About Author" onClick={() => window.open('https://peteralakembi.design', '_blank', 'noopener,noreferrer')} active={openMenu === 'help' && activeIndex === 6} />
+                <MenuItem ref={(el) => registerItemRef('help', 7, el)} label="About LyricDisplay" onClick={handleAbout} active={openMenu === 'help' && activeIndex === 7} />
+                <MenuItem ref={(el) => registerItemRef('help', 8, el)} label="Support Development" onClick={menuHandlers.handleSupportDev} active={openMenu === 'help' && activeIndex === 8} />
+                <MenuItem ref={(el) => registerItemRef('help', 9, el)} label="Check for Updates" onClick={menuHandlers.handleCheckUpdates} active={openMenu === 'help' && activeIndex === 9} />
               </div>
             )}
           </div>

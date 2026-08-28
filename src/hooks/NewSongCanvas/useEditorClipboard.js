@@ -7,6 +7,7 @@ const getFormattingOptions = () => {
   return {
     capitalizeFirst: state.formattingCapitalizeFirstLetter,
     capitalizeReligious: state.formattingCapitalizeReligiousTerms,
+    capitalizedWords: state.formattingCapitalizedWords,
     normalizeTypographic: state.formattingNormalizeTypographicChars,
     enableSplitting: state.lyricsParsingOptions.enableSplitting,
     splitConfig: state.lyricsParsingOptions.splitConfig,
@@ -72,8 +73,10 @@ const useEditorClipboard = ({ content, setContent, textareaRef, showToast }) => 
       });
       textareaRef.current.focus();
       textareaRef.current.setSelectionRange(nextCursor, nextCursor);
+      return newContent;
     } catch (err) {
       console.error('Failed to paste text:', err);
+      return null;
     }
   }, [content, setContent, textareaRef]);
 

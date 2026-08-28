@@ -7,6 +7,7 @@ import { assertJoinCodeAllowed, recordJoinCodeAttempt } from '../server/auth/joi
 import { registerObsDockPairingToken } from '../server/auth/obsDockPairing.js';
 import { getClientPermissions, hasPermission } from '../server/auth/permissions.js';
 import { createTokenService } from '../server/auth/tokens.js';
+import { createSocketAuthenticator } from '../server/auth/socketAuth.js';
 import { localhostOnly } from '../server/middleware/localhostOnly.js';
 import { registerAppControlRoutes } from '../server/routes/appControl.js';
 import { registerAuthRoutes } from '../server/routes/auth.js';
@@ -40,6 +41,22 @@ function createObsDockTokenRoute({ tokenService }) {
 
   const route = routes.find((candidate) => candidate.path === '/api/auth/obs-dock/token');
   assert.ok(route, 'OBS dock token route should be registered');
+  return route.handlers;
+}
+
+function createAuthTokenRoute({ tokenService, hasOutput = () => true }) {
+  const routes = [];
+  const app = {
+    post(path, ...handlers) {
+      routes.push({ method: 'POST', path, handlers });
+    },
+    get() {},
+  };
+
+  registerAuthRoutes(app, { secrets: {}, tokenService, localhostOnly, hasOutput });
+
+  const route = routes.find((candidate) => candidate.path === '/api/auth/token');
+  assert.ok(route, 'Output token route should be registered');
   return route.handlers;
 }
 
@@ -175,6 +192,89 @@ test('token verification accepts previous signing secret during grace period', (
   });
 
   assert.equal(verifier.verifyToken(token)?.clientType, 'desktop');
+});
+
+test('unregistered custom outputs are rejected before token issuance and socket connection', async () => {
+  const tokenService = {
+    generateToken() {
+      return 'should-not-be-issued';
+    },
+    getExpiryForClient() {
+      return '1h';
+    },
+  };
+  const handlers = createAuthTokenRoute({
+    tokenService,
+    hasOutput: (outputId) => outputId !== 'output3',
+  });
+  const response = await invokeRoute(handlers, createLocalRequest({
+    body: {
+      clientType: 'output3',
+      deviceId: 'output-device',
+      sessionId: 'output-session',
+    },
+  }));
+
+  assert.equal(response.statusCode, 404);
+  assert.deepEqual(response.body, {
+    error: 'Output route is not registered',
+    code: 'OUTPUT_UNAVAILABLE',
+    output: 'output3',
+  });
+
+  const authenticate = createSocketAuthenticator({
+    verifyToken: () => ({
+      clientType: 'output3',
+      deviceId: 'output-device',
+      sessionId: 'output-session',
+      permissions: ['lyrics:read'],
+    }),
+    hasOutput: () => false,
+  });
+  const socket = {
+    handshake: {
+      query: {},
+      auth: { token: 'cached-output-token', purpose: 'output3' },
+    },
+  };
+  let authenticationError = null;
+  authenticate(socket, (error) => {
+    authenticationError = error;
+  });
+
+  assert.equal(authenticationError?.data?.code, 'OUTPUT_UNAVAILABLE');
+  assert.equal(authenticationError?.data?.output, 'output3');
+  assert.equal(socket.userData, undefined);
+});
+
+test('socket authentication retains only bounded client instance identifiers', () => {
+  const authenticate = createSocketAuthenticator({
+    verifyToken: () => ({
+      clientType: 'output1',
+      deviceId: 'output-device',
+      sessionId: 'output-session',
+      permissions: ['lyrics:read'],
+    }),
+  });
+  const createSocket = (instanceId) => ({
+    handshake: {
+      query: {},
+      auth: { token: 'output-token', purpose: 'output1', instanceId },
+    },
+  });
+
+  const validSocket = createSocket('output1:3f0389df-a7a8-481a-9698-b79f693d73d6');
+  let validError = null;
+  authenticate(validSocket, (error) => {
+    validError = error;
+  });
+
+  assert.equal(validError, undefined);
+  assert.equal(validSocket.userData.clientInstanceId, 'output1:3f0389df-a7a8-481a-9698-b79f693d73d6');
+
+  const invalidSocket = createSocket('invalid instance id with spaces');
+  authenticate(invalidSocket, () => {});
+  assert.equal(invalidSocket.userData.clientInstanceId, null);
 });
 
 test('join-code guard locks repeated failures and clears after success', () => {

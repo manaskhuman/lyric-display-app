@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { AlertTriangle, FileText, Info, Loader2, Monitor, Play, RefreshCw, RotateCcw, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, FileText, Info, Loader2, Monitor, Play, RefreshCw, RotateCcw, ShieldCheck, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
@@ -12,6 +12,7 @@ const AdvancedPreferencesSection = ({
   formatSecurityDate,
   getNumberPreferenceInputProps,
   handleResetCategory,
+  handleRestoreAllDefaults,
   handleRotateSecurityTokenKey,
   inputClass,
   labelClass,
@@ -19,6 +20,7 @@ const AdvancedPreferencesSection = ({
   mutedClass,
   preferenceFieldLabelClass,
   preferences,
+  restoringAllDefaults,
   securityLoading,
   securityRotating,
   securityStatus,
@@ -31,6 +33,8 @@ const AdvancedPreferencesSection = ({
   const isPackagedApp = useIsPackagedApp();
   const [obsDockStartup, setObsDockStartup] = useState(null);
   const [obsDockStartupSaving, setObsDockStartupSaving] = useState(false);
+  const [clearingSystemLogs, setClearingSystemLogs] = useState(false);
+  const [resettingApp, setResettingApp] = useState(false);
 
   const loadObsDockStartup = async () => {
     if (!window.electronAPI?.obsDockStartup?.get) return;
@@ -85,16 +89,96 @@ const AdvancedPreferencesSection = ({
     });
   };
 
+  const handleClearSystemLogs = async () => {
+    const confirmation = await showModal?.({
+      title: 'Clear All System Logs?',
+      description: 'This permanently deletes all troubleshooting logs stored in LyricDisplay’s user-data logs folder.',
+      body: 'The current session will continue with a fresh, empty log. This action cannot be undone.',
+      variant: 'warning',
+      size: 'sm',
+      actions: [
+        { label: 'Cancel', value: 'cancel', variant: 'outline' },
+        { label: 'Clear Logs', value: 'clear', variant: 'destructive' },
+      ],
+    });
+
+    if (confirmation !== 'clear') return;
+    if (!window.electronAPI?.clearSystemLogs) {
+      showToast?.({
+        title: 'Log Cleanup Unavailable',
+        message: 'This build does not expose system log cleanup.',
+        variant: 'error',
+      });
+      return;
+    }
+
+    setClearingSystemLogs(true);
+    try {
+      const result = await window.electronAPI.clearSystemLogs();
+      if (!result?.success) {
+        throw new Error(result?.error || 'Could not clear the system logs.');
+      }
+      showToast?.({
+        title: 'System Logs Cleared',
+        message: 'All saved system logs were removed. A fresh session log is now active.',
+        variant: 'success',
+      });
+    } catch (error) {
+      showToast?.({
+        title: 'Log Cleanup Failed',
+        message: error?.message || 'Could not clear the system logs.',
+        variant: 'error',
+      });
+    } finally {
+      setClearingSystemLogs(false);
+    }
+  };
+
+  const handleResetApp = async () => {
+    const confirmation = await showModal?.({
+      title: 'Reset LyricDisplay?',
+      description: 'This permanently deletes the entire LyricDisplay user-data folder.',
+      body: 'All preferences, templates, indexes, cached data, local app content, and logs will be removed. Lyric files and other documents stored outside the user-data folder will not be deleted. LyricDisplay will restart as a fresh installation. This action cannot be undone.',
+      variant: 'warning',
+      size: 'sm',
+      dismissible: false,
+      actions: [
+        { label: 'Cancel', value: 'cancel', variant: 'outline', autoFocus: true },
+        { label: 'Reset and Restart', value: 'reset', variant: 'destructive' },
+      ],
+    });
+
+    if (confirmation !== 'reset') return;
+    if (!window.electronAPI?.resetAppData) {
+      showToast?.({
+        title: 'App Reset Unavailable',
+        message: 'This build does not expose app-data reset.',
+        variant: 'error',
+      });
+      return;
+    }
+
+    setResettingApp(true);
+    try {
+      const result = await window.electronAPI.resetAppData();
+      if (!result?.success) {
+        throw new Error(result?.error || 'Could not prepare the app reset.');
+      }
+    } catch (error) {
+      setResettingApp(false);
+      showToast?.({
+        title: 'App Reset Failed',
+        message: error?.message || 'Could not reset LyricDisplay.',
+        variant: 'error',
+      });
+    }
+  };
+
   return (
     <div className="space-y-6">
-      <div>
-        <div className="flex items-center gap-2">
-          <AlertTriangle className={`w-4 h-4 ${mutedClass}`} />
-          <span className={`text-sm font-medium ${labelClass}`}>
-            Advanced Settings
-          </span>
-        </div>
-        <p className={`mt-1 text-xs ${mutedClass}`}>
+      <div className="flex items-start gap-2">
+        <AlertTriangle className={`mt-0.5 h-4 w-4 shrink-0 ${mutedClass}`} />
+        <p className={`text-xs ${mutedClass}`}>
           These settings are for advanced users. Changing them may affect application stability.
         </p>
       </div>
@@ -113,11 +197,8 @@ const AdvancedPreferencesSection = ({
             shareAnonymousUsageData: checked,
             telemetryConsentDecided: true,
           })}
-          className={`!h-7 !w-14 !border-0 shadow-sm transition-colors ${darkMode
-            ? 'data-[state=checked]:bg-green-400 data-[state=unchecked]:bg-gray-600'
-            : 'data-[state=checked]:bg-black data-[state=unchecked]:bg-gray-300'
-            }`}
-          thumbClassName="!h-5 !w-6 data-[state=checked]:!translate-x-7 data-[state=unchecked]:!translate-x-1"
+          size="medium"
+          variant="control"
         />
       </div>
     )}
@@ -158,11 +239,8 @@ const AdvancedPreferencesSection = ({
                 checked={obsDockStartup?.enabled ?? false}
                 disabled={obsDockStartupSaving || obsDockStartup?.supported === false}
                 onCheckedChange={handleObsDockStartupToggle}
-                className={`!h-7 !w-14 !border-0 shadow-sm transition-colors ${darkMode
-                  ? 'data-[state=checked]:bg-green-400 data-[state=unchecked]:bg-gray-600'
-                  : 'data-[state=checked]:bg-black data-[state=unchecked]:bg-gray-300'
-                  }`}
-                thumbClassName="!h-5 !w-6 data-[state=checked]:!translate-x-7 data-[state=unchecked]:!translate-x-1"
+                size="medium"
+                variant="control"
               />
             </div>
           </div>
@@ -311,11 +389,8 @@ const AdvancedPreferencesSection = ({
           updatePreference('advanced', 'enableDebugLogging', checked);
           setDebugLogging(checked);
         }}
-        className={`!h-7 !w-14 !border-0 shadow-sm transition-colors ${darkMode
-          ? 'data-[state=checked]:bg-green-400 data-[state=unchecked]:bg-gray-600'
-          : 'data-[state=checked]:bg-black data-[state=unchecked]:bg-gray-300'
-          }`}
-        thumbClassName="!h-5 !w-6 data-[state=checked]:!translate-x-7 data-[state=unchecked]:!translate-x-1"
+        size="medium"
+        variant="control"
       />
     </div>
 
@@ -344,12 +419,29 @@ const AdvancedPreferencesSection = ({
             ]
           });
         }}
-        className={`!h-7 !w-14 !border-0 shadow-sm transition-colors ${darkMode
-          ? 'data-[state=checked]:bg-green-400 data-[state=unchecked]:bg-gray-600'
-          : 'data-[state=checked]:bg-black data-[state=unchecked]:bg-gray-300'
-          }`}
-        thumbClassName="!h-5 !w-6 data-[state=checked]:!translate-x-7 data-[state=unchecked]:!translate-x-1"
+        size="medium"
+        variant="control"
       />
+    </div>
+
+    <div className="flex items-center justify-between gap-6">
+      <div className="min-w-0 flex-1">
+        <label className={`text-sm font-medium ${labelClass}`}>Clear All System Logs</label>
+        <p className={`text-xs ${mutedClass}`}>Delete troubleshooting logs stored in the user-data logs folder</p>
+      </div>
+      <Button
+        type="button"
+        variant="destructiveOutline"
+        size="sm"
+        onClick={handleClearSystemLogs}
+        disabled={clearingSystemLogs}
+        className="shrink-0"
+      >
+        {clearingSystemLogs
+          ? <Loader2 className="h-4 w-4 animate-spin" />
+          : <Trash2 className="h-4 w-4" />}
+        Clear Logs
+      </Button>
     </div>
 
     <div className="space-y-2">
@@ -406,11 +498,56 @@ const AdvancedPreferencesSection = ({
     <Button
       variant="outline"
       onClick={() => handleResetCategory('advanced')}
+      disabled={restoringAllDefaults}
       className={darkMode ? 'w-full bg-gray-800 border-gray-600 hover:bg-gray-700 text-gray-300' : 'w-full'}
     >
       <RotateCcw className="w-4 h-4 mr-2" />
       Reset Advanced Settings to Defaults
     </Button>
+
+    <div className={`border-t pt-6 ${darkMode ? 'border-gray-700' : 'border-gray-200'}`}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 flex-1">
+          <label className={`text-sm font-medium ${labelClass}`}>Restore All Default Settings</label>
+          <p className={`mt-1 text-xs ${mutedClass}`}>Reset every User Preferences category without deleting your lyrics or indexed folders</p>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={handleRestoreAllDefaults}
+          disabled={restoringAllDefaults}
+          className="shrink-0"
+        >
+          {restoringAllDefaults
+            ? <Loader2 className="h-4 w-4 animate-spin" />
+            : <RotateCcw className="h-4 w-4" />}
+          {restoringAllDefaults ? 'Restoring...' : 'Restore Defaults'}
+        </Button>
+      </div>
+    </div>
+
+    <div className={`rounded-lg border p-4 ${darkMode ? 'border-red-900/70 bg-red-950/20' : 'border-red-200 bg-red-50/60'}`}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 flex-1">
+          <label className={`text-sm font-medium ${darkMode ? 'text-red-200' : 'text-red-800'}`}>Reset App</label>
+          <p className={`mt-1 text-xs ${mutedClass}`}>Delete the entire user-data folder and restart LyricDisplay as a fresh installation</p>
+        </div>
+        <Button
+          type="button"
+          variant="destructiveOutline"
+          size="sm"
+          onClick={handleResetApp}
+          disabled={resettingApp}
+          className="shrink-0"
+        >
+          {resettingApp
+            ? <Loader2 className="h-4 w-4 animate-spin" />
+            : <Trash2 className="h-4 w-4" />}
+          {resettingApp ? 'Resetting...' : 'Reset App'}
+        </Button>
+      </div>
+    </div>
   </div>
   );
 };

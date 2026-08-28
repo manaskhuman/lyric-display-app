@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { migrateUserDataForTests } from '../main/appIdentity.js';
+import {
+  migrateUserDataForTests,
+  resolveAppIdentityProfile,
+} from '../main/appIdentity.js';
 
 const LEGACY_APP_NAME = 'lyric-display-app';
 const APP_NAME = 'LyricDisplay';
@@ -12,8 +15,24 @@ const NDI_NAME = 'NDI';
 const NDI_INSTALL_NAME = 'Companion';
 const NDI_USER_DATA_NAME = 'User Data';
 const NDI_MANAGED_INSTALL_MARKER = '.managed-install-complete';
+const EASYWORSHIP_IMPORT_FOLDER_NAME = 'Imported Songs from EW';
+const EASYWORSHIP_LYRICS_FOLDER_NAME = 'Imported Lyrics from EW';
+const PRESENTATION_LYRICS_FOLDER_NAME = 'Imported Lyrics from Presentations';
 const MARKER_FILE = 'user-data-migration.json';
 const ORIGINAL_MIGRATED_AT = '2025-01-02T03:04:05.000Z';
+
+test('development and packaged builds resolve to separate application profiles', () => {
+  assert.deepEqual(resolveAppIdentityProfile(false), {
+    runtimeProfile: 'development',
+    profileName: 'LyricDisplay-Dev',
+    shouldMigrateProductionData: false,
+  });
+  assert.deepEqual(resolveAppIdentityProfile(true), {
+    runtimeProfile: 'production',
+    profileName: 'LyricDisplay',
+    shouldMigrateProductionData: true,
+  });
+});
 
 function makeTempAppData() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'lyricdisplay-migration-'));
@@ -248,4 +267,120 @@ test('removes superseded flat install artifacts after a managed install complete
     fs.readdirSync(ndiRootPath).sort(),
     [NDI_INSTALL_NAME, NDI_USER_DATA_NAME].sort()
   );
+});
+
+test('moves legacy EasyWorship imports under the LyricDisplay documents folder', () => {
+  const appDataPath = makeTempAppData();
+  const documentsPath = path.join(appDataPath, 'Documents');
+  const sourcePath = path.join(documentsPath, EASYWORSHIP_IMPORT_FOLDER_NAME);
+  const targetPath = path.join(documentsPath, APP_NAME, EASYWORSHIP_IMPORT_FOLDER_NAME);
+  const userDataPath = path.join(appDataPath, APP_NAME);
+
+  fs.mkdirSync(path.join(sourcePath, 'Worship'), { recursive: true });
+  fs.writeFileSync(path.join(sourcePath, 'Worship', 'Amazing Grace.txt'), 'lyrics', 'utf8');
+  writeMarker(userDataPath);
+
+  const result = migrateUserDataForTests(appDataPath, documentsPath);
+  const marker = JSON.parse(fs.readFileSync(path.join(userDataPath, MARKER_FILE), 'utf8'));
+
+  assert.equal(result.legacyEasyWorshipSongs.attempted, true);
+  assert.equal(result.legacyEasyWorshipSongs.deletedLegacy, true);
+  assert.equal(fs.existsSync(sourcePath), false);
+  assert.equal(fs.readFileSync(path.join(targetPath, 'Worship', 'Amazing Grace.txt'), 'utf8'), 'lyrics');
+  assert.equal(marker.legacyEasyWorshipSongs.deletedLegacy, true);
+  assert.equal(marker.legacyEasyWorshipSongs.targetPath, targetPath);
+});
+
+test('moves current EasyWorship and presentation import folders into LyricDisplay documents', () => {
+  const appDataPath = makeTempAppData();
+  const documentsPath = path.join(appDataPath, 'Documents');
+  const userDataPath = path.join(appDataPath, APP_NAME);
+  const easyWorshipSource = path.join(documentsPath, EASYWORSHIP_LYRICS_FOLDER_NAME);
+  const presentationSource = path.join(documentsPath, PRESENTATION_LYRICS_FOLDER_NAME);
+  const easyWorshipTarget = path.join(documentsPath, APP_NAME, EASYWORSHIP_LYRICS_FOLDER_NAME);
+  const presentationTarget = path.join(documentsPath, APP_NAME, PRESENTATION_LYRICS_FOLDER_NAME);
+
+  fs.mkdirSync(easyWorshipSource, { recursive: true });
+  fs.mkdirSync(presentationSource, { recursive: true });
+  fs.writeFileSync(path.join(easyWorshipSource, 'EW Song.txt'), 'easyworship lyrics', 'utf8');
+  fs.writeFileSync(path.join(presentationSource, 'Presentation Song.txt'), 'presentation lyrics', 'utf8');
+  writeMarker(userDataPath);
+
+  const result = migrateUserDataForTests(appDataPath, documentsPath);
+  const marker = JSON.parse(fs.readFileSync(path.join(userDataPath, MARKER_FILE), 'utf8'));
+
+  assert.equal(result.legacyEasyWorshipLyrics.deletedLegacy, true);
+  assert.equal(result.legacyPresentationLyrics.deletedLegacy, true);
+  assert.equal(fs.existsSync(easyWorshipSource), false);
+  assert.equal(fs.existsSync(presentationSource), false);
+  assert.equal(fs.readFileSync(path.join(easyWorshipTarget, 'EW Song.txt'), 'utf8'), 'easyworship lyrics');
+  assert.equal(fs.readFileSync(path.join(presentationTarget, 'Presentation Song.txt'), 'utf8'), 'presentation lyrics');
+  assert.equal(marker.legacyEasyWorshipLyrics.targetPath, easyWorshipTarget);
+  assert.equal(marker.legacyPresentationLyrics.targetPath, presentationTarget);
+});
+
+test('merges legacy EasyWorship imports into an existing destination before deleting the old folder', () => {
+  const appDataPath = makeTempAppData();
+  const documentsPath = path.join(appDataPath, 'Documents');
+  const sourcePath = path.join(documentsPath, EASYWORSHIP_IMPORT_FOLDER_NAME);
+  const targetPath = path.join(documentsPath, APP_NAME, EASYWORSHIP_IMPORT_FOLDER_NAME);
+
+  fs.mkdirSync(sourcePath, { recursive: true });
+  fs.mkdirSync(targetPath, { recursive: true });
+  fs.writeFileSync(path.join(sourcePath, 'Existing Song.txt'), 'same lyrics', 'utf8');
+  fs.writeFileSync(path.join(targetPath, 'Existing Song.txt'), 'same lyrics', 'utf8');
+  fs.writeFileSync(path.join(sourcePath, 'Legacy Song.txt'), 'legacy lyrics', 'utf8');
+  fs.writeFileSync(path.join(targetPath, 'Current Song.txt'), 'current lyrics', 'utf8');
+
+  const result = migrateUserDataForTests(appDataPath, documentsPath);
+
+  assert.equal(result.legacyEasyWorshipSongs.deletedLegacy, true);
+  assert.equal(result.legacyEasyWorshipSongs.copiedFiles, 1);
+  assert.equal(result.legacyEasyWorshipSongs.skippedExisting, 1);
+  assert.equal(fs.existsSync(sourcePath), false);
+  assert.equal(fs.readFileSync(path.join(targetPath, 'Legacy Song.txt'), 'utf8'), 'legacy lyrics');
+  assert.equal(fs.readFileSync(path.join(targetPath, 'Current Song.txt'), 'utf8'), 'current lyrics');
+});
+
+test('keeps conflicting legacy EasyWorship imports instead of deleting data', () => {
+  const appDataPath = makeTempAppData();
+  const documentsPath = path.join(appDataPath, 'Documents');
+  const sourcePath = path.join(documentsPath, EASYWORSHIP_IMPORT_FOLDER_NAME);
+  const targetPath = path.join(documentsPath, APP_NAME, EASYWORSHIP_IMPORT_FOLDER_NAME);
+
+  fs.mkdirSync(sourcePath, { recursive: true });
+  fs.mkdirSync(targetPath, { recursive: true });
+  fs.writeFileSync(path.join(sourcePath, 'Conflicting Song.txt'), 'legacy lyrics', 'utf8');
+  fs.writeFileSync(path.join(targetPath, 'Conflicting Song.txt'), 'current lyrics', 'utf8');
+
+  const result = migrateUserDataForTests(appDataPath, documentsPath);
+
+  assert.equal(result.legacyEasyWorshipSongs.deletedLegacy, false);
+  assert.equal(result.legacyEasyWorshipSongs.conflicts.length, 1);
+  assert.equal(fs.readFileSync(path.join(sourcePath, 'Conflicting Song.txt'), 'utf8'), 'legacy lyrics');
+  assert.equal(fs.readFileSync(path.join(targetPath, 'Conflicting Song.txt'), 'utf8'), 'current lyrics');
+});
+
+test('migrates EasyWorship imports even when another legacy migration has a conflict', () => {
+  const appDataPath = makeTempAppData();
+  const documentsPath = path.join(appDataPath, 'Documents');
+  const legacyUserDataPath = path.join(appDataPath, LEGACY_APP_NAME);
+  const currentUserDataPath = path.join(appDataPath, APP_NAME);
+  const sourcePath = path.join(documentsPath, EASYWORSHIP_IMPORT_FOLDER_NAME);
+  const targetPath = path.join(documentsPath, APP_NAME, EASYWORSHIP_IMPORT_FOLDER_NAME);
+
+  fs.mkdirSync(legacyUserDataPath, { recursive: true });
+  fs.mkdirSync(currentUserDataPath, { recursive: true });
+  fs.writeFileSync(path.join(legacyUserDataPath, 'settings.json'), 'legacy settings', 'utf8');
+  fs.writeFileSync(path.join(currentUserDataPath, 'settings.json'), 'current settings', 'utf8');
+  fs.mkdirSync(sourcePath, { recursive: true });
+  fs.writeFileSync(path.join(sourcePath, 'Song.txt'), 'lyrics', 'utf8');
+
+  const result = migrateUserDataForTests(appDataPath, documentsPath);
+
+  assert.equal(result.deletedLegacy, false);
+  assert.equal(result.conflicts.length, 1);
+  assert.equal(result.legacyEasyWorshipSongs.deletedLegacy, true);
+  assert.equal(fs.existsSync(sourcePath), false);
+  assert.equal(fs.readFileSync(path.join(targetPath, 'Song.txt'), 'utf8'), 'lyrics');
 });

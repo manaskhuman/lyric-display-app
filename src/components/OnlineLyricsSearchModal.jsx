@@ -12,6 +12,7 @@ import ProviderAdvancedPanel from './OnlineLyricsSearchModal/ProviderAdvancedPan
 import { classifyError } from '../utils/errorClassification';
 import { useKeyboardShortcuts } from '../hooks/OnlineLyricsSearchModal/useKeyboardShortcuts';
 import { REQUEST_MODAL_CLOSE_EVENT } from '@/constants/modalEvents';
+import { SlidingTabIndicator } from '@/components/ui/sliding-tab-indicator';
 
 const DEFAULT_TAB = 'libraries';
 const INITIAL_STATE = {
@@ -471,9 +472,9 @@ const OnlineLyricsSearchModal = ({ isOpen, onClose, darkMode, onImportLyrics }) 
 
   const isLibrariesMode = activeTab === 'libraries';
   const sourceModeClasses = (mode) => [
-    'inline-flex h-9 items-center justify-center gap-2 rounded-md px-3 text-sm font-medium transition-colors',
+    'tab-switcher-item-squircle relative z-10 inline-flex h-9 items-center justify-center gap-2 rounded-xl px-3 text-sm font-medium transition-colors',
     activeTab === mode
-      ? (darkMode ? 'bg-gray-100 text-gray-900 shadow-sm' : 'bg-gray-900 text-white shadow-sm')
+      ? (darkMode ? 'text-gray-900' : 'text-white')
       : (darkMode ? 'text-gray-300' : 'text-gray-600 hover:bg-gray-100'),
   ].join(' ');
   const inputClasses = darkMode
@@ -511,7 +512,7 @@ const OnlineLyricsSearchModal = ({ isOpen, onClose, darkMode, onImportLyrics }) 
 
   const modalClasses = [
     'rounded-xl border shadow-2xl ring-1 w-[94vw] max-w-5xl mx-4',
-    'flex max-h-[calc(100vh-2rem)] h-[min(86vh,760px)] flex-col overflow-hidden sm:min-h-[620px]',
+    'flex max-h-[calc(100vh-2rem)] h-[min(86vh,760px)] flex-col overflow-hidden sm:min-h-155',
     darkMode ? 'bg-gray-900 text-gray-50 border-slate-800/80 ring-blue-500/35' : 'bg-white text-gray-900 border-slate-200/80 ring-blue-500/20',
     'transition-all duration-200 ease-out',
     (exiting || entering) ? 'opacity-0 translate-y-8 scale-95' : 'opacity-100 translate-y-0 scale-100',
@@ -566,12 +567,17 @@ const OnlineLyricsSearchModal = ({ isOpen, onClose, darkMode, onImportLyrics }) 
           <section className={`flex min-h-0 flex-col ${darkMode ? 'bg-gray-900' : 'bg-white'}`}>
             <div className={`border-b p-4 ${darkMode ? 'border-slate-800/60 bg-gray-900' : 'border-slate-200/70 bg-white'}`}>
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-                <div className={`inline-flex w-fit rounded-lg p-1 ${darkMode ? 'bg-gray-800' : 'bg-gray-100'}`}>
-                  <button type="button" onClick={() => setSearchMode('libraries')} className={sourceModeClasses('libraries')}>
+                <div
+                  className={`tab-switcher-squircle relative isolate inline-flex w-fit rounded-2xl p-1 ${darkMode ? 'bg-gray-800' : 'bg-gray-100'}`}
+                  role="tablist"
+                  aria-label="Lyrics source"
+                >
+                  <SlidingTabIndicator className={darkMode ? 'bg-gray-100 shadow-sm' : 'bg-gray-900 shadow-sm'} />
+                  <button type="button" role="tab" aria-selected={activeTab === 'libraries'} onClick={() => setSearchMode('libraries')} className={sourceModeClasses('libraries')}>
                     <Library className="h-4 w-4" />
                     Libraries
                   </button>
-                  <button type="button" onClick={() => setSearchMode('google')} className={sourceModeClasses('google')}>
+                  <button type="button" role="tab" aria-selected={activeTab === 'google'} onClick={() => setSearchMode('google')} className={sourceModeClasses('google')}>
                     <Globe2 className="h-4 w-4" />
                     Web
                   </button>

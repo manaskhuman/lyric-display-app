@@ -1,11 +1,9 @@
 // Project: LyricDisplay App
 // File: src/utils/parseLyrics.js
 
-import {
-  parseTxtContent,
-  processRawTextToLines,
-  STRUCTURE_TAG_PATTERNS,
-} from '../../shared/lyricsParsing.js';
+import { isStructureTag } from '../../shared/lyricsParsing/structureTags.js';
+import { parseTxtContent } from '../../shared/lyricsParsing/txtParser.js';
+import { processRawTextToLines } from '../../shared/lyricsParsing/txtProcessor.js';
 
 /**
  * Parses a .txt file and extracts the raw text and processed lyric lines.
@@ -38,15 +36,28 @@ export const parseLyrics = (file, options = {}) => {
 export { processRawTextToLines, parseTxtContent };
 
 const STAGE_ONLY_LINE_REGEX = /^\s*\/\//;
-const STAGE_ONLY_LINE_PREFIX_REGEX = /^\s*\/\/\s*/;
+const STAGE_ONLY_PREFIX_REGEX = /^(\s*)\/\/\s*/;
 
-const isStageOnlyLine = (lineText) => {
-  return typeof lineText === 'string' && STAGE_ONLY_LINE_REGEX.test(lineText);
+export const isStageOnlyLine = (lineText) => (
+  typeof lineText === 'string' && STAGE_ONLY_LINE_REGEX.test(lineText)
+);
+
+export const stripStageOnlyPrefix = (lineText) => {
+  if (typeof lineText !== 'string') return '';
+  return lineText.replace(STAGE_ONLY_PREFIX_REGEX, '');
 };
 
-const stripStageOnlyPrefix = (lineText) => {
+export const toggleStageOnlyPrefix = (lineText) => {
   if (typeof lineText !== 'string') return '';
-  return lineText.replace(STAGE_ONLY_LINE_PREFIX_REGEX, '');
+
+  const prefixMatch = lineText.match(STAGE_ONLY_PREFIX_REGEX);
+  if (prefixMatch) {
+    return `${prefixMatch[1]}${lineText.slice(prefixMatch[0].length)}`;
+  }
+
+  const leadingWhitespace = lineText.match(/^\s*/)?.[0] ?? '';
+  const content = lineText.slice(leadingWhitespace.length);
+  return `${leadingWhitespace}// ${content}`;
 };
 
 const resolveRawLineText = (line) => {
@@ -128,18 +139,16 @@ export const getLineOutputText = (line, target = 'output') => {
   return formatTextForTarget(rawText, target);
 };
 
-export const isStructureTagLyricLine = (line) => {
+export const isStructureTagLyricLine = (line, sectionTagPhrases) => {
   if (!line || typeof line !== 'string') return false;
-  const trimmed = line.trim();
-  if (!trimmed) return false;
-  return STRUCTURE_TAG_PATTERNS.some((pattern) => pattern.test(trimmed));
+  return isStructureTag(line, sectionTagPhrases);
 };
 
 export const findNavigableLyricLineIndex = (
   lyrics,
   startIndex,
   direction = 1,
-  { skipSectionTitles = false } = {}
+  { skipSectionTitles = false, sectionTagPhrases } = {}
 ) => {
   if (!Array.isArray(lyrics) || lyrics.length === 0) return null;
 
@@ -147,7 +156,7 @@ export const findNavigableLyricLineIndex = (
   let index = Math.min(lyrics.length - 1, Math.max(0, Number(startIndex) || 0));
 
   while (index >= 0 && index < lyrics.length) {
-    if (!skipSectionTitles || !isStructureTagLyricLine(lyrics[index])) {
+    if (!skipSectionTitles || !isStructureTagLyricLine(lyrics[index], sectionTagPhrases)) {
       return index;
     }
     index += step;

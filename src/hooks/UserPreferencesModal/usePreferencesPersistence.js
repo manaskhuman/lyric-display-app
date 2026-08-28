@@ -3,7 +3,7 @@ import useLyricsStore, { loadPreferencesIntoStore } from '../../context/LyricsSt
 import { loadAdvancedSettings } from '../../utils/connectionManager';
 import { loadDebugLoggingPreference } from '../../utils/logger';
 import { LIVE_SAFETY_PREFERENCE_EVENT } from '../useLiveSafetyBridge';
-import { normalizeLyricsParsingOptions } from '../../../shared/lyricsParsing.js';
+import { normalizeLyricsParsingOptions } from '../../../shared/lyricsParsing/preferenceOptions.js';
 import { requestLyricsReloadWithCurrentParser } from '../../utils/lyricsReloadEvents.js';
 
 export const usePreferencesPersistence = ({ showToast }) => {
@@ -116,7 +116,9 @@ export const usePreferencesPersistence = ({ showToast }) => {
 
       const result = await window.electronAPI.preferences.saveAll(newPreferences);
       if (!result?.success) {
-        throw new Error(result?.error || 'Preference save was rejected');
+        const error = new Error(result?.error || 'Preference save was rejected');
+        error.code = result?.code;
+        throw error;
       }
 
       if (isMountedRef.current) {
@@ -139,6 +141,12 @@ export const usePreferencesPersistence = ({ showToast }) => {
       if (isMountedRef.current) {
         setLastSaved(null);
         setSaveError(true);
+        showToastRef.current?.({
+          title: error?.code === 'STORAGE_FULL' ? 'Storage is full' : 'Preferences not saved',
+          message: error?.message || 'LyricDisplay could not save your preferences.',
+          variant: 'error',
+          dedupeKey: 'preferences-storage-write-failed',
+        });
       }
     } finally {
       if (isMountedRef.current) setSaving(false);
@@ -288,6 +296,73 @@ export const usePreferencesPersistence = ({ showToast }) => {
     }
   }, [savePreferences]);
 
+  const handleResetAll = useCallback(async () => {
+    try {
+      if (!window.electronAPI?.preferences?.resetAll || !window.electronAPI?.preferences?.getAll) {
+        throw new Error('Preferences reset is unavailable');
+      }
+
+      lyricsLayoutChangedRef.current = true;
+
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
+      }
+      const pendingPreferences = pendingPreferencesRef.current;
+      pendingPreferencesRef.current = null;
+      if (pendingPreferences) {
+        await savePreferences(pendingPreferences);
+      }
+
+      if (isMountedRef.current) {
+        setSaving(true);
+        setSaveError(false);
+      }
+
+      const resetResult = await window.electronAPI.preferences.resetAll();
+      if (!resetResult?.success) {
+        const error = new Error(resetResult?.error || 'Preferences reset was rejected');
+        error.code = resetResult?.code;
+        throw error;
+      }
+
+      const result = await window.electronAPI.preferences.getAll();
+      if (!result?.success || !result.preferences) {
+        throw new Error(result?.error || 'Default preferences could not be loaded');
+      }
+
+      if (isMountedRef.current) setPreferences(result.preferences);
+      await loadPreferencesIntoStore(useLyricsStore);
+      await loadAdvancedSettings();
+      await loadDebugLoggingPreference();
+
+      if (isMountedRef.current) {
+        setLastSaved(new Date());
+        setSaveError(false);
+        if (confirmationTimeoutRef.current) clearTimeout(confirmationTimeoutRef.current);
+        confirmationTimeoutRef.current = setTimeout(() => {
+          setLastSaved(null);
+        }, 3000);
+      }
+      return true;
+    } catch (error) {
+      console.error('Failed to reset preferences:', error);
+      if (isMountedRef.current) {
+        setLastSaved(null);
+        setSaveError(true);
+        showToastRef.current?.({
+          title: error?.code === 'STORAGE_FULL' ? 'Storage is full' : 'Preferences not restored',
+          message: error?.message || 'LyricDisplay could not restore the default preferences.',
+          variant: 'error',
+          dedupeKey: 'preferences-reset-all-failed',
+        });
+      }
+      return false;
+    } finally {
+      if (isMountedRef.current) setSaving(false);
+    }
+  }, [savePreferences]);
+
   useEffect(() => {
     const handleLiveSafetyPreferenceUpdated = (event) => {
       const enabled = event?.detail?.enabled;
@@ -350,21 +425,8 @@ export const usePreferencesPersistence = ({ showToast }) => {
     return () => window.removeEventListener('tutorial-popovers-preference-updated', handleTutorialPreferenceUpdated);
   }, []);
 
-  const handleBrowseDefaultPath = useCallback(async () => {
-    try {
-      if (window.electronAPI?.preferences?.browseDefaultPath) {
-        const result = await window.electronAPI.preferences.browseDefaultPath();
-        if (result.success && result.path) {
-          updatePreference('fileHandling', 'defaultLyricsPath', result.path);
-        }
-      }
-    } catch (error) {
-      console.error('Failed to browse for path:', error);
-    }
-  }, [updatePreference]);
-
   return {
-    handleBrowseDefaultPath,
+    handleResetAll,
     handleResetCategory,
     lastSaved,
     loading,

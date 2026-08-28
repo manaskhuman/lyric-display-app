@@ -1,11 +1,12 @@
 import { useCallback, useMemo } from 'react';
 import { useDynamicRowHeight } from 'react-window';
-import { sanitizeMaxLinesPerGroup, STRUCTURE_TAG_PATTERNS } from '../../../shared/lyricsParsing.js';
+import { createStructureTagPatterns } from '../../../shared/lyricsParsing/constants.js';
+import { sanitizeMaxLinesPerGroup } from '../../../shared/lyricsParsing/runtimeConfig.js';
 
 export const DEFAULT_ROW_HEIGHT = 48;
 export const ROW_GAP = 8;
 export const VIRTUALIZATION_THRESHOLD = 200;
-export const HORIZONTAL_PADDING_PX = 16;
+export const HORIZONTAL_PADDING_PX = 12;
 
 export default function useLyricsListRows({
   lyrics,
@@ -14,6 +15,7 @@ export default function useLyricsListRows({
   selectedLine,
   previewLine,
   maxLinesPerGroup,
+  sectionTagPhrases,
   highlightedLineIndex,
   searchQuery,
   darkMode,
@@ -23,12 +25,17 @@ export default function useLyricsListRows({
   const baseRowHeight = compact ? 38 : DEFAULT_ROW_HEIGHT;
   const rowGap = compact ? 4 : ROW_GAP;
 
+  const structureTagPatterns = useMemo(
+    () => createStructureTagPatterns(sectionTagPhrases),
+    [sectionTagPhrases],
+  );
+
   const isStructureTagLine = useCallback((line) => {
     if (!line || typeof line !== 'string') return false;
     const trimmed = line.trim();
     if (!trimmed) return false;
-    return STRUCTURE_TAG_PATTERNS.some((pattern) => pattern.test(trimmed));
-  }, []);
+    return structureTagPatterns.some((pattern) => pattern.test(trimmed));
+  }, [structureTagPatterns]);
 
   const effectiveMaxLinesPerGroup = useMemo(() => {
     return sanitizeMaxLinesPerGroup(maxLinesPerGroup);
@@ -124,7 +131,7 @@ export default function useLyricsListRows({
   const getLineClassName = useCallback(
     (index, isVirtualized = false, isMultiSelected = false) => {
       const padding = compact ? 'px-2.5 py-2' : 'p-3';
-      let base = `${padding} ${compact ? 'rounded-md border text-[13px] leading-snug' : 'rounded'} cursor-pointer transition-colors duration-150 select-none `;
+      let base = `${padding} lyric-line-item-rounded ${compact ? 'border text-[13px] leading-snug' : ''} cursor-pointer transition-colors duration-150 select-none `;
 
       if (compact && darkMode) {
         if (index === previewLine) {

@@ -1,8 +1,13 @@
 import React from 'react';
-import { Clock3, LayoutPanelTop } from 'lucide-react';
+import { Clock3, LayoutPanelTop, ArrowRightLeft } from 'lucide-react';
+import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { getTimerToggleProps } from '../utils/timerUtils';
+import {
+  MAX_TRANSITION_DURATION_MS,
+  MIN_TRANSITION_DURATION_MS,
+  TRANSITION_ANIMATION_OPTIONS,
+} from '../../shared/transitionSettings.js';
 
 const SettingRow = ({ title, description, children, disabled = false, mutedText }) => (
   <div className={`flex items-center justify-between gap-5 py-2.5 ${disabled ? 'opacity-50' : ''}`}>
@@ -26,8 +31,6 @@ const TimerDisplaySettingsModal = ({ displaySettings, onDraftChange, darkMode = 
   const selectContentClass = darkMode
     ? 'bg-gray-800 border-gray-700 text-gray-100'
     : 'bg-white border-gray-300';
-  const switchProps = getTimerToggleProps(darkMode);
-
   const update = React.useCallback((partial) => {
     const nextSettings = { ...settingsRef.current, ...partial };
     settingsRef.current = nextSettings;
@@ -62,10 +65,10 @@ const TimerDisplaySettingsModal = ({ displaySettings, onDraftChange, darkMode = 
             </Select>
           </div>
           <SettingRow title="Progress bar" description="Show elapsed progress beneath the timer." mutedText={mutedText}>
-            <Switch checked={Boolean(settings.showProgress)} onCheckedChange={(checked) => update({ showProgress: checked })} {...switchProps} />
+            <Switch checked={Boolean(settings.showProgress)} onCheckedChange={(checked) => update({ showProgress: checked })} size="small" variant="control" />
           </SettingRow>
           <SettingRow title="Secondary text" description="Show the timer label and schedule position." mutedText={mutedText}>
-            <Switch checked={showSecondaryText} onCheckedChange={(checked) => update({ showSecondaryText: checked })} {...switchProps} />
+            <Switch checked={showSecondaryText} onCheckedChange={(checked) => update({ showSecondaryText: checked })} size="small" variant="control" />
           </SettingRow>
         </div>
       </section>
@@ -80,17 +83,53 @@ const TimerDisplaySettingsModal = ({ displaySettings, onDraftChange, darkMode = 
         </div>
         <div className={`divide-y ${dividerClass}`}>
           <SettingRow title="Show global time" disabled={!showSecondaryText} mutedText={mutedText}>
-            <Switch checked={Boolean(settings.showGlobalClock)} onCheckedChange={(checked) => update({ showGlobalClock: checked })} disabled={!showSecondaryText} {...getTimerToggleProps(darkMode, !showSecondaryText)} />
+            <Switch checked={Boolean(settings.showGlobalClock)} onCheckedChange={(checked) => update({ showGlobalClock: checked })} disabled={!showSecondaryText} size="small" variant="control" />
           </SettingRow>
           <SettingRow title="12-hour clock" disabled={!showSecondaryText || !settings.showGlobalClock} mutedText={mutedText}>
-            <Switch checked={Boolean(settings.clockHour12)} onCheckedChange={(checked) => update({ clockHour12: checked })} disabled={!showSecondaryText || !settings.showGlobalClock} {...getTimerToggleProps(darkMode, !showSecondaryText || !settings.showGlobalClock)} />
+            <Switch checked={Boolean(settings.clockHour12)} onCheckedChange={(checked) => update({ clockHour12: checked })} disabled={!showSecondaryText || !settings.showGlobalClock} size="small" variant="control" />
           </SettingRow>
           <SettingRow title="Show seconds" disabled={!showSecondaryText || !settings.showGlobalClock} mutedText={mutedText}>
-            <Switch checked={Boolean(settings.clockShowSeconds)} onCheckedChange={(checked) => update({ clockShowSeconds: checked })} disabled={!showSecondaryText || !settings.showGlobalClock} {...getTimerToggleProps(darkMode, !showSecondaryText || !settings.showGlobalClock)} />
+            <Switch checked={Boolean(settings.clockShowSeconds)} onCheckedChange={(checked) => update({ clockShowSeconds: checked })} disabled={!showSecondaryText || !settings.showGlobalClock} size="small" variant="control" />
           </SettingRow>
           <SettingRow title="Show AM/PM" disabled={!showSecondaryText || !settings.showGlobalClock || !settings.clockHour12} mutedText={mutedText}>
-            <Switch checked={Boolean(settings.clockShowPeriod)} onCheckedChange={(checked) => update({ clockShowPeriod: checked })} disabled={!showSecondaryText || !settings.showGlobalClock || !settings.clockHour12} {...getTimerToggleProps(darkMode, !showSecondaryText || !settings.showGlobalClock || !settings.clockHour12)} />
+            <Switch checked={Boolean(settings.clockShowPeriod)} onCheckedChange={(checked) => update({ clockShowPeriod: checked })} disabled={!showSecondaryText || !settings.showGlobalClock || !settings.clockHour12} size="small" variant="control" />
           </SettingRow>
+        </div>
+      </section>
+
+      <section className={`rounded-xl border px-4 py-2 md:col-span-2 ${cardClass}`}>
+        <div className="flex items-center gap-2 border-b border-inherit py-2.5">
+          <ArrowRightLeft className="h-4 w-4 text-blue-500" />
+          <div>
+            <h3 className="text-xs font-semibold">Timer and clock transition</h3>
+            <p className={`mt-0.5 text-[10px] ${mutedText}`}>Animate the switch between the global clock and an active timer. Select None for an instant change.</p>
+          </div>
+        </div>
+        <div className="grid gap-3 py-3 sm:grid-cols-[minmax(0,1fr)_160px]">
+          <label className="space-y-2">
+            <span className="text-xs font-medium">Animation</span>
+            <Select value={settings.stateTransitionAnimation || 'fade'} onValueChange={(value) => update({ stateTransitionAnimation: value })}>
+              <SelectTrigger className={selectTriggerClass}><SelectValue /></SelectTrigger>
+              <SelectContent className={selectContentClass}>
+                {TRANSITION_ANIMATION_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </label>
+          <label className={`space-y-2 ${settings.stateTransitionAnimation === 'none' ? 'opacity-50' : ''}`}>
+            <span className="text-xs font-medium">Duration (ms)</span>
+            <Input
+              type="number"
+              min={MIN_TRANSITION_DURATION_MS}
+              max={MAX_TRANSITION_DURATION_MS}
+              step="50"
+              disabled={settings.stateTransitionAnimation === 'none'}
+              value={settings.stateTransitionDuration ?? 300}
+              onChange={(event) => update({ stateTransitionDuration: event.target.value })}
+              className={selectTriggerClass}
+            />
+          </label>
         </div>
       </section>
     </div>

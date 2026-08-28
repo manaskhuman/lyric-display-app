@@ -1,10 +1,18 @@
+import { isOutputDisplayClientType } from '../config/clientTypes.js';
+
 const normalizeClientPurpose = (value) => {
   if (typeof value !== 'string') return null;
   const normalized = value.trim().toLowerCase();
   return /^[a-z0-9-]{1,48}$/.test(normalized) ? normalized : null;
 };
 
-export function createSocketAuthenticator({ verifyToken }) {
+const normalizeClientInstanceId = (value) => {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim();
+  return /^[a-zA-Z0-9:_-]{1,96}$/.test(normalized) ? normalized : null;
+};
+
+export function createSocketAuthenticator({ verifyToken, hasOutput = () => true }) {
   return (socket, next) => {
     if (socket.handshake.query?.token) {
       const error = new Error('Token in query string not allowed');
@@ -29,6 +37,15 @@ export function createSocketAuthenticator({ verifyToken }) {
       return next(error);
     }
 
+    if (isOutputDisplayClientType(decoded.clientType) && !hasOutput(decoded.clientType)) {
+      const error = new Error('Output route unavailable');
+      error.data = {
+        code: 'OUTPUT_UNAVAILABLE',
+        output: decoded.clientType,
+      };
+      return next(error);
+    }
+
     socket.userData = {
       clientType: decoded.clientType,
       deviceId: decoded.deviceId,
@@ -36,6 +53,7 @@ export function createSocketAuthenticator({ verifyToken }) {
       permissions: decoded.permissions,
       connectedAt: Date.now(),
       clientPurpose: normalizeClientPurpose(socket.handshake.auth?.purpose),
+      clientInstanceId: normalizeClientInstanceId(socket.handshake.auth?.instanceId),
       isPreview: socket.handshake.auth?.preview === true
     };
 

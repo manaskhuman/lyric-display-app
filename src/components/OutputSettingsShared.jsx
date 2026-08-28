@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { ChevronDown, ChevronUp, TextCursorInput, PaintBucket, Bold, Italic, Underline, CaseUpper, AlignVerticalSpaceAround, AlignLeft, AlignCenter, AlignRight } from 'lucide-react';
+import { ChevronDown, ChevronUp, TextCursorInput, Bold, Italic, Underline, CaseUpper, AlignVerticalSpaceAround, AlignLeft, AlignCenter, AlignRight } from 'lucide-react';
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
@@ -10,9 +10,11 @@ import { sanitizeIntegerInput } from '../utils/numberInput';
 import { getEmphasisToggleStateClassName } from '../utils/emphasisToggleStyles.js';
 
 export const LabelWithIcon = ({ icon: Icon, text, darkMode }) => (
-  <div className="flex items-center gap-2 min-w-[140px]">
-    <Icon className={`h-3.5 w-3.5 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`} />
-    <label className={`text-[13px] leading-5 ${darkMode ? 'text-gray-200' : 'text-gray-700'}`}>{text}</label>
+  <div className="flex items-center gap-2 min-w-35" data-output-setting-label>
+    <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full" data-output-setting-icon>
+      <Icon className={`h-3.5 w-3.5 ${darkMode ? 'text-gray-300' : 'text-gray-600'}`} />
+    </span>
+    <label className={`whitespace-nowrap text-[13px] leading-5 ${darkMode ? 'text-gray-200' : 'text-gray-700'}`}>{text}</label>
   </div>
 );
 
@@ -29,15 +31,16 @@ export const blurInputOnEnter = (event) => {
   });
 };
 
-const compactOptionButtonClass = '!h-9 !w-9 rounded-md [&_svg]:!size-3.5';
+const compactOptionButtonClass = 'h-9! w-9! rounded-md [&_svg]:size-3.5!';
 
 export const AdvancedToggle = ({ expanded, onToggle, darkMode, ariaLabel, disabled = false, className = '' }) => (
   <button
+    type="button"
     onClick={onToggle}
     disabled={disabled}
     className={`p-1 rounded transition-colors ${darkMode
-      ? 'hover:bg-gray-700 text-gray-400'
-      : 'hover:bg-gray-100 text-gray-500'
+      ? 'hover:bg-gray-600 text-gray-400'
+      : 'hover:bg-slate-200 text-gray-500'
       } ${disabled ? 'opacity-60 cursor-not-allowed' : ''} ${className}`}
     aria-label={ariaLabel}
   >
@@ -104,12 +107,13 @@ export const FontSettingsRow = ({
   tooltip = "Font size and color settings",
   disabled = false
 }) => (
-  <div className="flex items-center justify-between gap-4">
+  <div className="flex items-center justify-between gap-4" data-output-setting-row>
     <Tooltip content={tooltip} side="right">
-      <label className={`text-[13px] leading-5 ${darkMode ? 'text-gray-200' : 'text-gray-700'} ${disabled ? 'opacity-50' : ''}`}>{label}</label>
+      <div className={disabled ? 'opacity-50' : ''}>
+        <LabelWithIcon icon={TextCursorInput} text={label} darkMode={darkMode} />
+      </div>
     </Tooltip>
     <div className="flex items-center gap-2">
-      <TextCursorInput className={`h-3.5 w-3.5 ${darkMode ? 'text-gray-400' : 'text-gray-500'} ${disabled ? 'opacity-50' : ''}`} />
       <Input
         type="number"
         value={sizeValue}
@@ -125,7 +129,6 @@ export const FontSettingsRow = ({
         disabled={disabled}
         className={`w-20 ${darkMode ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300'} ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
       />
-      <PaintBucket className={`h-3.5 w-3.5 ${darkMode ? 'text-gray-400' : 'text-gray-500'} ${disabled ? 'opacity-50' : ''}`} />
       <ColorPicker
         value={colorValue}
         onChange={onColorChange}
@@ -150,7 +153,7 @@ export const EmphasisRow = ({
   onAllCapsChange,
   disabled = false
 }) => (
-  <div className="flex items-center justify-between gap-4">
+  <div className="flex items-center justify-between gap-4" data-output-setting-row>
     <Tooltip content="Apply text styling: bold, italic, underline, or all caps" side="right">
       <LabelWithIcon icon={icon} text="Emphasis" darkMode={darkMode} />
     </Tooltip>
@@ -219,7 +222,7 @@ export const AlignmentRow = ({
   const currentValue = value || 'center';
 
   return (
-    <div className="flex items-center justify-between gap-4">
+    <div className="flex items-center justify-between gap-4" data-output-setting-row>
       <Tooltip content={tooltip} side="right">
         <LabelWithIcon icon={icon} text={label} darkMode={darkMode} />
       </Tooltip>
@@ -233,11 +236,11 @@ export const AlignmentRow = ({
             className={
               currentValue === 'left'
                 ? darkMode
-                  ? `${compactOptionButtonClass} !bg-white !text-gray-900 hover:!bg-white !border-gray-300`
-                  : `${compactOptionButtonClass} !bg-black !text-white hover:!bg-black !border-gray-300`
+                  ? `${compactOptionButtonClass} bg-white! text-gray-900! hover:bg-white! border-gray-300!`
+                  : `${compactOptionButtonClass} bg-black! text-white! hover:bg-black! border-gray-300!`
                 : darkMode
-                  ? `${compactOptionButtonClass} !bg-transparent !border-gray-600 !text-gray-200 hover:!bg-gray-700`
-                  : `${compactOptionButtonClass} !bg-transparent !border-gray-300 !text-gray-700 hover:!bg-gray-100`
+                  ? `${compactOptionButtonClass} bg-transparent! border-gray-600! text-gray-200! hover:bg-gray-700!`
+                  : `${compactOptionButtonClass} bg-transparent! border-gray-300! text-gray-700! hover:bg-gray-100!`
             }
           >
             <AlignLeft className="h-3.5 w-3.5" />
@@ -252,11 +255,11 @@ export const AlignmentRow = ({
             className={
               currentValue === 'center'
                 ? darkMode
-                  ? `${compactOptionButtonClass} !bg-white !text-gray-900 hover:!bg-white !border-gray-300`
-                  : `${compactOptionButtonClass} !bg-black !text-white hover:!bg-black !border-gray-300`
+                  ? `${compactOptionButtonClass} bg-white! text-gray-900! hover:bg-white! border-gray-300!`
+                  : `${compactOptionButtonClass} bg-black! text-white! hover:bg-black! border-gray-300!`
                 : darkMode
-                  ? `${compactOptionButtonClass} !bg-transparent !border-gray-600 !text-gray-200 hover:!bg-gray-700`
-                  : `${compactOptionButtonClass} !bg-transparent !border-gray-300 !text-gray-700 hover:!bg-gray-100`
+                  ? `${compactOptionButtonClass} bg-transparent! border-gray-600! text-gray-200! hover:bg-gray-700!`
+                  : `${compactOptionButtonClass} bg-transparent! border-gray-300! text-gray-700! hover:bg-gray-100!`
             }
           >
             <AlignCenter className="h-3.5 w-3.5" />
@@ -271,11 +274,11 @@ export const AlignmentRow = ({
             className={
               currentValue === 'right'
                 ? darkMode
-                  ? `${compactOptionButtonClass} !bg-white !text-gray-900 hover:!bg-white !border-gray-300`
-                  : `${compactOptionButtonClass} !bg-black !text-white hover:!bg-black !border-gray-300`
+                  ? `${compactOptionButtonClass} bg-white! text-gray-900! hover:bg-white! border-gray-300!`
+                  : `${compactOptionButtonClass} bg-black! text-white! hover:bg-black! border-gray-300!`
                 : darkMode
-                  ? `${compactOptionButtonClass} !bg-transparent !border-gray-600 !text-gray-200 hover:!bg-gray-700`
-                  : `${compactOptionButtonClass} !bg-transparent !border-gray-300 !text-gray-700 hover:!bg-gray-100`
+                  ? `${compactOptionButtonClass} bg-transparent! border-gray-600! text-gray-200! hover:bg-gray-700!`
+                  : `${compactOptionButtonClass} bg-transparent! border-gray-300! text-gray-700! hover:bg-gray-100!`
             }
           >
             <AlignRight className="h-3.5 w-3.5" />

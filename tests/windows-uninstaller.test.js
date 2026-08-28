@@ -24,6 +24,10 @@ test('Windows user-data deletion is opt-in and confined to the uninstaller', () 
   assert.doesNotMatch(customInstallMacro, /DeleteUserDataSelection/);
 });
 
+test('Windows upgrades retain electron-builder atomic replacement of the install directory', () => {
+  assert.doesNotMatch(installerScript, /!macro\s+customRemoveFiles\b/);
+});
+
 test('Windows cleanup covers current, legacy, and local application data', () => {
   assert.match(
     installerScript,
@@ -35,9 +39,21 @@ test('Windows cleanup covers current, legacy, and local application data', () =>
     '$APPDATA\\lyric-display-app',
     '$APPDATA\\lyricdisplay-ndi',
     '$LOCALAPPDATA\\LyricDisplay',
+    '$DOCUMENTS\\LyricDisplay',
   ]) {
     assert.ok(installerScript.includes(`RMDir /r "${expectedPath}"`), expectedPath);
   }
+});
+
+test('Windows cleanup explicitly warns before removing app-created documents', () => {
+  assert.match(
+    installerScript,
+    /This also removes lyrics, imported songs and setlists\. Files saved elsewhere are not removed\./
+  );
+  assert.match(
+    installerScript,
+    /\$\{If\} \$DeleteUserDataSelection == \$\{BST_CHECKED\}[\s\S]*RMDir \/r "\$DOCUMENTS\\LyricDisplay"/
+  );
 });
 
 test('the NSIS uninstaller embeds credential cleanup for every LyricDisplay service', () => {

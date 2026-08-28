@@ -1,11 +1,11 @@
 import { app, BrowserWindow, dialog, Menu } from 'electron';
-import './main/appIdentity.js';
+import { getAppDataResetResult } from './main/appIdentity.js';
 import { registerLyricVideoMediaScheme } from './main/lyricVideoMediaProtocol.js';
 import { initModalBridge, requestRendererModal } from './main/modalBridge.js';
 import { appRoot, isDev } from './main/paths.js';
 import { createWindow } from './main/windows.js';
 import { checkForUpdates } from './main/updater.js';
-import { registerIpcHandlers } from './main/ipc.js';
+import { registerIpcHandlers } from './main/ipc/index.js';
 import { openInAppBrowser, registerInAppBrowserIpc } from './main/inAppBrowser.js';
 import { makeMenuAPI } from './main/menuBridge.js';
 import { setupSingleInstanceLock } from './main/singleInstance.js';
@@ -27,6 +27,11 @@ import * as userPreferences from './main/userPreferences.js';
 import { flushFileLogs, initFileLogging } from './main/logging.js';
 import { createAppTray, destroyAppTray } from './main/tray.js';
 import { recordSuccessfulAppLaunch } from './main/telemetry.js';
+import {
+  startNetworkAddressMonitor,
+  stopNetworkAddressMonitor,
+  updateNetworkOutputPresence,
+} from './main/networkAddressMonitor.js';
 
 const APP_PROTOCOL = 'lyricdisplay';
 const DEV_APP_PROTOCOL = 'lyricdisplay-dev';
@@ -410,12 +415,39 @@ registerIpcHandlers({
   checkForUpdates,
   requestRendererModal,
   syncBackendParsingConfig,
+  prepareForAppDataReset: performCleanup,
 });
 registerInAppBrowserIpc();
 
 setBackendMessageHandler((message) => {
   if (message?.type === 'security-admin-key') {
     return { success: setAdminKeyFromBackend(message.adminKey) };
+  }
+
+  if (message?.type === 'output-presence') {
+    return { success: updateNetworkOutputPresence(message) };
+  }
+
+  if (message?.type === 'storage-write-failed') {
+    requestRendererModal({
+      title: 'Storage is full',
+      description: message.error || 'LyricDisplay cannot save changes because the drive containing its data folder is full.',
+      body: 'The current session can continue in memory, but new changes may be lost when the app closes. Free some disk space, then make another change to retry saving.',
+      variant: 'error',
+      dedupeKey: 'user-data-storage-full',
+      dismissible: true,
+      actions: [{ label: 'Dismiss', value: 'dismiss', variant: 'outline' }],
+    }, {
+      fallback: () => dialog.showMessageBox({
+        type: 'error',
+        title: 'Storage is full',
+        message: message.error || 'LyricDisplay cannot save changes because the drive is full.',
+        detail: 'Free some disk space before closing LyricDisplay to avoid losing current-session changes.',
+      }),
+    }).catch((error) => {
+      console.error('[Storage] Failed to show storage capacity alert:', error);
+    });
+    return { success: true };
   }
 
   if (message?.type === 'switch-to-desktop-mode') {
@@ -476,6 +508,16 @@ setBackendStatusHandler((status) => {
 });
 
 app.whenReady().then(async () => {
+  const appDataResetResult = getAppDataResetResult();
+  if (appDataResetResult?.requested && appDataResetResult.error) {
+    await dialog.showMessageBox({
+      type: 'error',
+      title: 'LyricDisplay Reset Failed',
+      message: 'LyricDisplay could not clear its user-data folder.',
+      detail: appDataResetResult.error,
+    });
+  }
+
   try { Menu.setApplicationMenu(null); } catch { }
   if (!isHeadlessMode) {
     createLoadingWindow();
@@ -492,6 +534,7 @@ app.whenReady().then(async () => {
 
   if (mainWindow) {
     attachMainWindowLifecycle(mainWindow);
+    startNetworkAddressMonitor({ requestRendererModal });
   }
 
   if (app.isPackaged && (mainWindow || isHeadlessMode) && !app.isQuitting) {
@@ -559,6 +602,7 @@ app.on('before-quit', (event) => {
 });
 
 app.on('will-quit', () => {
+  stopNetworkAddressMonitor();
   destroyAppTray();
   performCleanup();
 });

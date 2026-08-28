@@ -1,14 +1,15 @@
 import { useEffect } from 'react';
 import { reconstructEditableText } from '../../utils/lyricsFormat';
 import { stripLyricImportExtension } from '../../../shared/lyricImportRegistry.js';
-import { extractExplicitGroupingDirective } from '../../../shared/lyricsParsing.js';
+import { extractExplicitGroupingDirective } from '../../../shared/lyricsParsing/txtParser.js';
+import { UNTITLED_LYRICS_TITLE } from '../../utils/titlePrefill.js';
 
 const resetCanvasState = ({ baseContentRef, baseTitleRef, loadSignatureRef, resetHistory, setFileName, setTitle }) => {
   resetHistory('');
   setFileName('');
-  setTitle('');
+  setTitle(UNTITLED_LYRICS_TITLE);
   baseContentRef.current = '';
-  baseTitleRef.current = '';
+  baseTitleRef.current = UNTITLED_LYRICS_TITLE;
   if (loadSignatureRef) {
     loadSignatureRef.current = null;
   }
@@ -57,7 +58,7 @@ export const useCanvasLoadLifecycle = ({
 
       if (!content) return;
 
-      const baseName = fileName ? stripLyricImportExtension(fileName) : 'Untitled';
+      const baseName = fileName ? stripLyricImportExtension(fileName) : UNTITLED_LYRICS_TITLE;
       const editableContent = extractExplicitGroupingDirective(content).content;
 
       resetHistory(editableContent);
@@ -78,7 +79,16 @@ export const useCanvasLoadLifecycle = ({
 
     window.addEventListener('load-into-canvas', handleLoadIntoCanvas);
 
+    const pendingLoadTimer = window.__pendingCanvasLyricsLoad
+      ? window.setTimeout(() => {
+        const pending = window.__pendingCanvasLyricsLoad;
+        delete window.__pendingCanvasLyricsLoad;
+        handleLoadIntoCanvas({ detail: pending });
+      }, 0)
+      : null;
+
     return () => {
+      if (pendingLoadTimer !== null) window.clearTimeout(pendingLoadTimer);
       window.removeEventListener('load-into-canvas', handleLoadIntoCanvas);
     };
   }, [baseContentRef, baseTitleRef, loadSignatureRef, resetHistory, setCurrentFilePath, setFileName, setTitle, showToast]);
@@ -98,7 +108,7 @@ export const useCanvasLoadLifecycle = ({
       : (lyrics && lyrics.length > 0)
         ? reconstructEditableText(lyrics)
         : extractExplicitGroupingDirective(rawLyricsContent || '').content;
-    const nextTitle = lyricsFileName || '';
+    const nextTitle = lyricsFileName || UNTITLED_LYRICS_TITLE;
     const loadSignature = `${nextTitle}::${nextContent}`;
     if (loadSignatureRef.current !== loadSignature) {
       resetHistory(nextContent);

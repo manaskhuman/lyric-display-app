@@ -1,4 +1,21 @@
-export const CURRENT_PREFERENCES_SCHEMA_VERSION = 4;
+import {
+  DEFAULT_CAPITALIZED_WORDS,
+  normalizeCapitalizedWords,
+} from '../shared/capitalizedWords.js';
+import {
+  DEFAULT_SECTION_TAG_PHRASES,
+  normalizeSectionTagPhrases,
+} from '../shared/sectionTagPhrases.js';
+import {
+  DEFAULT_APPEARANCE_TRANSITIONS,
+  normalizeAppearanceTransitions,
+} from '../shared/transitionSettings.js';
+import {
+  DEFAULT_PREVIEW_SETTINGS,
+  normalizePreviewSettings,
+} from '../shared/previewSettings.js';
+
+export const CURRENT_PREFERENCES_SCHEMA_VERSION = 10;
 
 const isPlainObject = (value) => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 
@@ -85,6 +102,90 @@ export function migratePreferences(input) {
           : false,
       },
       _schemaVersion: 4,
+    };
+  }
+
+  if (sourceVersion < 5) {
+    const formatting = isPlainObject(migrated.formatting) ? migrated.formatting : {};
+    migrated = {
+      ...migrated,
+      formatting: {
+        ...formatting,
+        capitalizedWords: Array.isArray(formatting.capitalizedWords)
+          ? normalizeCapitalizedWords(formatting.capitalizedWords)
+          : [...DEFAULT_CAPITALIZED_WORDS],
+      },
+      _schemaVersion: 5,
+    };
+  }
+
+  if (sourceVersion < 6) {
+    const parsing = isPlainObject(migrated.parsing) ? migrated.parsing : {};
+    migrated = {
+      ...migrated,
+      parsing: {
+        ...parsing,
+        sectionTagPhrases: Array.isArray(parsing.sectionTagPhrases)
+          ? normalizeSectionTagPhrases(parsing.sectionTagPhrases)
+          : [...DEFAULT_SECTION_TAG_PHRASES],
+      },
+      _schemaVersion: 6,
+    };
+  }
+
+  if (sourceVersion < 7) {
+    const fileHandling = isPlainObject(migrated.fileHandling) ? migrated.fileHandling : {};
+    const nextFileHandling = { ...fileHandling };
+    delete nextFileHandling.defaultLyricsPath;
+    migrated = {
+      ...migrated,
+      fileHandling: nextFileHandling,
+      _schemaVersion: 7,
+    };
+  }
+
+  if (sourceVersion < 8) {
+    const appearance = isPlainObject(migrated.appearance) ? migrated.appearance : {};
+    migrated = {
+      ...migrated,
+      appearance: {
+        ...appearance,
+        ...DEFAULT_APPEARANCE_TRANSITIONS,
+        ...normalizeAppearanceTransitions(appearance),
+      },
+      _schemaVersion: 8,
+    };
+  }
+
+  if (sourceVersion < 9) {
+    const appearance = isPlainObject(migrated.appearance) ? migrated.appearance : {};
+    migrated = {
+      ...migrated,
+      appearance: {
+        ...appearance,
+        preview: normalizePreviewSettings(
+          isPlainObject(appearance.preview)
+            ? appearance.preview
+            : DEFAULT_PREVIEW_SETTINGS
+        ),
+      },
+      _schemaVersion: 9,
+    };
+  }
+
+  if (sourceVersion < 10) {
+    const appearance = isPlainObject(migrated.appearance) ? migrated.appearance : {};
+    migrated = {
+      ...migrated,
+      appearance: {
+        ...appearance,
+        preview: normalizePreviewSettings(
+          isPlainObject(appearance.preview)
+            ? appearance.preview
+            : DEFAULT_PREVIEW_SETTINGS
+        ),
+      },
+      _schemaVersion: 10,
     };
   }
 

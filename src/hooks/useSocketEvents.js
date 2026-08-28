@@ -2,10 +2,14 @@ import { useCallback, useRef } from 'react';
 import useLyricsStore from '../context/LyricsStore';
 import { logDebug, logError, logWarn } from '../utils/logger';
 import { detectArtistFromFilename } from '../utils/artistDetection';
-import { deriveSectionsFromProcessedLines } from '../../shared/lyricsParsing.js';
+import { deriveSectionsFromProcessedLines } from '../../shared/lyricsParsing/sections.js';
 import { normalizeLyricFileType } from '../../shared/lyricImportRegistry.js';
 import { localizeAuthoritativeTimerState } from '../../shared/timerAuthority.js';
 import { REALTIME_EVENTS } from '../../shared/apiContractRegistry.js';
+import {
+  isCustomOutputRouteId,
+  isRoutableOutputId,
+} from '../../shared/outputRegistry.js';
 import {
   emitDesktopSessionBootstrap,
   getDesktopBootstrapOutputIds,
@@ -16,8 +20,8 @@ import {
 const isPlainObject = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 const isOutputId = (value) => typeof value === 'string' && value.startsWith('output');
-const isRoutableOutput = (value) => value === 'stage' || isOutputId(value);
-const isCustomOutputId = (value) => isOutputId(value) && value !== 'output1' && value !== 'output2';
+const isRoutableOutput = (value) => value === 'stage' || isRoutableOutputId(value);
+const isMetricsOutput = (value) => value === 'time' || isRoutableOutput(value);
 const isPassiveDisplayRole = (role) => role === 'stage' || isOutputId(role);
 const localizeTimerState = (timerState, serverNow = null) => (
   localizeAuthoritativeTimerState(timerState, Date.now(), serverNow)
@@ -77,7 +81,7 @@ const normalizeOutputRegistry = (payload) => {
   if (!isPlainObject(payload) || !Array.isArray(payload.outputs)) return null;
   const uniqueOutputs = Array.from(
     new Set(
-      payload.outputs.filter((id) => typeof id === 'string')
+      payload.outputs.filter((outputId) => isRoutableOutputId(outputId))
     )
   );
   return { outputs: uniqueOutputs };
@@ -98,6 +102,7 @@ const useSocketEvents = (role, clientPurpose = role) => {
   const setLyricsSections = useLyricsStore((state) => state.setLyricsSections);
   const setLineToSection = useLyricsStore((state) => state.setLineToSection);
   const setLyricsParsingOptions = useLyricsStore((state) => state.setLyricsParsingOptions);
+  const setPreviewSettings = useLyricsStore((state) => state.setPreviewSettings);
 
   const setlistNameRef = useRef(new Map());
   const desktopBootstrapSocketRef = useRef(null);
@@ -291,6 +296,10 @@ const useSocketEvents = (role, clientPurpose = role) => {
         dispatchTimerState(state.stageTimerState, state.timestamp || state.syncTimestamp);
       }
 
+      if (isPlainObject(state.previewSettings)) {
+        setPreviewSettings(state.previewSettings);
+      }
+
       if (role === 'stage') {
         if (state.stageMessages) {
           window.dispatchEvent(new CustomEvent('stage-messages-update', {
@@ -394,28 +403,34 @@ const useSocketEvents = (role, clientPurpose = role) => {
     });
 
     socket.on('outputRemoved', (payload) => {
-      if (!isPlainObject(payload) || !isOutputId(payload.output)) return;
+      if (!isPlainObject(payload) || !isCustomOutputRouteId(payload.output)) return;
       const { output } = payload;
       const store = useLyricsStore.getState();
       if (typeof store.removeCustomOutput === 'function') {
         store.removeCustomOutput(output);
       }
+      window.dispatchEvent?.(new CustomEvent('output-route-unavailable', {
+        detail: { output },
+      }));
     });
 
     socket.on('outputUnavailable', (payload) => {
-      if (!isPlainObject(payload) || !isOutputId(payload.output)) return;
+      if (!isPlainObject(payload) || !isCustomOutputRouteId(payload.output)) return;
       const { output } = payload;
       const store = useLyricsStore.getState();
       if (typeof store.removeCustomOutput === 'function') {
         store.removeCustomOutput(output);
       }
+      window.dispatchEvent?.(new CustomEvent('output-route-unavailable', {
+        detail: { output },
+      }));
     });
 
     socket.on('outputsRegistry', (payload) => {
       const normalized = normalizeOutputRegistry(payload);
       if (!normalized) return;
       const customOutputs = normalized.outputs
-        .filter((id) => isCustomOutputId(id));
+        .filter((id) => isCustomOutputRouteId(id));
       const store = useLyricsStore.getState();
       if (typeof store.setCustomOutputs === 'function') {
         if (isDesktopApp && desktopBootstrapSocketRef.current === socket.id) {
@@ -430,6 +445,9 @@ const useSocketEvents = (role, clientPurpose = role) => {
         }
         store.setCustomOutputs(customOutputs);
       }
+      window.dispatchEvent?.(new CustomEvent('output-registry-updated', {
+        detail: { outputs: normalized.outputs },
+      }));
     });
 
     const shouldHandleOutputMetrics =
@@ -437,36 +455,44 @@ const useSocketEvents = (role, clientPurpose = role) => {
       role === 'stage' ||
       (typeof role === 'string' && role.startsWith('output') && role !== 'output-discovery');
 
+    socket.on('styleUpdate', (payload) => {
+      if (!isPlainObject(payload) || !isPlainObject(payload.settings)) return;
+      const { output, settings } = payload;
+
+      if (output === 'preview') {
+        setPreviewSettings(settings);
+        return;
+      }
+
+      if (!shouldHandleOutputMetrics || !isRoutableOutput(output)) return;
+      logDebug('Received style update for', output, ':', settings);
+
+      if (output === 'stage' && role === 'stage') {
+
+        updateOutputSettings(output, settings);
+      } else if (output !== 'stage') {
+
+        const { autosizerActive, primaryViewportWidth, primaryViewportHeight, allInstances, instanceCount, ...styleSettings } = settings;
+        updateOutputSettings(output, styleSettings);
+      }
+    });
+
     if (shouldHandleOutputMetrics) {
-      socket.on('styleUpdate', (payload) => {
-        if (!isPlainObject(payload) || !isRoutableOutput(payload.output) || !isPlainObject(payload.settings)) {
-          return;
-        }
-        const { output, settings } = payload;
-        logDebug('Received style update for', output, ':', settings);
-
-        if (output === 'stage' && role === 'stage') {
-
-          updateOutputSettings(output, settings);
-        } else if (output !== 'stage') {
-
-          const { autosizerActive, primaryViewportWidth, primaryViewportHeight, allInstances, instanceCount, ...styleSettings } = settings;
-          updateOutputSettings(output, styleSettings);
-        }
-      });
-
       socket.on('outputMetrics', (payload) => {
-        if (!isPlainObject(payload) || !isOutputId(payload.output) || !isPlainObject(payload.metrics)) {
+        if (!isPlainObject(payload) || !isMetricsOutput(payload.output) || !isPlainObject(payload.metrics)) {
           return;
         }
         const { output, metrics, allInstances, instanceCount } = payload;
         try {
+          const normalizedInstanceCount = Number.isFinite(instanceCount) ? instanceCount : 1;
+          useLyricsStore.getState().setOutputConnectionCount?.(output, normalizedInstanceCount);
+
           const updates = {
             autosizerActive: metrics?.autosizerActive ?? false,
             primaryViewportWidth: metrics?.viewportWidth ?? null,
             primaryViewportHeight: metrics?.viewportHeight ?? null,
             allInstances: allInstances || null,
-            instanceCount: Number.isFinite(instanceCount) ? instanceCount : 1,
+            instanceCount: normalizedInstanceCount,
           };
 
           if (typeof output === 'string' && output.startsWith('output')) {
@@ -678,7 +704,7 @@ const useSocketEvents = (role, clientPurpose = role) => {
     socket.on('periodicStateSync', (state) => {
       applySnapshot(state, 'periodicStateSync');
     });
-  }, [role, setLyrics, setLyricsSections, setLineToSection, setLyricsTimestamps, setLyricsEnhancedTimestamps, selectLine, updateOutputSettings, setSetlistFiles, setIsDesktopApp, setLyricsFileName, setRawLyricsContent, setLyricsSource, setSongMetadata, setLyricsParsingOptions]);
+  }, [role, setLyrics, setLyricsSections, setLineToSection, setLyricsTimestamps, setLyricsEnhancedTimestamps, selectLine, updateOutputSettings, setSetlistFiles, setIsDesktopApp, setLyricsFileName, setRawLyricsContent, setLyricsSource, setSongMetadata, setLyricsParsingOptions, setPreviewSettings]);
 
   const registerAuthenticatedHandlers = useCallback(({
     socket,
@@ -721,6 +747,13 @@ const useSocketEvents = (role, clientPurpose = role) => {
 
     socket.on('connect_error', (error) => {
       logError('Socket connection error:', error);
+      if (error?.data?.code === 'OUTPUT_UNAVAILABLE') {
+        window.dispatchEvent?.(new CustomEvent('output-route-unavailable', {
+          detail: { output: error.data.output || clientType },
+        }));
+        setConnectionStatus('disconnected');
+        return;
+      }
       setConnectionStatus('error');
 
       if (error.message?.includes('Authentication') || error.message?.includes('token')) {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createGroupingPlan } from '../shared/lyricsParsing.js';
+import { createGroupingPlan } from '../shared/lyricsParsing/groupingPlan.js';
 import {
   createDefaultOutputSettings,
   createOutputSlice,
@@ -26,6 +26,11 @@ import {
   sanitizePersistedStageTimerState,
 } from '../server/realtime/sessionPersistence.js';
 import { buildCurrentState, buildPeriodicState, state } from '../server/realtime/state.js';
+import { getSocketConnectionScope } from '../server/realtime/utils.js';
+import {
+  OUTPUT_PRESENCE_STALE_MS,
+  pruneStaleOutputPresence,
+} from '../server/realtime/outputPresence.js';
 
 function createSocketHarness() {
   const handlers = new Map();
@@ -820,7 +825,7 @@ test('setCustomOutputs normalizes ids, initializes new output state, and removes
   const store = createOutputStore();
   const stateBeforeRemoval = store.getState();
 
-  stateBeforeRemoval.setCustomOutputs(['output5', 'output3', 'output3', 'output2', 'bad']);
+  stateBeforeRemoval.setCustomOutputs(['output5', 'output3', 'output3', 'output2', 'output7', 'bad']);
   assert.deepEqual(store.getState().customOutputIds, ['output3', 'output5']);
   assert.deepEqual(store.getState().getAllOutputIds(), ['output1', 'output2', 'output3', 'output5']);
   assert.equal(typeof store.getState().output3Enabled, 'boolean');
@@ -834,6 +839,117 @@ test('setCustomOutputs normalizes ids, initializes new output state, and removes
   assert.equal(store.getState().previewCustomOutputId, null);
   assert.equal(store.getState().output5Settings, undefined);
   assert.equal(store.getState().output5Enabled, undefined);
+});
+
+test('resetOutputConnectionState clears transient presence without changing output styling', () => {
+  const store = createOutputStore();
+
+  store.getState().setCustomOutputs(['output3']);
+  store.getState().setOutputConnectionCount('stage', 1);
+  store.getState().setOutputConnectionCount('stage', 0);
+  assert.equal(Object.hasOwn(store.getState().outputConnectionCounts, 'stage'), false);
+  store.getState().setOutputConnectionCount('output1', 2);
+  store.getState().setOutputConnectionCount('output3', 1);
+  store.getState().updateOutputSettings('output1', {
+    fontSize: 91,
+    autosizerActive: true,
+    primaryViewportWidth: 1920,
+    primaryViewportHeight: 1080,
+    allInstances: [{ socketId: 'socket-output1', lastUpdate: Date.now() }],
+    instanceCount: 1,
+  });
+  store.getState().updateOutputSettings('output3', {
+    primaryViewportWidth: 1280,
+    primaryViewportHeight: 720,
+    allInstances: [{ socketId: 'socket-output3', lastUpdate: Date.now() }],
+    instanceCount: 1,
+  });
+
+  store.getState().resetOutputConnectionState();
+
+  assert.deepEqual(store.getState().outputConnectionCounts, {});
+  assert.equal(store.getState().output1Settings.fontSize, 91);
+  assert.equal(store.getState().output1Settings.autosizerActive, false);
+  assert.equal(store.getState().output1Settings.primaryViewportWidth, null);
+  assert.equal(store.getState().output1Settings.primaryViewportHeight, null);
+  assert.equal(store.getState().output1Settings.allInstances, null);
+  assert.equal(store.getState().output1Settings.instanceCount, 0);
+  assert.equal(store.getState().output3Settings.primaryViewportWidth, null);
+  assert.equal(store.getState().output3Settings.primaryViewportHeight, null);
+  assert.equal(store.getState().output3Settings.allInstances, null);
+  assert.equal(store.getState().output3Settings.instanceCount, 0);
+
+  const clearedState = store.getState();
+  clearedState.resetOutputConnectionState();
+  assert.equal(store.getState(), clearedState);
+});
+
+test('removing a custom output notifies and disconnects every active instance', () => {
+  const previousState = {
+    connectedClients: state.connectedClients,
+    outputInstances: state.outputInstances,
+    outputSettings: state.outputSettings,
+    outputEnabled: state.outputEnabled,
+    registeredOutputs: state.registeredOutputs,
+    liveSafety: state.liveSafety,
+    sessionAuthority: state.sessionAuthority,
+  };
+
+  const outputEvents = [];
+  let forcedDisconnect = false;
+  const outputSocket = {
+    id: 'socket-output3',
+    connected: true,
+    emit(eventName, payload) {
+      outputEvents.push({ eventName, payload });
+    },
+    disconnect(force) {
+      forcedDisconnect = force;
+      this.connected = false;
+    },
+  };
+
+  state.connectedClients = new Map([['socket-output3', {
+    type: 'output3',
+    purpose: 'output3',
+    socket: outputSocket,
+    permissions: ['lyrics:read'],
+  }]]);
+  state.outputInstances = new Map([
+    ['output1', new Map()],
+    ['output2', new Map()],
+    ['output3', new Map([['socket-output3', { socketId: 'socket-output3' }]])],
+  ]);
+  state.outputSettings = new Map([['output1', {}], ['output2', {}], ['output3', {}]]);
+  state.outputEnabled = new Map([['output1', true], ['output2', true], ['output3', true]]);
+  state.registeredOutputs = new Set(['output1', 'output2', 'output3']);
+  state.liveSafety = { enabled: false, updatedAt: null, updatedBy: null };
+
+  try {
+    const { handlers, io, socket } = createSocketHarness();
+    registerOutputHandlers({
+      io,
+      socket,
+      hasPermission: (_socket, permission) => permission === 'settings:write',
+      clientType: 'desktop',
+      deviceId: 'desktop-device',
+      sessionId: 'desktop-session',
+    });
+
+    handlers.get('outputRemove')?.({ output: 'output3' });
+
+    assert.equal(state.registeredOutputs.has('output3'), false);
+    assert.equal(state.outputSettings.has('output3'), false);
+    assert.equal(state.outputEnabled.has('output3'), false);
+    assert.equal(state.outputInstances.has('output3'), false);
+    assert.equal(forcedDisconnect, true);
+    assert.deepEqual(outputEvents.find((event) => event.eventName === 'outputRemoved'), {
+      eventName: 'outputRemoved',
+      payload: { output: 'output3' },
+    });
+  } finally {
+    Object.assign(state, previousState);
+  }
 });
 
 test('output persistence includes custom outputs and rehydration clears stale runtime fields', () => {
@@ -961,6 +1077,8 @@ test('last output disconnect broadcasts zero active instances', () => {
         metrics: {},
         allInstances: [],
         instanceCount: 0,
+        remoteInstanceCount: 0,
+        hasRemoteInstances: false,
       },
     });
     assert.equal(state.outputInstances.has('output1'), false);
@@ -993,6 +1111,7 @@ test('output connection immediately broadcasts an active instance', () => {
     const socket = {
       id: 'socket-output',
       connected: true,
+      handshake: { address: '203.0.113.25' },
       userData: {
         permissions: ['lyrics:read'],
         connectedAt: Date.now(),
@@ -1032,6 +1151,9 @@ test('output connection immediately broadcasts an active instance', () => {
     assert.equal(metricsEvent.payload.instanceCount, 1);
     assert.equal(metricsEvent.payload.allInstances.length, 1);
     assert.equal(metricsEvent.payload.allInstances[0].socketId, 'socket-output');
+    assert.equal(metricsEvent.payload.allInstances[0].connectionScope, 'remote');
+    assert.equal(metricsEvent.payload.remoteInstanceCount, 1);
+    assert.equal(metricsEvent.payload.hasRemoteInstances, true);
 
     handlers.get('disconnect')?.forEach((handler) => handler('test cleanup'));
   } finally {
@@ -1041,6 +1163,172 @@ test('output connection immediately broadcasts an active instance', () => {
     state.outputSettings = previousOutputSettings;
     state.outputEnabled = previousOutputEnabled;
   }
+});
+
+test('reconnecting the same output instance replaces its superseded socket without double counting', () => {
+  const previousConnectedClients = state.connectedClients;
+  const previousOutputInstances = state.outputInstances;
+  const previousRegisteredOutputs = state.registeredOutputs;
+  const previousOutputSettings = state.outputSettings;
+  const previousOutputEnabled = state.outputEnabled;
+
+  state.connectedClients = new Map();
+  state.outputInstances = new Map([['output1', new Map()]]);
+  state.registeredOutputs = new Set(['output1', 'output2']);
+  state.outputSettings = new Map([['output1', {}]]);
+  state.outputEnabled = new Map([['output1', true]]);
+  let first;
+  let second;
+
+  const createOutputSocket = (id) => {
+    const handlers = new Map();
+    const socket = {
+      id,
+      connected: true,
+      userData: {
+        permissions: ['lyrics:read'],
+        connectedAt: Date.now(),
+      },
+      broadcast: { emit() {} },
+      on(eventName, handler) {
+        if (!handlers.has(eventName)) handlers.set(eventName, []);
+        handlers.get(eventName).push(handler);
+      },
+      emit() {},
+      disconnect(force) {
+        this.forceDisconnected = force;
+        this.connected = false;
+        handlers.get('disconnect')?.forEach((handler) => handler('server namespace disconnect'));
+      },
+    };
+    return { handlers, socket };
+  };
+
+  try {
+    const io = { emit() {} };
+    first = createOutputSocket('socket-output-old');
+    second = createOutputSocket('socket-output-new');
+
+    registerConnectionHandlers({
+      io,
+      socket: first.socket,
+      clientType: 'output1',
+      deviceId: 'output-device',
+      sessionId: 'output-session',
+      clientInstanceId: 'display-instance-1',
+    });
+    registerConnectionHandlers({
+      io,
+      socket: second.socket,
+      clientType: 'output1',
+      deviceId: 'output-device',
+      sessionId: 'output-session',
+      clientInstanceId: 'display-instance-1',
+    });
+
+    assert.equal(first.socket.forceDisconnected, true);
+    assert.equal(state.outputInstances.get('output1').size, 1);
+    assert.equal(state.outputInstances.get('output1').has('socket-output-new'), true);
+    assert.equal(state.outputInstances.get('output1').get('socket-output-new').clientInstanceId, 'display-instance-1');
+
+    second.socket.disconnect(false);
+  } finally {
+    if (first?.socket.connected) {
+      first.handlers.get('disconnect')?.forEach((handler) => handler('test cleanup'));
+    }
+    if (second?.socket.connected) {
+      second.handlers.get('disconnect')?.forEach((handler) => handler('test cleanup'));
+    }
+    state.connectedClients = previousConnectedClients;
+    state.outputInstances = previousOutputInstances;
+    state.registeredOutputs = previousRegisteredOutputs;
+    state.outputSettings = previousOutputSettings;
+    state.outputEnabled = previousOutputEnabled;
+  }
+});
+
+test('stale output presence is evicted while fresh instances remain authoritative', () => {
+  const previousConnectedClients = state.connectedClients;
+  const previousOutputInstances = state.outputInstances;
+  const previousRegisteredOutputs = state.registeredOutputs;
+  const now = 1_800_000_000_000;
+  const controllerEvents = [];
+
+  const staleSocket = { connected: true, emit() {} };
+  const freshSocket = { connected: true, emit() {} };
+  const controllerSocket = {
+    connected: true,
+    emit(eventName, payload) {
+      controllerEvents.push({ eventName, payload });
+    },
+  };
+
+  state.connectedClients = new Map([
+    ['socket-stale', {
+      type: 'output1',
+      purpose: 'output1',
+      presenceOutputId: 'output1',
+      isPreview: false,
+      socket: staleSocket,
+    }],
+    ['socket-fresh', {
+      type: 'output2',
+      purpose: 'output2',
+      presenceOutputId: 'output2',
+      isPreview: false,
+      socket: freshSocket,
+    }],
+    ['socket-controller', {
+      type: 'desktop',
+      purpose: 'control',
+      socket: controllerSocket,
+    }],
+  ]);
+  state.outputInstances = new Map([
+    ['output1', new Map([['socket-stale', {
+      socketId: 'socket-stale',
+      lastUpdate: now - OUTPUT_PRESENCE_STALE_MS - 1,
+      connectionScope: 'remote',
+    }]])],
+    ['output2', new Map([['socket-fresh', {
+      socketId: 'socket-fresh',
+      lastUpdate: now - 5000,
+      connectionScope: 'local',
+    }]])],
+  ]);
+  state.registeredOutputs = new Set(['output1', 'output2']);
+
+  try {
+    const changed = pruneStaleOutputPresence({ emit() {} }, { now });
+
+    assert.deepEqual(changed, ['output1']);
+    assert.equal(state.outputInstances.has('output1'), false);
+    assert.equal(state.outputInstances.get('output2').size, 1);
+    assert.deepEqual(controllerEvents.find((event) => (
+      event.eventName === 'outputMetrics' && event.payload.output === 'output1'
+    )), {
+      eventName: 'outputMetrics',
+      payload: {
+        output: 'output1',
+        metrics: {},
+        allInstances: [],
+        instanceCount: 0,
+        remoteInstanceCount: 0,
+        hasRemoteInstances: false,
+      },
+    });
+  } finally {
+    state.connectedClients = previousConnectedClients;
+    state.outputInstances = previousOutputInstances;
+    state.registeredOutputs = previousRegisteredOutputs;
+  }
+});
+
+test('output connection scope recognizes loopback, remote, and missing peers', () => {
+  assert.equal(getSocketConnectionScope({ handshake: { address: '127.0.0.1' } }), 'local');
+  assert.equal(getSocketConnectionScope({ handshake: { address: '::ffff:127.0.0.1' } }), 'local');
+  assert.equal(getSocketConnectionScope({ handshake: { address: '203.0.113.25' } }), 'remote');
+  assert.equal(getSocketConnectionScope({}), 'unknown');
 });
 
 test('preview output connection does not broadcast production readiness presence', () => {
@@ -1222,6 +1510,92 @@ test('stage output toggle fanout reaches controllers and stage display only', ()
   } finally {
     state.connectedClients = previousConnectedClients;
     state.currentStageEnabled = previousStageEnabled;
+  }
+});
+
+test('Preview layout settings reach browser Preview clients and hydrate reconnect snapshots', () => {
+  const previousConnectedClients = state.connectedClients;
+  const previousPreviewSettings = state.currentPreviewSettings;
+  const previousLiveSafety = state.liveSafety;
+
+  state.connectedClients = new Map();
+  state.currentPreviewSettings = {
+    order: ['output1', 'output2', 'stage', 'time'],
+    gridStyle: 'featured',
+    gap: 'comfortable',
+    previewResolution: '720p',
+    showHeader: true,
+    showLabels: true,
+    showRoutePaths: false,
+  };
+  state.liveSafety = { enabled: true, updatedAt: Date.now(), updatedBy: 'test' };
+
+  const preview = createTrackedClient('socket-preview', {
+    type: 'output-discovery',
+    purpose: 'preview',
+  });
+  const otherDiscovery = createTrackedClient('socket-discovery', {
+    type: 'output-discovery',
+    purpose: 'output-discovery',
+  });
+  const output = createTrackedClient('socket-output', {
+    type: 'output1',
+    purpose: 'output1',
+  });
+  const controller = createTrackedClient('socket-controller', {
+    type: 'web',
+    purpose: 'control',
+  });
+
+  try {
+    const { handlers, io, socket } = createSocketHarness();
+    registerOutputHandlers({
+      io,
+      socket,
+      hasPermission: (_socket, permission) => permission === 'settings:write',
+      clientType: 'desktop',
+      deviceId: 'desktop-device',
+      sessionId: 'desktop-session',
+    });
+
+    const nextSettings = {
+      order: ['time', 'stage', 'output2', 'output1'],
+      gridStyle: 'responsive',
+      gap: 'compact',
+      previewResolution: '1080p',
+      showHeader: false,
+      showLabels: true,
+      showRoutePaths: true,
+    };
+    handlers.get('styleUpdate')?.({ output: 'preview', settings: nextSettings });
+
+    assert.deepEqual(state.currentPreviewSettings, nextSettings);
+    assert.deepEqual(preview.events.at(-1), {
+      eventName: 'styleUpdate',
+      payload: { output: 'preview', settings: nextSettings },
+    });
+    assert.equal(otherDiscovery.events.length, 0);
+    assert.equal(output.events.length, 0);
+    assert.equal(controller.events.length, 0);
+
+    const reconnectState = buildCurrentState({
+      type: 'output-discovery',
+      purpose: 'preview',
+      permissions: ['lyrics:read', 'settings:read'],
+    });
+    assert.deepEqual(reconnectState.previewSettings, nextSettings);
+    assert.equal(Object.hasOwn(reconnectState, 'lyrics'), false);
+
+    const periodicState = buildPeriodicState({
+      type: 'output-discovery',
+      purpose: 'preview',
+      permissions: ['lyrics:read', 'settings:read'],
+    });
+    assert.deepEqual(periodicState.previewSettings, nextSettings);
+  } finally {
+    state.connectedClients = previousConnectedClients;
+    state.currentPreviewSettings = previousPreviewSettings;
+    state.liveSafety = previousLiveSafety;
   }
 });
 

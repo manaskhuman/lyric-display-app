@@ -1,5 +1,5 @@
 import React from 'react';
-import { getCleanSectionLabel } from '../../../shared/lyricsParsing.js';
+import { getCleanSectionLabel } from '../../../shared/lyricsParsing/structureTags.js';
 
 export default function SectionChips({
   darkMode,
@@ -18,7 +18,7 @@ export default function SectionChips({
       <div className="relative" ref={containerRef}>
         <div
           ref={scrollerRef}
-          className={`${compact ? 'px-2 py-1.5 gap-1.5' : 'px-4 py-3.5 gap-2'} flex flex-nowrap overflow-x-auto overflow-y-hidden whitespace-nowrap overscroll-contain`}
+          className={`${compact ? 'px-2 py-1.5 gap-1.5' : 'px-3 py-3 gap-2'} flex flex-nowrap overflow-x-auto overflow-y-hidden whitespace-nowrap overscroll-contain`}
         >
           {sections.map((section) => {
             const isActive = section.id && section.id === activeSectionId;
@@ -40,8 +40,8 @@ export default function SectionChips({
         </div>
         <div
           className={`pointer-events-none absolute inset-y-0 right-0 w-12 ${darkMode
-            ? 'bg-gradient-to-l from-gray-800 via-gray-800/85 to-transparent'
-            : 'bg-gradient-to-l from-white via-white/85 to-transparent'
+            ? 'bg-linear-to-l from-gray-800 via-gray-800/85 to-transparent'
+            : 'bg-linear-to-l from-white via-white/85 to-transparent'
             }`}
         />
       </div>

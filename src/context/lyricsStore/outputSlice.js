@@ -1,4 +1,19 @@
-import { DEFAULT_OUTPUT_IDS, MAX_CUSTOM_OUTPUTS } from '../../../shared/outputRegistry.js';
+import {
+  DEFAULT_OUTPUT_IDS,
+  isCustomOutputRouteId,
+  MAX_CUSTOM_OUTPUTS,
+  normalizeCustomOutputRouteIds,
+} from '../../../shared/outputRegistry.js';
+import { DEFAULT_APPEARANCE_TRANSITIONS } from '../../../shared/transitionSettings.js';
+import {
+  DEFAULT_LYRIC_VIDEO_VISUALIZER,
+  LYRIC_VIDEO_BACKGROUND_SOURCES,
+} from '../../../shared/lyricVideoVisualizer.js';
+
+const createDefaultFullscreenVisualizer = () => ({
+  ...DEFAULT_LYRIC_VIDEO_VISUALIZER,
+  source: LYRIC_VIDEO_BACKGROUND_SOURCES.BUTTERCHURN,
+});
 
 const settingValueEqual = (current, next) => {
   if (current === next) return true;
@@ -29,6 +44,23 @@ const settingsChanged = (current = {}, next = {}) => {
   if (!next || typeof next !== 'object' || Array.isArray(next)) return false;
   return Object.entries(next).some(([key, value]) => !settingValueEqual(current?.[key], value));
 };
+
+const OUTPUT_RUNTIME_DEFAULTS = Object.freeze({
+  autosizerActive: false,
+  primaryViewportWidth: null,
+  primaryViewportHeight: null,
+  allInstances: null,
+  instanceCount: 0,
+});
+
+const hasOutputRuntimeState = (settings = {}) => (
+  Object.entries(OUTPUT_RUNTIME_DEFAULTS).some(([key, value]) => !Object.is(settings[key], value))
+);
+
+const clearOutputRuntimeState = (settings) => ({
+  ...settings,
+  ...OUTPUT_RUNTIME_DEFAULTS,
+});
 
 export const defaultOutput1Settings = {
   fontStyle: 'Bebas Neue',
@@ -63,91 +95,13 @@ export const defaultOutput1Settings = {
   fullScreenBackgroundType: 'color',
   fullScreenBackgroundColor: '#000000',
   fullScreenBackgroundPaint: { type: 'solid', color: '#000000' },
+  fullScreenBackgroundOpacity: 10,
   fullScreenBackgroundMedia: null,
   fullScreenBackgroundMediaName: '',
-  fullScreenElementEnabled: false,
-  fullScreenElementMedia: null,
-  fullScreenElementMediaName: '',
-  fullScreenElementScale: 25,
-  fullScreenElementPosition: 'center',
-  fullScreenElementPaddingX: 0,
-  fullScreenElementPaddingY: 0,
-  fullScreenElementOpacity: 2.5,
-  fullScreenElementBlur: 0,
-  alwaysShowBackground: false,
-  fullScreenRestorePosition: null,
-  fullScreenRestoreFontSize: null,
-  fullScreenRestoreMaxLinesEnabled: null,
-  fullScreenRestoreMaxLines: null,
-  fullScreenRestoreLetterSpacing: null,
-  fullScreenRestoreLineSpacing: null,
-  fullScreenRestoreXMargin: null,
-  fullScreenRestoreYMargin: null,
-  fullScreenRestoreFontColor: null,
-  fullScreenRestoreTranslationLineColor: null,
-  fullScreenRestoreTranslationFontSizeMode: null,
-  fullScreenRestoreTranslationFontSize: null,
-  fullScreenFontSize: null,
-  fullScreenMaxLinesEnabled: null,
-  fullScreenMaxLines: null,
-  fullScreenLetterSpacing: null,
-  fullScreenLineSpacing: null,
-  fullScreenXMargin: null,
-  fullScreenYMargin: null,
-  fullScreenFontColor: null,
-  fullScreenTranslationLineColor: null,
-  fullScreenTranslationFontSizeMode: null,
-  fullScreenTranslationFontSize: null,
-  xMargin: 3.5,
-  yMargin: 2,
-  maxLinesEnabled: false,
-  maxLines: 3,
-  minFontSize: 24,
-  autosizerActive: false,
-  primaryViewportWidth: null,
-  primaryViewportHeight: null,
-  allInstances: null,
-  instanceCount: 0,
-  transitionAnimation: 'none',
-  transitionSpeed: 150
-};
-
-/** Default settings factory for any new output */
-export const createDefaultOutputSettings = (overrides = {}) => ({
-  fontStyle: 'Bebas Neue',
-  bold: false,
-  italic: false,
-  underline: false,
-  allCaps: false,
-  textAlign: 'center',
-  letterSpacing: 0,
-  lineSpacing: 1,
-  fontSize: 48,
-  translationFontSizeMode: 'bound',
-  translationFontSize: 48,
-  fontColor: '#FFFFFF',
-  translationLineColor: '#FBBF24',
-  borderColor: '#000000',
-  borderSize: 0,
-  dropShadowColor: '#000000',
-  dropShadowOpacity: 4,
-  dropShadowOffsetX: 0,
-  dropShadowOffsetY: 8,
-  dropShadowBlur: 10,
-  backgroundColor: '#000000',
-  backgroundPaint: { type: 'solid', color: '#000000' },
-  backgroundOpacity: 0,
-  backgroundBandVerticalPadding: 20,
-  backgroundBandHeightMode: 'adaptive',
-  backgroundBandCustomLines: 3,
-  backgroundBandLockedToMaxLines: false,
-  lyricsPosition: 'lower',
-  fullScreenMode: false,
-  fullScreenBackgroundType: 'color',
-  fullScreenBackgroundColor: '#000000',
-  fullScreenBackgroundPaint: { type: 'solid', color: '#000000' },
-  fullScreenBackgroundMedia: null,
-  fullScreenBackgroundMediaName: '',
+  fullScreenVisualizer: createDefaultFullscreenVisualizer(),
+  fullScreenVisualizerInitialized: false,
+  backgroundMediaTransitionAnimation: DEFAULT_APPEARANCE_TRANSITIONS.backgroundMediaTransitionAnimation,
+  backgroundMediaTransitionDuration: DEFAULT_APPEARANCE_TRANSITIONS.backgroundMediaTransitionDuration,
   fullScreenElementEnabled: false,
   fullScreenElementMedia: null,
   fullScreenElementMediaName: '',
@@ -193,10 +147,12 @@ export const createDefaultOutputSettings = (overrides = {}) => ({
   instanceCount: 0,
   transitionAnimation: 'none',
   transitionSpeed: 150,
-  ...overrides,
-});
+  outputVisibilityTransitionAnimation: DEFAULT_APPEARANCE_TRANSITIONS.outputVisibilityTransitionAnimation,
+  outputVisibilityTransitionDuration: DEFAULT_APPEARANCE_TRANSITIONS.outputVisibilityTransitionDuration,
+};
 
-export const defaultOutput2Settings = {
+/** Default settings factory for any new output */
+export const createDefaultOutputSettings = (overrides = {}) => ({
   fontStyle: 'Bebas Neue',
   bold: false,
   italic: false,
@@ -205,9 +161,9 @@ export const defaultOutput2Settings = {
   textAlign: 'center',
   letterSpacing: 0,
   lineSpacing: 1,
-  fontSize: 72,
+  fontSize: 48,
   translationFontSizeMode: 'bound',
-  translationFontSize: 72,
+  translationFontSize: 48,
   fontColor: '#FFFFFF',
   translationLineColor: '#FBBF24',
   borderColor: '#000000',
@@ -220,7 +176,7 @@ export const defaultOutput2Settings = {
   backgroundColor: '#000000',
   backgroundPaint: { type: 'solid', color: '#000000' },
   backgroundOpacity: 0,
-  backgroundBandVerticalPadding: 30,
+  backgroundBandVerticalPadding: 20,
   backgroundBandHeightMode: 'adaptive',
   backgroundBandCustomLines: 3,
   backgroundBandLockedToMaxLines: false,
@@ -229,8 +185,13 @@ export const defaultOutput2Settings = {
   fullScreenBackgroundType: 'color',
   fullScreenBackgroundColor: '#000000',
   fullScreenBackgroundPaint: { type: 'solid', color: '#000000' },
+  fullScreenBackgroundOpacity: 10,
   fullScreenBackgroundMedia: null,
   fullScreenBackgroundMediaName: '',
+  fullScreenVisualizer: createDefaultFullscreenVisualizer(),
+  fullScreenVisualizerInitialized: false,
+  backgroundMediaTransitionAnimation: DEFAULT_APPEARANCE_TRANSITIONS.backgroundMediaTransitionAnimation,
+  backgroundMediaTransitionDuration: DEFAULT_APPEARANCE_TRANSITIONS.backgroundMediaTransitionDuration,
   fullScreenElementEnabled: false,
   fullScreenElementMedia: null,
   fullScreenElementMediaName: '',
@@ -275,13 +236,106 @@ export const defaultOutput2Settings = {
   allInstances: null,
   instanceCount: 0,
   transitionAnimation: 'none',
-  transitionSpeed: 150
+  transitionSpeed: 150,
+  outputVisibilityTransitionAnimation: DEFAULT_APPEARANCE_TRANSITIONS.outputVisibilityTransitionAnimation,
+  outputVisibilityTransitionDuration: DEFAULT_APPEARANCE_TRANSITIONS.outputVisibilityTransitionDuration,
+  ...overrides,
+});
+
+export const defaultOutput2Settings = {
+  fontStyle: 'Bebas Neue',
+  bold: false,
+  italic: false,
+  underline: false,
+  allCaps: false,
+  textAlign: 'center',
+  letterSpacing: 0,
+  lineSpacing: 1,
+  fontSize: 72,
+  translationFontSizeMode: 'bound',
+  translationFontSize: 72,
+  fontColor: '#FFFFFF',
+  translationLineColor: '#FBBF24',
+  borderColor: '#000000',
+  borderSize: 0,
+  dropShadowColor: '#000000',
+  dropShadowOpacity: 4,
+  dropShadowOffsetX: 0,
+  dropShadowOffsetY: 8,
+  dropShadowBlur: 10,
+  backgroundColor: '#000000',
+  backgroundPaint: { type: 'solid', color: '#000000' },
+  backgroundOpacity: 0,
+  backgroundBandVerticalPadding: 30,
+  backgroundBandHeightMode: 'adaptive',
+  backgroundBandCustomLines: 3,
+  backgroundBandLockedToMaxLines: false,
+  lyricsPosition: 'lower',
+  fullScreenMode: false,
+  fullScreenBackgroundType: 'color',
+  fullScreenBackgroundColor: '#000000',
+  fullScreenBackgroundPaint: { type: 'solid', color: '#000000' },
+  fullScreenBackgroundOpacity: 10,
+  fullScreenBackgroundMedia: null,
+  fullScreenBackgroundMediaName: '',
+  fullScreenVisualizer: createDefaultFullscreenVisualizer(),
+  fullScreenVisualizerInitialized: false,
+  backgroundMediaTransitionAnimation: DEFAULT_APPEARANCE_TRANSITIONS.backgroundMediaTransitionAnimation,
+  backgroundMediaTransitionDuration: DEFAULT_APPEARANCE_TRANSITIONS.backgroundMediaTransitionDuration,
+  fullScreenElementEnabled: false,
+  fullScreenElementMedia: null,
+  fullScreenElementMediaName: '',
+  fullScreenElementScale: 25,
+  fullScreenElementPosition: 'center',
+  fullScreenElementPaddingX: 0,
+  fullScreenElementPaddingY: 0,
+  fullScreenElementOpacity: 2.5,
+  fullScreenElementBlur: 0,
+  alwaysShowBackground: false,
+  fullScreenRestorePosition: null,
+  fullScreenRestoreFontSize: null,
+  fullScreenRestoreMaxLinesEnabled: null,
+  fullScreenRestoreMaxLines: null,
+  fullScreenRestoreLetterSpacing: null,
+  fullScreenRestoreLineSpacing: null,
+  fullScreenRestoreXMargin: null,
+  fullScreenRestoreYMargin: null,
+  fullScreenRestoreFontColor: null,
+  fullScreenRestoreTranslationLineColor: null,
+  fullScreenRestoreTranslationFontSizeMode: null,
+  fullScreenRestoreTranslationFontSize: null,
+  fullScreenFontSize: null,
+  fullScreenMaxLinesEnabled: null,
+  fullScreenMaxLines: null,
+  fullScreenLetterSpacing: null,
+  fullScreenLineSpacing: null,
+  fullScreenXMargin: null,
+  fullScreenYMargin: null,
+  fullScreenFontColor: null,
+  fullScreenTranslationLineColor: null,
+  fullScreenTranslationFontSizeMode: null,
+  fullScreenTranslationFontSize: null,
+  xMargin: 3.5,
+  yMargin: 2,
+  maxLinesEnabled: false,
+  maxLines: 3,
+  minFontSize: 24,
+  autosizerActive: false,
+  primaryViewportWidth: null,
+  primaryViewportHeight: null,
+  allInstances: null,
+  instanceCount: 0,
+  transitionAnimation: 'none',
+  transitionSpeed: 150,
+  outputVisibilityTransitionAnimation: DEFAULT_APPEARANCE_TRANSITIONS.outputVisibilityTransitionAnimation,
+  outputVisibilityTransitionDuration: DEFAULT_APPEARANCE_TRANSITIONS.outputVisibilityTransitionDuration,
 };
 
 export const createOutputSlice = (set, get, normalizePaintSettingUpdates) => ({
   isOutputOn: true,
   output1Enabled: true,
   output2Enabled: true,
+  outputConnectionCounts: {},
   customOutputIds: [],
   previewCustomOutputId: null,
   output1Settings: defaultOutput1Settings,
@@ -290,10 +344,49 @@ export const createOutputSlice = (set, get, normalizePaintSettingUpdates) => ({
   setIsOutputOn: (state) => set({ isOutputOn: state }),
   setOutput1Enabled: (enabled) => set({ output1Enabled: enabled }),
   setOutput2Enabled: (enabled) => set({ output2Enabled: enabled }),
+  setOutputConnectionCount: (outputId, count) =>
+    set((state) => {
+      const isKnownDisplay = outputId === 'stage'
+        || outputId === 'time'
+        || outputId === 'output1'
+        || outputId === 'output2'
+        || state.customOutputIds.includes(outputId);
+      if (!isKnownDisplay) return {};
+
+      const instanceCount = Math.max(0, Math.floor(Number(count) || 0));
+      if (state.outputConnectionCounts[outputId] === instanceCount) return {};
+      if (instanceCount === 0) {
+        if (!Object.hasOwn(state.outputConnectionCounts, outputId)) return {};
+        const outputConnectionCounts = { ...state.outputConnectionCounts };
+        delete outputConnectionCounts[outputId];
+        return { outputConnectionCounts };
+      }
+      return {
+        outputConnectionCounts: {
+          ...state.outputConnectionCounts,
+          [outputId]: instanceCount,
+        },
+      };
+    }),
+  resetOutputConnectionState: () =>
+    set((state) => {
+      const updates = { outputConnectionCounts: {} };
+      const outputIds = [...DEFAULT_OUTPUT_IDS, ...(state.customOutputIds || [])];
+      let changed = Object.keys(state.outputConnectionCounts).length > 0;
+
+      for (const outputId of outputIds) {
+        const key = `${outputId}Settings`;
+        if (!state[key] || !hasOutputRuntimeState(state[key])) continue;
+        updates[key] = clearOutputRuntimeState(state[key]);
+        changed = true;
+      }
+
+      return changed ? updates : state;
+    }),
   setPreviewCustomOutputId: (outputId) =>
     set((state) => {
       if (outputId === null) return { previewCustomOutputId: null };
-      if (typeof outputId !== 'string' || !outputId.startsWith('output')) return {};
+      if (!isCustomOutputRouteId(outputId)) return {};
       if (!state.customOutputIds.includes(outputId)) return {};
       return { previewCustomOutputId: outputId };
     }),
@@ -328,7 +421,12 @@ export const createOutputSlice = (set, get, normalizePaintSettingUpdates) => ({
 
     set({
       customOutputIds: [...state.customOutputIds, newId],
-      [`${newId}Settings`]: createDefaultOutputSettings(),
+      [`${newId}Settings`]: createDefaultOutputSettings({
+        backgroundMediaTransitionAnimation: state.appearanceTransitions?.backgroundMediaTransitionAnimation,
+        backgroundMediaTransitionDuration: state.appearanceTransitions?.backgroundMediaTransitionDuration,
+        outputVisibilityTransitionAnimation: state.appearanceTransitions?.outputVisibilityTransitionAnimation,
+        outputVisibilityTransitionDuration: state.appearanceTransitions?.outputVisibilityTransitionDuration,
+      }),
       [`${newId}Enabled`]: true,
     });
 
@@ -358,18 +456,7 @@ export const createOutputSlice = (set, get, normalizePaintSettingUpdates) => ({
 
   setCustomOutputs: (outputIds) =>
     set((state) => {
-      const normalized = Array.from(
-        new Set(
-          (Array.isArray(outputIds) ? outputIds : [])
-            .filter((id) => typeof id === 'string' && id.startsWith('output'))
-            .filter((id) => id !== 'output1' && id !== 'output2')
-        )
-      ).sort((a, b) => {
-        const numA = parseInt(a.replace('output', ''), 10);
-        const numB = parseInt(b.replace('output', ''), 10);
-        if (Number.isFinite(numA) && Number.isFinite(numB)) return numA - numB;
-        return a.localeCompare(b);
-      });
+      const normalized = normalizeCustomOutputRouteIds(outputIds);
 
       const updates = {
         customOutputIds: normalized,
@@ -399,7 +486,7 @@ export const createOutputSlice = (set, get, normalizePaintSettingUpdates) => ({
 
   setOutputEnabled: (outputId, enabled) =>
     set((state) => {
-      if (typeof outputId !== 'string' || !outputId.startsWith('output')) return {};
+      if (outputId !== 'output1' && outputId !== 'output2' && !isCustomOutputRouteId(outputId)) return {};
       if (outputId !== 'output1' && outputId !== 'output2' && !state.customOutputIds.includes(outputId)) {
         return {};
       }
@@ -427,6 +514,7 @@ export const partializeOutputState = (state) => {
 };
 
 export const rehydrateOutputState = (state) => {
+  state.customOutputIds = normalizeCustomOutputRouteIds(state.customOutputIds);
   if (state.previewCustomOutputId && !state.customOutputIds?.includes(state.previewCustomOutputId)) {
     state.previewCustomOutputId = null;
   }
@@ -434,14 +522,7 @@ export const rehydrateOutputState = (state) => {
   const allOutputIds = [...DEFAULT_OUTPUT_IDS, ...(state.customOutputIds || [])];
   for (const id of allOutputIds) {
     if (state[`${id}Settings`]) {
-      state[`${id}Settings`] = {
-        ...state[`${id}Settings`],
-        autosizerActive: false,
-        primaryViewportWidth: null,
-        primaryViewportHeight: null,
-        allInstances: null,
-        instanceCount: 0,
-      };
+      state[`${id}Settings`] = clearOutputRuntimeState(state[`${id}Settings`]);
     }
   }
 };

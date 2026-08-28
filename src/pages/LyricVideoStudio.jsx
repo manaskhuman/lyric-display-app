@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { AppWindowMac, ArrowLeft, CircleHelp, Download, FilePlus2, FileText, MonitorUp } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Tooltip } from '../components/ui/tooltip';
 import useToast from '../hooks/useToast';
 import useModal from '../hooks/useModal';
 import { parseLrc } from '../utils/asyncLyricsParser';
-import { createDefaultOutputSettings } from '../context/LyricsStore';
+import { createDefaultOutputSettings } from '../context/lyricsStore/outputSlice.js';
 import {
   useAllOutputIds,
   useLyricsState,
@@ -26,6 +26,12 @@ import {
   writeLyricVideoStudioState,
 } from '../utils/lyricVideoStudioState';
 import { isCommandFocusProtected } from '../../shared/commandSafetyPolicy.js';
+import {
+  DEFAULT_LYRIC_VIDEO_VISUALIZER,
+  LYRIC_VIDEO_BACKGROUND_SOURCES,
+  normalizeLyricVideoVisualizer,
+} from '../../shared/lyricVideoVisualizer.js';
+import { openFileNavigator } from '../utils/fileNavigatorEvents';
 
 const DEFAULT_LYRIC_VIDEO_SETTINGS = createDefaultOutputSettings({
   fontSize: 86,
@@ -40,8 +46,8 @@ const DEFAULT_LYRIC_VIDEO_SETTINGS = createDefaultOutputSettings({
   backgroundOpacity: 0,
   fullScreenMode: true,
   fullScreenBackgroundType: 'color',
-  fullScreenBackgroundColor: '#111827',
-  fullScreenBackgroundPaint: { type: 'solid', color: '#111827' },
+  fullScreenBackgroundColor: '#000000',
+  fullScreenBackgroundPaint: { type: 'solid', color: '#000000' },
   alwaysShowBackground: true,
   transitionAnimation: 'fade',
   transitionSpeed: 220,
@@ -61,6 +67,9 @@ const DEFAULT_PROJECT = {
   gapBehavior: 'keep-previous-line',
   clearAfterMs: 2500,
   styleSource: 'lyricVideo',
+  visualizer: {
+    ...DEFAULT_LYRIC_VIDEO_VISUALIZER,
+  },
   intro: {
     enabled: false,
     title: '',
@@ -107,9 +116,14 @@ const getVideoDurationMs = (project = {}) => (
   + getOutroDurationMs(project)
 );
 
-const mergePersistedProject = (persistedProject) => {
+const mergePersistedProject = (persistedProject, persistedSettings) => {
   const safeProject = persistedProject && typeof persistedProject === 'object' ? persistedProject : {};
   const { openingScreen: _legacyOpeningScreen, ...safeProjectWithoutLegacyOpening } = safeProject;
+  const legacyBackgroundSource = safeProject.visualizer?.source === 'style'
+    ? (persistedSettings?.fullScreenBackgroundType === 'media'
+      ? 'media'
+      : 'color')
+    : safeProject.visualizer?.source;
   return {
     ...DEFAULT_PROJECT,
     ...safeProjectWithoutLegacyOpening,
@@ -123,6 +137,10 @@ const mergePersistedProject = (persistedProject) => {
       ...DEFAULT_PROJECT.exportSettings,
       ...(safeProject.exportSettings || {}),
     },
+    visualizer: normalizeLyricVideoVisualizer({
+      ...safeProject.visualizer,
+      source: legacyBackgroundSource,
+    }),
     intro: {
       ...DEFAULT_PROJECT.intro,
       ...(safeProject.intro || safeProject.openingScreen || {}),
@@ -130,8 +148,51 @@ const mergePersistedProject = (persistedProject) => {
   };
 };
 
+const normalizeLyricVideoStyleSettings = (settings = {}) => ({
+  ...DEFAULT_LYRIC_VIDEO_SETTINGS,
+  ...(settings || {}),
+  fullScreenMode: true,
+  alwaysShowBackground: true,
+});
+
+const buildLyricVideoVisualSettings = ({
+  styleSettings,
+  studioSettings,
+  visualizer,
+}) => {
+  const normalizedVisualizer = normalizeLyricVideoVisualizer(visualizer);
+  const backgroundType = normalizedVisualizer.source === LYRIC_VIDEO_BACKGROUND_SOURCES.BUTTERCHURN
+    ? 'visualizer'
+    : normalizedVisualizer.source;
+
+  return {
+    ...DEFAULT_LYRIC_VIDEO_SETTINGS,
+    ...(styleSettings || {}),
+    fullScreenMode: true,
+    alwaysShowBackground: true,
+    fullScreenBackgroundType: backgroundType,
+    fullScreenBackgroundColor: studioSettings.fullScreenBackgroundColor || '#000000',
+    fullScreenBackgroundPaint: studioSettings.fullScreenBackgroundPaint || { type: 'solid', color: '#000000' },
+    fullScreenBackgroundOpacity: studioSettings.fullScreenBackgroundOpacity ?? 10,
+    fullScreenBackgroundMedia: studioSettings.fullScreenBackgroundMedia || null,
+    fullScreenBackgroundMediaName: studioSettings.fullScreenBackgroundMediaName || '',
+    backgroundMediaTransitionAnimation: studioSettings.backgroundMediaTransitionAnimation,
+    backgroundMediaTransitionDuration: studioSettings.backgroundMediaTransitionDuration,
+    fullScreenElementEnabled: Boolean(studioSettings.fullScreenElementEnabled),
+    fullScreenElementMedia: studioSettings.fullScreenElementMedia || null,
+    fullScreenElementMediaName: studioSettings.fullScreenElementMediaName || '',
+    fullScreenElementScale: studioSettings.fullScreenElementScale,
+    fullScreenElementPosition: studioSettings.fullScreenElementPosition,
+    fullScreenElementPaddingX: studioSettings.fullScreenElementPaddingX,
+    fullScreenElementPaddingY: studioSettings.fullScreenElementPaddingY,
+    fullScreenElementOpacity: studioSettings.fullScreenElementOpacity,
+    fullScreenElementBlur: studioSettings.fullScreenElementBlur,
+  };
+};
+
 export default function LyricVideoStudio() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { showToast } = useToast();
   const { showModal } = useModal();
   const persistedStateRef = useRef(readLyricVideoStudioState());
@@ -161,16 +222,23 @@ export default function LyricVideoStudio() {
     () => allOutputIds.filter((id) => id.startsWith('output')),
     [allOutputIds]
   );
-  const [project, setProject] = useState(() => mergePersistedProject(persistedStateRef.current?.project));
-  const [lyricVideoSettings, setLyricVideoSettings] = useState(() => ({
-    ...DEFAULT_LYRIC_VIDEO_SETTINGS,
-    ...(persistedStateRef.current?.lyricVideoSettings || {}),
-  }));
+  const [project, setProject] = useState(() => mergePersistedProject(
+    persistedStateRef.current?.project,
+    persistedStateRef.current?.lyricVideoSettings
+  ));
+  const [lyricVideoSettings, setLyricVideoSettings] = useState(() => (
+    normalizeLyricVideoStyleSettings(persistedStateRef.current?.lyricVideoSettings)
+  ));
   const outputStyleSource = project.styleSource === 'lyricVideo' ? 'output1' : project.styleSource;
   const { settings: outputVisualSettings } = useOutputSettings(outputStyleSource);
-  const visualSettings = project.styleSource === 'lyricVideo'
+  const selectedStyleSettings = project.styleSource === 'lyricVideo'
     ? lyricVideoSettings
     : outputVisualSettings;
+  const visualSettings = useMemo(() => buildLyricVideoVisualSettings({
+    styleSettings: selectedStyleSettings,
+    studioSettings: lyricVideoSettings,
+    visualizer: project.visualizer,
+  }), [lyricVideoSettings, project.visualizer, selectedStyleSettings]);
   const [studioLyrics, setStudioLyrics] = useState(() => (
     Array.isArray(persistedStateRef.current?.studioLyrics)
       ? persistedStateRef.current.studioLyrics
@@ -215,7 +283,7 @@ export default function LyricVideoStudio() {
   }, [outputIds]);
 
   const updateLyricVideoSettings = useCallback((partial) => {
-    setLyricVideoSettings((current) => ({
+    setLyricVideoSettings((current) => normalizeLyricVideoStyleSettings({
       ...current,
       ...(partial || {}),
     }));
@@ -278,10 +346,12 @@ export default function LyricVideoStudio() {
     audioStartTimeMs,
     previewTitle,
     visualSettings,
+    visualizerAudioSource: audioSource,
     styleLabel: project.styleSource === 'lyricVideo' ? 'Lyric Video' : project.styleSource.replace('output', 'Output '),
     updatedAt: Date.now(),
   }), [
     currentTimeMs,
+    audioSource,
     isPlaying,
     lyricVideoSettings,
     previewTitle,
@@ -330,6 +400,11 @@ export default function LyricVideoStudio() {
   useEffect(() => {
     if (typeof BroadcastChannel === 'undefined') return undefined;
     const channel = new BroadcastChannel(LYRIC_VIDEO_STUDIO_CHANNEL);
+    channel.onmessage = (event) => {
+      if (event.data?.type === 'request-snapshot') {
+        publishStudioSnapshot();
+      }
+    };
     liveChannelRef.current = channel;
     publishStudioSnapshot();
 
@@ -697,9 +772,7 @@ export default function LyricVideoStudio() {
     window.open('https://ffmpeg.org/download.html', '_blank', 'noopener,noreferrer');
   }, []);
 
-  const handleImportLrc = async (event) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
+  const importLrcFile = useCallback(async (file) => {
     if (!file) return;
 
     try {
@@ -723,7 +796,41 @@ export default function LyricVideoStudio() {
         variant: 'error',
       });
     }
-  };
+  }, [clampVideoTime, showToast]);
+
+  useEffect(() => {
+    const pendingImport = location.state?.lyricVideoImport;
+    if (!pendingImport?.content || !pendingImport?.fileName) return;
+
+    navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
+    const file = new File(
+      [pendingImport.content],
+      pendingImport.fileName,
+      { type: 'text/plain' }
+    );
+    void importLrcFile(file);
+  }, [importLrcFile, location.pathname, location.search, location.state, navigate]);
+
+  const handleImportLrc = useCallback((event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    void importLrcFile(file);
+  }, [importLrcFile]);
+
+  useEffect(() => {
+    const handleNavigatorLrc = (event) => {
+      const payload = event?.detail || {};
+      if (payload.fileType !== 'lrc' || typeof payload.content !== 'string') return;
+      const file = new File([payload.content], payload.fileName || 'lyrics.lrc', { type: 'text/plain' });
+      void importLrcFile(file);
+    };
+    window.addEventListener('file-navigator:video-lrc-selection', handleNavigatorLrc);
+    return () => window.removeEventListener('file-navigator:video-lrc-selection', handleNavigatorLrc);
+  }, [importLrcFile]);
+
+  const handleChooseLrc = useCallback(() => {
+    if (!openFileNavigator({ destination: 'video' })) lrcInputRef.current?.click();
+  }, []);
 
   const setAudioProject = (audio, { resetPlayback = true } = {}) => {
     if (resetPlayback) {
@@ -906,23 +1013,35 @@ export default function LyricVideoStudio() {
   ]);
 
   useEffect(() => {
-    const handleStudioSpacebar = (event) => {
-      if (event.code !== 'Space' || event.repeat || exportOpen || styleOpen) return;
-
+    const handleStudioShortcut = (event) => {
       const target = event.target;
       if (isCommandFocusProtected(target, document.activeElement)) return;
 
       const activeModal = document.querySelector('[data-modal-root="true"]');
       if (activeModal?.contains?.(target)) return;
 
+      if (
+        !event.repeat
+        && (event.ctrlKey || event.metaKey)
+        && !event.shiftKey
+        && String(event.key || '').toLowerCase() === 'o'
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        handleChooseLrc();
+        return;
+      }
+
+      if (event.code !== 'Space' || event.repeat || exportOpen || styleOpen) return;
+
       event.preventDefault();
       event.stopPropagation();
       handlePlayPause();
     };
 
-    window.addEventListener('keydown', handleStudioSpacebar, true);
-    return () => window.removeEventListener('keydown', handleStudioSpacebar, true);
-  }, [exportOpen, handlePlayPause, styleOpen]);
+    window.addEventListener('keydown', handleStudioShortcut, true);
+    return () => window.removeEventListener('keydown', handleStudioShortcut, true);
+  }, [exportOpen, handleChooseLrc, handlePlayPause, styleOpen]);
 
   const handleStartExport = async (performanceMode = 'balanced') => {
     if (!window.electronAPI?.lyricVideo?.exportVideo) {
@@ -950,6 +1069,7 @@ export default function LyricVideoStudio() {
         clearAfterMs: project.clearAfterMs,
         title: project.name || 'Untitled Video 1',
         settings: visualSettings,
+        visualizer: project.visualizer,
         intro,
         audio: project.audio,
         exportSettings: {
@@ -1013,6 +1133,50 @@ export default function LyricVideoStudio() {
     }
     setExportOpen(true);
   }, [isExporting]);
+
+  const handleChooseBackgroundMedia = useCallback(() => {
+    showModal({
+      title: 'Lyric Video Background',
+      headerDescription: 'Choose an image or video from User Media.',
+      component: 'UserMedia',
+      variant: 'info',
+      size: 'lg',
+      customLayout: true,
+      scrollBehavior: 'none',
+      modalKey: 'lyric-video-background-media',
+      actions: [],
+      allowedTypes: ['image', 'video'],
+      initialTab: 'image',
+      onSelect: (media) => {
+        if (!media?.url) {
+          showToast({
+            title: 'Media unavailable',
+            message: 'Selected media could not be used.',
+            variant: 'error',
+          });
+          return;
+        }
+
+        updateLyricVideoSettings({
+          fullScreenBackgroundType: 'media',
+          fullScreenBackgroundMedia: {
+            url: media.url,
+            mimeType: media.mimeType,
+            name: media.name,
+            size: media.size,
+            uploadedAt: media.uploadedAt ?? Date.now(),
+            bundled: media.bundled === true,
+          },
+          fullScreenBackgroundMediaName: media.name || '',
+        });
+        showToast({
+          title: 'Background ready',
+          message: `${media.name || 'Media'} selected.`,
+          variant: 'success',
+        });
+      },
+    });
+  }, [showModal, showToast, updateLyricVideoSettings]);
 
   const handleCancelExport = async () => {
     exportCancelRequestedRef.current = true;
@@ -1123,13 +1287,13 @@ export default function LyricVideoStudio() {
         <aside className="row-span-2 flex min-h-0 flex-col overflow-hidden border-r border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
           <div className="flex h-16 shrink-0 items-center justify-between gap-2 border-b border-gray-200 px-5 dark:border-gray-800">
             <Tooltip content="Import a timestamped .lrc file" side="bottom">
-              <Button type="button" variant="ghost" size="sm" onClick={() => lrcInputRef.current?.click()} className="rounded-full text-gray-600 hover:bg-blue-50 hover:text-blue-600 dark:text-gray-400 dark:hover:bg-blue-500/10 dark:hover:text-blue-300">
+              <Button type="button" variant="ghost" size="sm" onClick={handleChooseLrc} className="rounded-full text-gray-600 hover:bg-blue-50 hover:text-blue-600 dark:text-gray-400 dark:hover:bg-blue-500/10 dark:hover:text-blue-300">
                 <FileText className="h-4 w-4" />
                 Import LRC
               </Button>
             </Tooltip>
             <Tooltip content="Create or edit lyrics in New Song Canvas" side="bottom">
-              <Button type="button" variant="ghost" size="sm" onClick={() => navigate('/new-song')} className="rounded-full text-gray-600 hover:bg-blue-50 hover:text-blue-600 dark:text-gray-400 dark:hover:bg-blue-500/10 dark:hover:text-blue-300">
+              <Button type="button" variant="ghost" size="sm" onClick={() => navigate('/new-song?mode=new&origin=lyric-video-studio')} className="rounded-full text-gray-600 hover:bg-blue-50 hover:text-blue-600 dark:text-gray-400 dark:hover:bg-blue-500/10 dark:hover:text-blue-300">
                 <FilePlus2 className="h-4 w-4" />
                 Create LRC
               </Button>
@@ -1152,6 +1316,8 @@ export default function LyricVideoStudio() {
             resolvedLine={resolvedLine}
             currentLine={resolved.activeLine}
             settings={visualSettings}
+            visualizer={project.visualizer}
+            audioSource={audioSource}
             exportSettings={project.exportSettings}
             intro={intro}
             currentTimeMs={currentTimeMs}
@@ -1161,6 +1327,7 @@ export default function LyricVideoStudio() {
             gapBehavior={project.gapBehavior}
             styleLabel={project.styleSource === 'lyricVideo' ? 'Lyric Video' : project.styleSource.replace('output', 'Output ')}
             backgroundVideoPlaying={isPlaying}
+            audioStartTimeMs={audioStartTimeMs}
           />
         </section>
 
@@ -1169,6 +1336,9 @@ export default function LyricVideoStudio() {
             project={project}
             outputIds={outputIds}
             onProjectChange={setProject}
+            backgroundSettings={lyricVideoSettings}
+            onBackgroundSettingsChange={updateLyricVideoSettings}
+            onChooseBackgroundMedia={handleChooseBackgroundMedia}
             onOpenStyleEditor={() => setStyleOpen(true)}
             onOpenExport={handleOpenExportModal}
           />

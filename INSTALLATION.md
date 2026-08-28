@@ -2,7 +2,7 @@
 
 Install LyricDisplay, connect production outputs, and resolve common setup problems.
 
-Version: 6.7.1
+Version: 6.8.6
 
 ## Contents
 
@@ -36,10 +36,10 @@ Current packages:
 
 Direct assets for this version:
 
-- [Windows x64 installer](https://github.com/PeterAlaks/lyric-display-app/releases/download/v6.7.1/LyricDisplay-6.7.1-Windows-Setup.exe)
-- [macOS Apple Silicon DMG](https://github.com/PeterAlaks/lyric-display-app/releases/download/v6.7.1/LyricDisplay-6.7.1-macOS-arm64.dmg)
-- [macOS Intel DMG](https://github.com/PeterAlaks/lyric-display-app/releases/download/v6.7.1/LyricDisplay-6.7.1-macOS-x64.dmg)
-- [Linux x64 AppImage](https://github.com/PeterAlaks/lyric-display-app/releases/download/v6.7.1/LyricDisplay-6.7.1-Linux.AppImage)
+- [Windows x64 installer](https://github.com/PeterAlaks/lyric-display-app/releases/download/v6.8.6/LyricDisplay-6.8.6-Windows-Setup.exe)
+- [macOS Apple Silicon DMG](https://github.com/PeterAlaks/lyric-display-app/releases/download/v6.8.6/LyricDisplay-6.8.6-macOS-arm64.dmg)
+- [macOS Intel DMG](https://github.com/PeterAlaks/lyric-display-app/releases/download/v6.8.6/LyricDisplay-6.8.6-macOS-x64.dmg)
+- [Linux x64 AppImage](https://github.com/PeterAlaks/lyric-display-app/releases/download/v6.8.6/LyricDisplay-6.8.6-Linux.AppImage)
 
 For a typical production workflow, 8 GB of RAM and a 1920×1080-capable display are a practical baseline. Multiple high-resolution video backgrounds, several browser sources, lyric video export, or NDI output benefit from more memory and GPU capacity. Wired Ethernet is strongly recommended when outputs or controllers run on other devices.
 
@@ -111,11 +111,11 @@ Use these routes in software that accepts a web/browser source:
 
 | View | Local URL | Notes |
 | --- | --- | --- |
-| Output 1 | `http://localhost:4000/#/output1` | Default lyric output |
-| Output 2 | `http://localhost:4000/#/output2` | Default lyric output |
-| Output 3–6 | `http://localhost:4000/#/output3` ... `output6` | Add the custom output in LyricDisplay first |
-| Stage | `http://localhost:4000/#/stage` | Confidence/stage display |
-| Timer | `http://localhost:4000/#/time` | Dedicated timer/clock display |
+| Output 1 | `http://localhost:4000/output1` | Default lyric output |
+| Output 2 | `http://localhost:4000/output2` | Default lyric output |
+| Output 3–6 | `http://localhost:4000/output3` ... `output6` | Add the custom output in LyricDisplay first |
+| Stage | `http://localhost:4000/stage` | Confidence/stage display |
+| Timer | `http://localhost:4000/time` | Dedicated timer/clock display |
 
 Replace `localhost` with the LyricDisplay computer's LAN address when the receiving software runs on another device. Output and Stage views support transparent production layouts; the Timer view is intended as a full display.
 
@@ -140,7 +140,7 @@ For OBS on the same computer, use host `127.0.0.1`. For OBS on another computer,
 2. Enter an output URL, for example:
 
 ```text
-http://localhost:4000/#/output1
+http://localhost:4000/output1
 ```
 
 3. Match the width and height to the OBS canvas, commonly `1920 × 1080`.
@@ -170,7 +170,7 @@ http://<LYRICDISPLAY-IP>:4000/api/health
 4. Use that address in the output URL:
 
 ```text
-http://<LYRICDISPLAY-IP>:4000/#/output1
+http://<LYRICDISPLAY-IP>:4000/output1
 ```
 
 5. If the address changes after a restart, reserve the address in the router's DHCP settings or ask the network administrator for a stable address. This is safer than guessing and manually assigning an address that may conflict with another device.
@@ -220,12 +220,15 @@ NDI support uses a separately downloaded LyricDisplay companion rather than bund
 
 1. In LyricDisplay, open **Output > NDI Preferences**.
 2. Select **Download NDI Companion** and wait for download and extraction to complete.
-3. Launch the companion, or enable **Start with LyricDisplay**.
-4. Open the NDI settings for each output or Stage view that should broadcast.
-5. Enable the output, choose a unique source name, resolution, and frame rate. `1080p` at `30 fps` is a sensible starting point for lyrics.
-6. Select that source in the NDI receiver, such as an NDI-enabled OBS or vMix input.
+3. If you already downloaded the latest official platform ZIP from the [LyricDisplay NDI releases](https://github.com/PeterAlaks/lyricdisplay-ndi/releases), select **Install from downloaded ZIP** or **Install or update from downloaded ZIP**. LyricDisplay stages the file in temporary storage and verifies it against the published checksum before replacing an existing Companion installation.
+4. Launch the companion, or enable **Start with LyricDisplay**.
+5. Open the NDI settings for each output or Stage view that should broadcast.
+6. Enable the output, choose a unique source name, resolution, and frame rate. `1080p` at `30 fps` is a sensible starting point for lyrics.
+7. Select that source in the NDI receiver, such as an NDI-enabled OBS or vMix input.
 
 The companion status should progress through Installed, Running, and Ready. Higher resolutions and frame rates require more CPU/GPU/network capacity. If no compatible companion asset is available for the current platform, the in-app download will report that condition.
+
+On Linux, NDI discovery also requires the Avahi client libraries and a running `avahi-daemon`. On Debian or Ubuntu, install `avahi-daemon`, `libavahi-common3`, and `libavahi-client3`, then enable the daemon before launching the companion.
 
 NDI discovery normally expects devices to be on the same LAN. Firewall rules, VLAN boundaries, Wi-Fi client isolation, or blocked discovery traffic can prevent a receiver from seeing a source.
 
@@ -254,7 +257,9 @@ Supported lyric inputs:
 | LyricDisplay setlist | `.ldset` |
 | LyricDisplay schedule | `.ldsch` |
 
-Load a file with **File > Load Lyrics File**, `Ctrl/Cmd + O`, or drag and drop. Create a song with **File > New Lyrics File** or `Ctrl/Cmd + N`.
+Open the built-in file navigator with **File > Load Lyrics** or `Ctrl/Cmd + O`. Add one or more source folders once, then search filenames, paths, and TXT/LRC lyric contents without leaving LyricDisplay. The navigator starts on recent files, supports Up/Down and Enter, previews TXT/LRC files, and watches indexed folders for changes. Drag and drop remains available. Create a song with **File > New Lyrics File** or `Ctrl/Cmd + N`.
+
+Saving a song opens a smaller in-app destination picker. It lists the current indexed song folder first when available, followed by indexed lyrics folders; use Up/Down and Enter for a fast save. Choose **Save in different folder…** only when you want the operating system's Save As dialog.
 
 Lines wrapped in `[ ]`, `( )`, `< >`, or `{ }` can be recognized as translation/alternate lines and grouped with the preceding lyric line. Parsing, cleanup, capitalization, splitting, and grouping behavior can be adjusted in Preferences.
 
@@ -308,9 +313,11 @@ Only one LyricDisplay backend can use the default port. Close other desktop/head
 ### NDI source is missing or stale
 
 - Open **Output > NDI Preferences** and confirm Installed, Running, and Ready states.
+- If installation fails, copy the persistent error message, stage, code, and hostname shown in NDI Preferences. These details distinguish release-metadata, download, checksum, extraction, and file-replacement failures.
 - Confirm the intended output's NDI toggle is enabled and its source name is unique.
 - Start with `1080p`/`30 fps` and reduce resolution/frame rate if telemetry reports dropped frames.
 - Keep sender and receiver on the same LAN and check firewall/VLAN discovery restrictions.
+- On Linux, confirm `avahi-daemon` is installed and running.
 - Update the companion from the NDI Preferences page when an update is offered.
 
 ### macOS blocks the app

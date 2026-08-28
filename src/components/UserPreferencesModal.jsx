@@ -6,9 +6,9 @@
 
 import React, { useState } from 'react';
 import {
-  Settings, FolderOpen, FileText, Radio, Play, Sliders,
+  Settings, FileText, Radio, Play, Sliders,
   AlertTriangle, RotateCcw, Loader2,
-  HardDrive, Cast, Palette, Wand2
+  ChevronRight, HardDrive, Cast, Palette, Wand2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -31,10 +31,25 @@ import { useOscPreferences } from '../hooks/UserPreferencesModal/useOscPreferenc
 import { usePreferencesPersistence } from '../hooks/UserPreferencesModal/usePreferencesPersistence';
 import { useSecurityPreferences } from '../hooks/UserPreferencesModal/useSecurityPreferences';
 import AdvancedPreferencesSection from './UserPreferencesModal/AdvancedPreferencesSection';
+import CapitalizedWordsPreferencesPage from './UserPreferencesModal/CapitalizedWordsPreferencesPage';
+import DisplayTransitionsPreferencesPage from './UserPreferencesModal/DisplayTransitionsPreferencesPage';
 import ExternalControlPreferencesSection from './UserPreferencesModal/ExternalControlPreferencesSection';
+import IndexedLyricsFoldersPreferencesPage from './UserPreferencesModal/IndexedLyricsFoldersPreferencesPage';
+import MidiMappingsPreferencesPage from './UserPreferencesModal/MidiMappingsPreferencesPage';
+import PreviewPreferencesPage from './UserPreferencesModal/PreviewPreferencesPage';
 import NdiPreferencesSection from './UserPreferencesModal/NdiPreferencesSection';
+import NdiTelemetryPreferencesPage from './UserPreferencesModal/NdiTelemetryPreferencesPage';
+import SectionTagPhrasesPreferencesPage from './UserPreferencesModal/SectionTagPhrasesPreferencesPage';
 import UserPreferencesLayout from './UserPreferencesModal/UserPreferencesLayout';
-import { normalizeLineSplittingConfig } from '../../shared/lyricsParsing.js';
+import { normalizeLineSplittingConfig } from '../../shared/lyricsParsing/preferenceOptions.js';
+import {
+  DEFAULT_CAPITALIZED_WORDS,
+  normalizeCapitalizedWords,
+} from '../../shared/capitalizedWords.js';
+import {
+  DEFAULT_SECTION_TAG_PHRASES,
+  normalizeSectionTagPhrases,
+} from '../../shared/sectionTagPhrases.js';
 
 // Category definitions
 const CATEGORIES = [
@@ -62,11 +77,24 @@ const CATEGORIES = [
 
 const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
   const [activeCategory, setActiveCategory] = useState(initialCategory || 'general');
+  const [appearancePage, setAppearancePage] = useState('main');
+  const [parsingPage, setParsingPage] = useState('main');
+  const [formattingPage, setFormattingPage] = useState('main');
+  const [fileHandlingPage, setFileHandlingPage] = useState('main');
+  const [externalControlPage, setExternalControlPage] = useState('main');
+  const [ndiPage, setNdiPage] = useState('main');
+  const [contentDirection, setContentDirection] = useState(0);
+  const [restoringAllDefaults, setRestoringAllDefaults] = useState(false);
+  const [indexedFolderPersistence, setIndexedFolderPersistence] = useState({
+    saving: false,
+    saveError: false,
+    lastSaved: null,
+  });
   const { showToast } = useToast();
   const { showModal } = useModal();
   const { liveSafety, setLiveSafetyEnabled, isAuthenticated, ready } = useLiveSafetyBridge();
   const {
-    handleBrowseDefaultPath,
+    handleResetAll,
     handleResetCategory,
     lastSaved,
     loading,
@@ -105,9 +133,7 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
     lastLearnedMidi,
     midiAssigningAction,
     midiLearnActive,
-    midiMappingsExpanded,
     midiRefreshing,
-    setMidiMappingsExpanded,
   } = useMidiPreferences({ midiStatus, setMidiStatus, showToast, updateNestedPreference });
 
   const {
@@ -130,6 +156,7 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
     handleNdiCancelDownload,
     handleNdiCheckForUpdate,
     handleNdiDownload,
+    handleNdiInstallFromZip,
     handleNdiLaunch,
     handleNdiStop,
     handleNdiUninstall,
@@ -138,6 +165,7 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
     ndiAutoLaunch,
     ndiCheckingUpdate,
     ndiStatus,
+    ndiLastError,
     ndiTelemetry,
     ndiUpdateInfo,
     ndiUpdating,
@@ -145,7 +173,7 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-[500px]">
+      <div className="flex items-center justify-center h-125">
         <Loader2 className={`w-8 h-8 animate-spin ${darkMode ? 'text-gray-400' : 'text-gray-500'}`} />
       </div>
     );
@@ -170,6 +198,117 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
   const splitTarget = Number(preferences?.lineSplitting?.targetLength ?? 60);
   const splitMaximum = Number(preferences?.lineSplitting?.maxLength ?? 80);
   const hasInvalidSplitRelationship = splitMinimum > splitTarget || splitTarget > splitMaximum;
+  const capitalizedWords = normalizeCapitalizedWords(
+    preferences?.formatting?.capitalizedWords,
+    DEFAULT_CAPITALIZED_WORDS,
+  );
+  const sectionTagPhrases = normalizeSectionTagPhrases(
+    preferences?.parsing?.sectionTagPhrases,
+    DEFAULT_SECTION_TAG_PHRASES,
+  );
+  const isDisplayTransitionsPage = activeCategory === 'appearance' && appearancePage === 'displayTransitions';
+  const isPreviewPage = activeCategory === 'appearance' && appearancePage === 'preview';
+  const isSectionTagPhrasesPage = activeCategory === 'parsing' && parsingPage === 'sectionTagPhrases';
+  const isCapitalizedWordsPage = activeCategory === 'formatting' && formattingPage === 'capitalizedWords';
+  const isIndexedLyricsFoldersPage = activeCategory === 'fileHandling' && fileHandlingPage === 'indexedFolders';
+  const isMidiMappingsPage = activeCategory === 'externalControl' && externalControlPage === 'midiMappings';
+  const isNdiTelemetryPage = activeCategory === 'ndi' && ndiPage === 'telemetry';
+  const handleCategoryChange = (category) => {
+    const isReturningFromNestedPage = (
+      (category === 'appearance' && (isDisplayTransitionsPage || isPreviewPage))
+      || (category === 'parsing' && isSectionTagPhrasesPage)
+      || (category === 'formatting' && isCapitalizedWordsPage)
+      || (category === 'fileHandling' && isIndexedLyricsFoldersPage)
+      || (category === 'externalControl' && isMidiMappingsPage)
+      || (category === 'ndi' && isNdiTelemetryPage)
+    );
+    setContentDirection(isReturningFromNestedPage ? -1 : 0);
+    setAppearancePage('main');
+    setParsingPage('main');
+    setFormattingPage('main');
+    setFileHandlingPage('main');
+    setExternalControlPage('main');
+    setNdiPage('main');
+    setActiveCategory(category);
+  };
+  const openDisplayTransitionsPage = () => {
+    setContentDirection(1);
+    setAppearancePage('displayTransitions');
+  };
+  const closeDisplayTransitionsPage = () => {
+    setContentDirection(-1);
+    setAppearancePage('main');
+  };
+  const openPreviewPage = () => {
+    setContentDirection(1);
+    setAppearancePage('preview');
+  };
+  const closePreviewPage = () => {
+    setContentDirection(-1);
+    setAppearancePage('main');
+  };
+  const openSectionTagPhrasesPage = () => {
+    setContentDirection(1);
+    setParsingPage('sectionTagPhrases');
+  };
+  const closeSectionTagPhrasesPage = () => {
+    setContentDirection(-1);
+    setParsingPage('main');
+  };
+  const openCapitalizedWordsPage = () => {
+    setContentDirection(1);
+    setFormattingPage('capitalizedWords');
+  };
+  const closeCapitalizedWordsPage = () => {
+    setContentDirection(-1);
+    setFormattingPage('main');
+  };
+  const openIndexedLyricsFoldersPage = () => {
+    setContentDirection(1);
+    setFileHandlingPage('indexedFolders');
+  };
+  const closeIndexedLyricsFoldersPage = () => {
+    setContentDirection(-1);
+    setFileHandlingPage('main');
+  };
+  const handleIndexedFolderPersistenceChange = (phase) => {
+    setIndexedFolderPersistence((current) => {
+      if (phase === 'start') {
+        return { saving: true, saveError: false, lastSaved: null };
+      }
+      if (phase === 'success') {
+        return { saving: false, saveError: false, lastSaved: Date.now() };
+      }
+      if (phase === 'error') {
+        return { saving: false, saveError: true, lastSaved: null };
+      }
+      return { ...current, saving: false };
+    });
+  };
+  const openMidiMappingsPage = () => {
+    setContentDirection(1);
+    setExternalControlPage('midiMappings');
+  };
+  const closeMidiMappingsPage = () => {
+    setContentDirection(-1);
+    setExternalControlPage('main');
+  };
+  const openNdiTelemetryPage = () => {
+    setContentDirection(1);
+    setNdiPage('telemetry');
+  };
+  const closeNdiTelemetryPage = () => {
+    setContentDirection(-1);
+    setNdiPage('main');
+  };
+  const handleCapitalizedWordsChange = (words) => {
+    const normalizedWords = normalizeCapitalizedWords(words);
+    updatePreference('formatting', 'capitalizedWords', normalizedWords);
+    useLyricsStore.getState().setFormattingCapitalizedWords(normalizedWords);
+  };
+  const handleSectionTagPhrasesChange = (phrases) => {
+    updatePreference('parsing', 'sectionTagPhrases', normalizeSectionTagPhrases(phrases));
+  };
   const commitLineSplittingPreference = (key, value) => {
     const normalized = normalizeLineSplittingConfig({
       ...(preferences?.lineSplitting || {}),
@@ -182,10 +321,142 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
       overflowTolerance: normalized.OVERFLOW_TOLERANCE,
     });
   };
+  const handleRestoreAllDefaults = async () => {
+    const confirmation = await showModal({
+      title: 'Restore All Default Settings?',
+      description: 'Every category in User Preferences will be restored to its original defaults.',
+      body: 'Your lyric files, indexed folders, setlists, and system logs will not be removed. Settings marked as requiring a restart will take full effect after restarting LyricDisplay.',
+      variant: 'warning',
+      size: 'sm',
+      actions: [
+        { label: 'Cancel', value: 'cancel', variant: 'outline' },
+        { label: 'Restore Defaults', value: 'restore', variant: 'destructive' },
+      ],
+    });
+    if (confirmation !== 'restore') return;
+
+    setRestoringAllDefaults(true);
+    try {
+      const restored = await handleResetAll();
+      if (!restored) return;
+
+      setLiveSafetyEnabled(false, { persistPreference: false });
+      showToast({
+        title: 'Default Settings Restored',
+        message: 'All user preference categories have been restored to their defaults.',
+        variant: 'success',
+      });
+    } finally {
+      setRestoringAllDefaults(false);
+    }
+  };
 
   // Render category content
   const renderCategoryContent = () => {
     if (!preferences) return null;
+
+    if (isDisplayTransitionsPage) {
+      return (
+        <DisplayTransitionsPreferencesPage
+          getNumberPreferenceInputProps={getNumberPreferenceInputProps}
+          inputClass={inputClass}
+          labelClass={labelClass}
+          mutedClass={mutedClass}
+          onBack={closeDisplayTransitionsPage}
+          preferences={preferences}
+          selectContentClass={selectContentClass}
+          updatePreference={updatePreference}
+        />
+      );
+    }
+
+    if (isPreviewPage) {
+      return (
+        <PreviewPreferencesPage
+          darkMode={darkMode}
+          inputClass={inputClass}
+          labelClass={labelClass}
+          mutedClass={mutedClass}
+          onBack={closePreviewPage}
+          preferences={preferences}
+          selectContentClass={selectContentClass}
+          updatePreference={updatePreference}
+        />
+      );
+    }
+
+    if (isSectionTagPhrasesPage) {
+      return (
+        <SectionTagPhrasesPreferencesPage
+          darkMode={darkMode}
+          labelClass={labelClass}
+          mutedClass={mutedClass}
+          onBack={closeSectionTagPhrasesPage}
+          onPhrasesChange={handleSectionTagPhrasesChange}
+          phrases={sectionTagPhrases}
+          showModal={showModal}
+        />
+      );
+    }
+
+    if (isCapitalizedWordsPage) {
+      return (
+        <CapitalizedWordsPreferencesPage
+          darkMode={darkMode}
+          labelClass={labelClass}
+          mutedClass={mutedClass}
+          onBack={closeCapitalizedWordsPage}
+          onWordsChange={handleCapitalizedWordsChange}
+          showModal={showModal}
+          words={capitalizedWords}
+        />
+      );
+    }
+
+    if (isIndexedLyricsFoldersPage) {
+      return (
+        <IndexedLyricsFoldersPreferencesPage
+          darkMode={darkMode}
+          labelClass={labelClass}
+          mutedClass={mutedClass}
+          onBack={closeIndexedLyricsFoldersPage}
+          onPersistenceChange={handleIndexedFolderPersistenceChange}
+          showModal={showModal}
+          showToast={showToast}
+        />
+      );
+    }
+
+    if (isMidiMappingsPage) {
+      return (
+        <MidiMappingsPreferencesPage
+          darkMode={darkMode}
+          handleMidiAssignAction={handleMidiAssignAction}
+          handleMidiLearn={handleMidiLearn}
+          handleMidiResetMappings={handleMidiResetMappings}
+          labelClass={labelClass}
+          lastLearnedMidi={lastLearnedMidi}
+          midiAssigningAction={midiAssigningAction}
+          midiLearnActive={midiLearnActive}
+          midiStatus={midiStatus}
+          mutedClass={mutedClass}
+          onBack={closeMidiMappingsPage}
+        />
+      );
+    }
+
+    if (isNdiTelemetryPage) {
+      return (
+        <NdiTelemetryPreferencesPage
+          companionRunning={companionRunning}
+          darkMode={darkMode}
+          labelClass={labelClass}
+          mutedClass={mutedClass}
+          ndiTelemetry={ndiTelemetry}
+          onBack={closeNdiTelemetryPage}
+        />
+      );
+    }
 
     switch (activeCategory) {
       case 'general':
@@ -203,11 +474,8 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
                   updatePreference('general', 'liveSafetyMode', checked);
                   setLiveSafetyEnabled(checked, { persistPreference: false });
                 }}
-                className={`!h-7 !w-14 !border-0 shadow-sm transition-colors ${darkMode
-                  ? 'data-[state=checked]:bg-green-400 data-[state=unchecked]:bg-gray-600'
-                  : 'data-[state=checked]:bg-black data-[state=unchecked]:bg-gray-300'
-                  }`}
-                thumbClassName="!h-5 !w-6 data-[state=checked]:!translate-x-7 data-[state=unchecked]:!translate-x-1"
+                size="medium"
+                variant="control"
               />
             </div>
 
@@ -229,11 +497,8 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
                   updatePreference('general', 'previewLines', checked);
                   useLyricsStore.getState().setPreviewLinesEnabled(checked);
                 }}
-                className={`!h-7 !w-14 !border-0 shadow-sm transition-colors ${darkMode
-                  ? 'data-[state=checked]:bg-green-400 data-[state=unchecked]:bg-gray-600'
-                  : 'data-[state=checked]:bg-black data-[state=unchecked]:bg-gray-300'
-                  }`}
-                thumbClassName="!h-5 !w-6 data-[state=checked]:!translate-x-7 data-[state=unchecked]:!translate-x-1"
+                size="medium"
+                variant="control"
               />
             </div>
 
@@ -245,11 +510,8 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
               <Switch
                 checked={preferences.general?.confirmOnClose ?? true}
                 onCheckedChange={(checked) => updatePreference('general', 'confirmOnClose', checked)}
-                className={`!h-7 !w-14 !border-0 shadow-sm transition-colors ${darkMode
-                  ? 'data-[state=checked]:bg-green-400 data-[state=unchecked]:bg-gray-600'
-                  : 'data-[state=checked]:bg-black data-[state=unchecked]:bg-gray-300'
-                  }`}
-                thumbClassName="!h-5 !w-6 data-[state=checked]:!translate-x-7 data-[state=unchecked]:!translate-x-1"
+                size="medium"
+                variant="control"
               />
             </div>
 
@@ -261,11 +523,8 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
               <Switch
                 checked={preferences.general?.autoCheckForUpdates ?? true}
                 onCheckedChange={(checked) => updatePreference('general', 'autoCheckForUpdates', checked)}
-                className={`!h-7 !w-14 !border-0 shadow-sm transition-colors ${darkMode
-                  ? 'data-[state=checked]:bg-green-400 data-[state=unchecked]:bg-gray-600'
-                  : 'data-[state=checked]:bg-black data-[state=unchecked]:bg-gray-300'
-                  }`}
-                thumbClassName="!h-5 !w-6 data-[state=checked]:!translate-x-7 data-[state=unchecked]:!translate-x-1"
+                size="medium"
+                variant="control"
               />
             </div>
 
@@ -282,11 +541,8 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
 
                   useLyricsStore.getState().setToastSoundsMuted(muted);
                 }}
-                className={`!h-7 !w-14 !border-0 shadow-sm transition-colors ${darkMode
-                  ? 'data-[state=checked]:bg-green-400 data-[state=unchecked]:bg-gray-600'
-                  : 'data-[state=checked]:bg-black data-[state=unchecked]:bg-gray-300'
-                  }`}
-                thumbClassName="!h-5 !w-6 data-[state=checked]:!translate-x-7 data-[state=unchecked]:!translate-x-1"
+                size="medium"
+                variant="control"
               />
             </div>
 
@@ -301,11 +557,8 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
                   updatePreference('general', 'skipSectionTitlesOnKeyboard', checked);
                   useLyricsStore.getState().setSkipSectionTitlesOnKeyboard(checked);
                 }}
-                className={`!h-7 !w-14 !border-0 shadow-sm transition-colors ${darkMode
-                  ? 'data-[state=checked]:bg-green-400 data-[state=unchecked]:bg-gray-600'
-                  : 'data-[state=checked]:bg-black data-[state=unchecked]:bg-gray-300'
-                  }`}
-                thumbClassName="!h-5 !w-6 data-[state=checked]:!translate-x-7 data-[state=unchecked]:!translate-x-1"
+                size="medium"
+                variant="control"
               />
             </div>
           </div>
@@ -370,6 +623,34 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
               )}
             </div>
 
+            <button
+              type="button"
+              onClick={openDisplayTransitionsPage}
+              className={`-mx-3 flex w-[calc(100%+1.5rem)] items-center gap-4 rounded-lg px-3 py-2.5 text-left transition-colors ${darkMode ? 'hover:bg-gray-700/60' : 'hover:bg-gray-100'}`}
+              aria-label="Configure display transitions"
+            >
+              <div className="min-w-0 flex-1">
+                <span className={`text-sm font-medium ${labelClass}`}>Display Transitions</span>
+                <p className={`text-xs ${mutedClass}`}>Configure timer, background media, and output visibility animations</p>
+              </div>
+              <span className={`shrink-0 text-xs ${mutedClass}`}>Manage</span>
+              <ChevronRight className={`h-4 w-4 shrink-0 ${mutedClass}`} />
+            </button>
+
+            <button
+              type="button"
+              onClick={openPreviewPage}
+              className={`-mx-3 flex w-[calc(100%+1.5rem)] items-center gap-4 rounded-lg px-3 py-2.5 text-left transition-colors ${darkMode ? 'hover:bg-gray-700/60' : 'hover:bg-gray-100'}`}
+              aria-label="Configure Preview"
+            >
+              <div className="min-w-0 flex-1">
+                <span className={`text-sm font-medium ${labelClass}`}>Preview</span>
+                <p className={`text-xs ${mutedClass}`}>Arrange preview feeds and configure the operator grid</p>
+              </div>
+              <span className={`shrink-0 text-xs ${mutedClass}`}>Manage</span>
+              <ChevronRight className={`h-4 w-4 shrink-0 ${mutedClass}`} />
+            </button>
+
             <div className="flex items-center justify-between">
               <div>
                 <label className={`text-sm font-medium ${labelClass}`}>Show Tooltips</label>
@@ -382,11 +663,8 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
                   // Update the store immediately for runtime sync
                   useLyricsStore.getState().setShowTooltips(checked);
                 }}
-                className={`!h-7 !w-14 !border-0 shadow-sm transition-colors ${darkMode
-                  ? 'data-[state=checked]:bg-green-400 data-[state=unchecked]:bg-gray-600'
-                  : 'data-[state=checked]:bg-black data-[state=unchecked]:bg-gray-300'
-                  }`}
-                thumbClassName="!h-5 !w-6 data-[state=checked]:!translate-x-7 data-[state=unchecked]:!translate-x-1"
+                size="medium"
+                variant="control"
               />
             </div>
 
@@ -404,11 +682,8 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
                     detail: { showTutorialPopovers: checked }
                   }));
                 }}
-                className={`!h-7 !w-14 !border-0 shadow-sm transition-colors ${darkMode
-                  ? 'data-[state=checked]:bg-green-400 data-[state=unchecked]:bg-gray-600'
-                  : 'data-[state=checked]:bg-black data-[state=unchecked]:bg-gray-300'
-                  }`}
-                thumbClassName="!h-5 !w-6 data-[state=checked]:!translate-x-7 data-[state=unchecked]:!translate-x-1"
+                size="medium"
+                variant="control"
               />
             </div>
 
@@ -423,11 +698,8 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
                   updatePreference('appearance', 'showCanvasFloatingToolbar', checked);
                   useLyricsStore.getState().setShowCanvasFloatingToolbar(checked);
                 }}
-                className={`!h-7 !w-14 !border-0 shadow-sm transition-colors ${darkMode
-                  ? 'data-[state=checked]:bg-green-400 data-[state=unchecked]:bg-gray-600'
-                  : 'data-[state=checked]:bg-black data-[state=unchecked]:bg-gray-300'
-                  }`}
-                thumbClassName="!h-5 !w-6 data-[state=checked]:!translate-x-7 data-[state=unchecked]:!translate-x-1"
+                size="medium"
+                variant="control"
               />
             </div>
           </div>
@@ -445,11 +717,8 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
               <Switch
                 checked={preferences.parsing?.enableAutoLineGrouping ?? true}
                 onCheckedChange={(checked) => updatePreference('parsing', 'enableAutoLineGrouping', checked)}
-                className={`!h-7 !w-14 !border-0 shadow-sm transition-colors ${darkMode
-                  ? 'data-[state=checked]:bg-green-400 data-[state=unchecked]:bg-gray-600'
-                  : 'data-[state=checked]:bg-black data-[state=unchecked]:bg-gray-300'
-                  }`}
-                thumbClassName="!h-5 !w-6 data-[state=checked]:!translate-x-7 data-[state=unchecked]:!translate-x-1"
+                size="medium"
+                variant="control"
               />
             </div>
 
@@ -480,11 +749,8 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
               <Switch
                 checked={preferences.parsing?.enableTranslationGrouping ?? true}
                 onCheckedChange={(checked) => updatePreference('parsing', 'enableTranslationGrouping', checked)}
-                className={`!h-7 !w-14 !border-0 shadow-sm transition-colors ${darkMode
-                  ? 'data-[state=checked]:bg-green-400 data-[state=unchecked]:bg-gray-600'
-                  : 'data-[state=checked]:bg-black data-[state=unchecked]:bg-gray-300'
-                  }`}
-                thumbClassName="!h-5 !w-6 data-[state=checked]:!translate-x-7 data-[state=unchecked]:!translate-x-1"
+                size="medium"
+                variant="control"
               />
             </div>
 
@@ -516,11 +782,8 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
                 checked={preferences.parsing?.enableCrossBlankLineGrouping ?? true}
                 onCheckedChange={(checked) => updatePreference('parsing', 'enableCrossBlankLineGrouping', checked)}
                 disabled={!(preferences.parsing?.enableAutoLineGrouping ?? true)}
-                className={`!h-7 !w-14 !border-0 shadow-sm transition-colors ${darkMode
-                  ? 'data-[state=checked]:bg-green-400 data-[state=unchecked]:bg-gray-600'
-                  : 'data-[state=checked]:bg-black data-[state=unchecked]:bg-gray-300'
-                  }`}
-                thumbClassName="!h-5 !w-6 data-[state=checked]:!translate-x-7 data-[state=unchecked]:!translate-x-1"
+                size="medium"
+                variant="control"
               />
             </div>
 
@@ -543,14 +806,28 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
                 How to handle [Verse], [Chorus], etc. tags
               </p>
             </div>
+
+            <button
+              type="button"
+              onClick={openSectionTagPhrasesPage}
+              className={`-mx-3 flex w-[calc(100%+1.5rem)] items-center gap-4 rounded-lg px-3 py-2.5 text-left transition-colors ${darkMode ? 'hover:bg-gray-700/60' : 'hover:bg-gray-100'}`}
+              aria-label={`Manage ${sectionTagPhrases.length} recognized section tag phrases`}
+            >
+              <div className="min-w-0 flex-1">
+                <span className={`text-sm font-medium ${labelClass}`}>Recognized Section Tags</span>
+                <p className={`text-xs ${mutedClass}`}>Choose phrases treated as Verse, Chorus, Bridge, and other headings</p>
+              </div>
+              <span className={`shrink-0 text-xs ${mutedClass}`}>{sectionTagPhrases.length}</span>
+              <ChevronRight className={`h-4 w-4 shrink-0 ${mutedClass}`} />
+            </button>
           </div>
         );
 
       case 'formatting':
         return (
           <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
+            <div className={preferenceToggleRowClass}>
+              <div className={preferenceToggleTextClass}>
                 <label className={`text-sm font-medium ${labelClass}`}>Auto Cleanup on Paste</label>
                 <p className={`text-xs ${mutedClass}`}>Automatically format and clean up lyrics when pasting into the song canvas</p>
               </div>
@@ -560,16 +837,13 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
                   updatePreference('formatting', 'enableCleanupOnPaste', checked);
                   useLyricsStore.getState().setCanvasCleanupOnPaste(checked);
                 }}
-                className={`!h-7 !w-14 !border-0 shadow-sm transition-colors ${darkMode
-                  ? 'data-[state=checked]:bg-green-400 data-[state=unchecked]:bg-gray-600'
-                  : 'data-[state=checked]:bg-black data-[state=unchecked]:bg-gray-300'
-                  }`}
-                thumbClassName="!h-5 !w-6 data-[state=checked]:!translate-x-7 data-[state=unchecked]:!translate-x-1"
+                size="medium"
+                variant="control"
               />
             </div>
 
-            <div className="flex items-center justify-between">
-              <div>
+            <div className={preferenceToggleRowClass}>
+              <div className={preferenceToggleTextClass}>
                 <label className={`text-sm font-medium ${labelClass}`}>Capitalize First Letter</label>
                 <p className={`text-xs ${mutedClass}`}>Automatically capitalize the first letter of each lyric line during cleanup</p>
               </div>
@@ -579,16 +853,13 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
                   updatePreference('formatting', 'capitalizeFirstLetter', checked);
                   useLyricsStore.getState().setFormattingCapitalizeFirstLetter(checked);
                 }}
-                className={`!h-7 !w-14 !border-0 shadow-sm transition-colors ${darkMode
-                  ? 'data-[state=checked]:bg-green-400 data-[state=unchecked]:bg-gray-600'
-                  : 'data-[state=checked]:bg-black data-[state=unchecked]:bg-gray-300'
-                  }`}
-                thumbClassName="!h-5 !w-6 data-[state=checked]:!translate-x-7 data-[state=unchecked]:!translate-x-1"
+                size="medium"
+                variant="control"
               />
             </div>
 
-            <div className="flex items-center justify-between">
-              <div>
+            <div className={preferenceToggleRowClass}>
+              <div className={preferenceToggleTextClass}>
                 <label className={`text-sm font-medium ${labelClass}`}>Capitalize Religious Terms</label>
                 <p className={`text-xs ${mutedClass}`}>Auto-capitalize words like Jesus, God, Holy Spirit, Hallelujah, etc.</p>
               </div>
@@ -598,16 +869,27 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
                   updatePreference('formatting', 'capitalizeReligiousTerms', checked);
                   useLyricsStore.getState().setFormattingCapitalizeReligiousTerms(checked);
                 }}
-                className={`!h-7 !w-14 !border-0 shadow-sm transition-colors ${darkMode
-                  ? 'data-[state=checked]:bg-green-400 data-[state=unchecked]:bg-gray-600'
-                  : 'data-[state=checked]:bg-black data-[state=unchecked]:bg-gray-300'
-                  }`}
-                thumbClassName="!h-5 !w-6 data-[state=checked]:!translate-x-7 data-[state=unchecked]:!translate-x-1"
+                size="medium"
+                variant="control"
               />
             </div>
 
-            <div className="flex items-center justify-between">
-              <div>
+            <button
+              type="button"
+              onClick={openCapitalizedWordsPage}
+              className={`-mx-3 flex w-[calc(100%+1.5rem)] items-center gap-4 rounded-lg px-3 py-2.5 text-left transition-colors ${darkMode ? 'hover:bg-gray-700/60' : 'hover:bg-gray-100'}`}
+              aria-label={`Manage ${capitalizedWords.length} capitalized ${capitalizedWords.length === 1 ? 'word' : 'words'}`}
+            >
+              <div className="min-w-0 flex-1">
+                <span className={`text-sm font-medium ${labelClass}`}>Capitalized Words</span>
+                <p className={`text-xs ${mutedClass}`}>Choose the words and phrases this formatting rule applies to</p>
+              </div>
+              <span className={`shrink-0 text-xs ${mutedClass}`}>{capitalizedWords.length}</span>
+              <ChevronRight className={`h-4 w-4 shrink-0 ${mutedClass}`} />
+            </button>
+
+            <div className={preferenceToggleRowClass}>
+              <div className={preferenceToggleTextClass}>
                 <label className={`text-sm font-medium ${labelClass}`}>Normalize Typographic Characters</label>
                 <p className={`text-xs ${mutedClass}`}>Convert smart quotes, em dashes, and other typographic characters to plain equivalents</p>
               </div>
@@ -617,11 +899,8 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
                   updatePreference('formatting', 'normalizeTypographicChars', checked);
                   useLyricsStore.getState().setFormattingNormalizeTypographicChars(checked);
                 }}
-                className={`!h-7 !w-14 !border-0 shadow-sm transition-colors ${darkMode
-                  ? 'data-[state=checked]:bg-green-400 data-[state=unchecked]:bg-gray-600'
-                  : 'data-[state=checked]:bg-black data-[state=unchecked]:bg-gray-300'
-                  }`}
-                thumbClassName="!h-5 !w-6 data-[state=checked]:!translate-x-7 data-[state=unchecked]:!translate-x-1"
+                size="medium"
+                variant="control"
               />
             </div>
           </div>
@@ -645,11 +924,8 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
               <Switch
                 checked={preferences.lineSplitting?.enabled ?? true}
                 onCheckedChange={(checked) => updatePreference('lineSplitting', 'enabled', checked)}
-                className={`!h-7 !w-14 !border-0 shadow-sm transition-colors ${darkMode
-                  ? 'data-[state=checked]:bg-green-400 data-[state=unchecked]:bg-gray-600'
-                  : 'data-[state=checked]:bg-black data-[state=unchecked]:bg-gray-300'
-                  }`}
-                thumbClassName="!h-5 !w-6 data-[state=checked]:!translate-x-7 data-[state=unchecked]:!translate-x-1"
+                size="medium"
+                variant="control"
               />
             </div>
 
@@ -738,45 +1014,19 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
       case 'fileHandling':
         return (
           <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <label className={`text-sm font-medium ${labelClass}`}>Remember Last Opened Path</label>
-                <p className={`text-xs ${mutedClass}`}>Use the last opened folder instead of default</p>
+            <button
+              type="button"
+              onClick={openIndexedLyricsFoldersPage}
+              className={`-mx-3 flex w-[calc(100%+1.5rem)] items-center gap-4 rounded-lg px-3 py-2.5 text-left transition-colors ${darkMode ? 'hover:bg-gray-700/60' : 'hover:bg-gray-100'}`}
+              aria-label="Manage indexed lyrics folders"
+            >
+              <div className="min-w-0 flex-1">
+                <span className={`text-sm font-medium ${labelClass}`}>Indexed Lyrics Folders</span>
+                <p className={`text-xs ${mutedClass}`}>Choose the folders searched by the Load Lyrics navigator</p>
               </div>
-              <Switch
-                checked={preferences.fileHandling?.rememberLastOpenedPath ?? true}
-                onCheckedChange={(checked) => updatePreference('fileHandling', 'rememberLastOpenedPath', checked)}
-                className={`!h-7 !w-14 !border-0 shadow-sm transition-colors ${darkMode
-                  ? 'data-[state=checked]:bg-green-400 data-[state=unchecked]:bg-gray-600'
-                  : 'data-[state=checked]:bg-black data-[state=unchecked]:bg-gray-300'
-                  }`}
-                thumbClassName="!h-5 !w-6 data-[state=checked]:!translate-x-7 data-[state=unchecked]:!translate-x-1"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label className={preferenceFieldLabelClass}>Default Lyrics Folder</label>
-              <div className="flex gap-2">
-                <Input
-                  value={preferences.fileHandling?.defaultLyricsPath || ''}
-                  onChange={(e) => updatePreference('fileHandling', 'defaultLyricsPath', e.target.value)}
-                  placeholder="Select a default folder..."
-                  className={`flex-1 ${inputClass}`}
-                  disabled={preferences.fileHandling?.rememberLastOpenedPath ?? true}
-                />
-                <Button
-                  variant="outline"
-                  onClick={handleBrowseDefaultPath}
-                  className={darkMode ? 'bg-gray-800 border-gray-600 hover:bg-gray-700 text-gray-300' : ''}
-                  disabled={preferences.fileHandling?.rememberLastOpenedPath ?? true}
-                >
-                  <FolderOpen className="w-4 h-4" />
-                </Button>
-              </div>
-              <p className={`text-xs ${mutedClass}`}>
-                This folder will open by default when loading lyrics files (Ctrl+O). Disabled when "Remember Last Opened Path" is enabled.
-              </p>
-            </div>
+              <span className={`shrink-0 text-xs ${mutedClass}`}>Manage</span>
+              <ChevronRight className={`h-4 w-4 shrink-0 ${mutedClass}`} />
+            </button>
             <div className="space-y-2">
               <label className={preferenceFieldLabelClass}>Max Recent Files</label>
               <Input
@@ -849,10 +1099,7 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
         return (
           <ExternalControlPreferencesSection
             darkMode={darkMode}
-            handleMidiAssignAction={handleMidiAssignAction}
-            handleMidiLearn={handleMidiLearn}
             handleMidiRefreshPorts={handleMidiRefreshPorts}
-            handleMidiResetMappings={handleMidiResetMappings}
             handleMidiSelectPort={handleMidiSelectPort}
             handleMidiToggle={handleMidiToggle}
             handleOscFeedbackPortChange={handleOscFeedbackPortChange}
@@ -865,16 +1112,12 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
             getNumberPreferenceInputProps={getNumberPreferenceInputProps}
             inputClass={inputClass}
             labelClass={labelClass}
-            lastLearnedMidi={lastLearnedMidi}
-            midiAssigningAction={midiAssigningAction}
-            midiLearnActive={midiLearnActive}
-            midiMappingsExpanded={midiMappingsExpanded}
             midiRefreshing={midiRefreshing}
             midiStatus={midiStatus}
             mutedClass={mutedClass}
+            onOpenMidiMappings={openMidiMappingsPage}
             oscStatus={oscStatus}
             preferenceFieldLabelClass={preferenceFieldLabelClass}
-            setMidiMappingsExpanded={setMidiMappingsExpanded}
           />
         );
       case 'ndi':
@@ -889,6 +1132,7 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
             handleNdiAutoLaunchToggle={handleNdiAutoLaunchToggle}
             handleNdiCancelDownload={handleNdiCancelDownload}
             handleNdiDownload={handleNdiDownload}
+            handleNdiInstallFromZip={handleNdiInstallFromZip}
             handleNdiUpdate={handleNdiUpdate}
             inputClass={inputClass}
             isDownloading={isDownloading}
@@ -896,9 +1140,11 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
             mutedClass={mutedClass}
             ndiAutoLaunch={ndiAutoLaunch}
             ndiStatus={ndiStatus}
+            ndiLastError={ndiLastError}
             ndiTelemetry={ndiTelemetry}
             ndiUpdateInfo={ndiUpdateInfo}
             ndiUpdating={ndiUpdating}
+            onOpenTelemetry={openNdiTelemetryPage}
             preferenceFieldLabelClass={preferenceFieldLabelClass}
           />
         );
@@ -952,11 +1198,8 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
               <Switch
                 checked={preferences.autoplay?.defaultLoop ?? true}
                 onCheckedChange={(checked) => updateAutoplaySetting('defaultLoop', checked)}
-                className={`!h-7 !w-14 !border-0 shadow-sm transition-colors ${darkMode
-                  ? 'data-[state=checked]:bg-green-400 data-[state=unchecked]:bg-gray-600'
-                  : 'data-[state=checked]:bg-black data-[state=unchecked]:bg-gray-300'
-                  }`}
-                thumbClassName="!h-5 !w-6 data-[state=checked]:!translate-x-7 data-[state=unchecked]:!translate-x-1"
+                size="medium"
+                variant="control"
               />
             </div>
 
@@ -968,11 +1211,8 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
               <Switch
                 checked={preferences.autoplay?.defaultStartFromFirst ?? true}
                 onCheckedChange={(checked) => updateAutoplaySetting('defaultStartFromFirst', checked)}
-                className={`!h-7 !w-14 !border-0 shadow-sm transition-colors ${darkMode
-                  ? 'data-[state=checked]:bg-green-400 data-[state=unchecked]:bg-gray-600'
-                  : 'data-[state=checked]:bg-black data-[state=unchecked]:bg-gray-300'
-                  }`}
-                thumbClassName="!h-5 !w-6 data-[state=checked]:!translate-x-7 data-[state=unchecked]:!translate-x-1"
+                size="medium"
+                variant="control"
               />
             </div>
 
@@ -984,11 +1224,8 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
               <Switch
                 checked={preferences.autoplay?.defaultSkipBlankLines ?? true}
                 onCheckedChange={(checked) => updateAutoplaySetting('defaultSkipBlankLines', checked)}
-                className={`!h-7 !w-14 !border-0 shadow-sm transition-colors ${darkMode
-                  ? 'data-[state=checked]:bg-green-400 data-[state=unchecked]:bg-gray-600'
-                  : 'data-[state=checked]:bg-black data-[state=unchecked]:bg-gray-300'
-                  }`}
-                thumbClassName="!h-5 !w-6 data-[state=checked]:!translate-x-7 data-[state=unchecked]:!translate-x-1"
+                size="medium"
+                variant="control"
               />
             </div>
           </div>
@@ -1001,6 +1238,7 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
             formatSecurityDate={formatSecurityDate}
             getNumberPreferenceInputProps={getNumberPreferenceInputProps}
             handleResetCategory={handleResetCategory}
+            handleRestoreAllDefaults={handleRestoreAllDefaults}
             handleRotateSecurityTokenKey={handleRotateSecurityTokenKey}
             inputClass={inputClass}
             labelClass={labelClass}
@@ -1008,6 +1246,7 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
             mutedClass={mutedClass}
             preferenceFieldLabelClass={preferenceFieldLabelClass}
             preferences={preferences}
+            restoringAllDefaults={restoringAllDefaults}
             securityLoading={securityLoading}
             securityRotating={securityRotating}
             securityStatus={securityStatus}
@@ -1030,20 +1269,35 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
       categories={CATEGORIES}
       companionRunning={companionRunning}
       companionStarting={companionStarting}
+      contentDirection={contentDirection}
+      contentKey={isDisplayTransitionsPage
+        ? 'appearance-display-transitions'
+        : (isPreviewPage
+          ? 'appearance-preview'
+          : (isSectionTagPhrasesPage
+            ? 'parsing-section-tag-phrases'
+            : (isCapitalizedWordsPage
+              ? 'formatting-capitalized-words'
+              : (isIndexedLyricsFoldersPage
+                ? 'file-handling-indexed-folders'
+                : (isMidiMappingsPage
+                  ? 'external-control-midi-mappings'
+                  : (isNdiTelemetryPage ? 'ndi-runtime-telemetry' : activeCategory))))))}
       darkMode={darkMode}
       handleNdiCheckForUpdate={handleNdiCheckForUpdate}
       handleNdiLaunch={handleNdiLaunch}
       handleNdiStop={handleNdiStop}
       handleNdiUninstall={handleNdiUninstall}
       labelClass={labelClass}
-      lastSaved={lastSaved}
+      lastSaved={indexedFolderPersistence.lastSaved || lastSaved}
       mutedClass={mutedClass}
       ndiCheckingUpdate={ndiCheckingUpdate}
       ndiStatus={ndiStatus}
       panelBg={panelBg}
-      saveError={saveError}
-      saving={saving}
-      setActiveCategory={setActiveCategory}
+      saveError={saveError || indexedFolderPersistence.saveError}
+      saving={saving || indexedFolderPersistence.saving}
+      setActiveCategory={handleCategoryChange}
+      hideContentHeader={isDisplayTransitionsPage || isPreviewPage || isSectionTagPhrasesPage || isCapitalizedWordsPage || isIndexedLyricsFoldersPage || isMidiMappingsPage || isNdiTelemetryPage}
     >
       {renderCategoryContent()}
     </UserPreferencesLayout>

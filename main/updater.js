@@ -9,6 +9,12 @@ import {
   updateProgressWindowState
 } from './progressWindow.js';
 import { createUpdateSessionPolicy } from './updateSessionPolicy.js';
+import {
+  compareVersions,
+  MAX_OLDER_RELEASES,
+  normalizeVersionText,
+  selectOlderReleases,
+} from '../shared/updateReleaseHistory.js';
 
 const { autoUpdater } = updaterPkg;
 
@@ -17,6 +23,7 @@ const GITHUB_OWNER = 'PeterAlaks';
 const GITHUB_REPO = 'lyric-display-app';
 const GITHUB_API_BASE = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}`;
 const GITHUB_LATEST_RELEASE_URL = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`;
+const RELEASE_HISTORY_FETCH_LIMIT = 10;
 const isWindowsStoreUpdater = () => process.windowsStore === true;
 
 const INITIAL_STATE = {
@@ -34,24 +41,7 @@ let downloadPromise = null;
 let state = { ...INITIAL_STATE };
 let currentCheckIsInteractive = false;
 const sessionPolicy = createUpdateSessionPolicy();
-
-const normalizeVersionText = (value = '') => String(value).trim().replace(/^v/i, '');
 const isManualMacUpdater = () => process.platform === 'darwin';
-
-const compareVersions = (a, b) => {
-  const pa = normalizeVersionText(a).split(/[.-]/).map((part) => Number.parseInt(part, 10) || 0);
-  const pb = normalizeVersionText(b).split(/[.-]/).map((part) => Number.parseInt(part, 10) || 0);
-  const max = Math.max(pa.length, pb.length, 3);
-
-  for (let i = 0; i < max; i += 1) {
-    const na = pa[i] || 0;
-    const nb = pb[i] || 0;
-    if (na > nb) return 1;
-    if (na < nb) return -1;
-  }
-
-  return 0;
-};
 
 const toUpdateInfo = (info = {}) => ({
   version: info?.version ? normalizeVersionText(info.version) : null,
@@ -64,7 +54,15 @@ const toUpdateInfo = (info = {}) => ({
   assetName: info?.assetName ?? null,
   assetSize: Number(info?.assetSize) || 0,
   platform: info?.platform ?? process.platform,
-  arch: info?.arch ?? process.arch
+  arch: info?.arch ?? process.arch,
+  olderReleases: Array.isArray(info?.olderReleases)
+    ? info.olderReleases.slice(0, MAX_OLDER_RELEASES).map((release) => ({
+      version: release?.version ? normalizeVersionText(release.version) : '',
+      releaseName: release?.releaseName ?? '',
+      releaseNotes: release?.releaseNotes ?? '',
+      releaseDate: release?.releaseDate ?? '',
+    }))
+    : null,
 });
 
 const toErrorPayload = (err, phase = state.status, source = 'event') => {
@@ -83,7 +81,12 @@ const toErrorPayload = (err, phase = state.status, source = 'event') => {
 const getStateSnapshot = () => ({
   ...state,
   sessionPolicy: sessionPolicy.getSnapshot(),
-  updateInfo: state.updateInfo ? { ...state.updateInfo } : null,
+  updateInfo: state.updateInfo ? {
+    ...state.updateInfo,
+    olderReleases: Array.isArray(state.updateInfo.olderReleases)
+      ? state.updateInfo.olderReleases.map((release) => ({ ...release }))
+      : state.updateInfo.olderReleases,
+  } : null,
   progress: state.progress ? { ...state.progress } : null,
   error: state.error ? { ...state.error } : null
 });
@@ -162,6 +165,25 @@ const githubApiRequest = (urlPath) => new Promise((resolve, reject) => {
       reject(new Error('GitHub releases request timed out'));
     });
 });
+
+const hydrateOlderReleaseHistory = async (updateInfo) => {
+  if (!updateInfo?.version) return;
+
+  try {
+    const releases = await githubApiRequest(`/releases?per_page=${RELEASE_HISTORY_FETCH_LIMIT}`);
+    const olderReleases = selectOlderReleases(releases, updateInfo.version);
+
+    if (state.updateInfo?.version !== updateInfo.version) return;
+    setState({
+      updateInfo: toUpdateInfo({
+        ...state.updateInfo,
+        olderReleases,
+      }),
+    });
+  } catch (error) {
+    console.warn('Unable to load older release notes:', error?.message || error);
+  }
+};
 
 const findMacDmgAsset = (release, version) => {
   const assets = Array.isArray(release?.assets) ? release.assets : [];
@@ -255,6 +277,7 @@ const checkForManualMacUpdate = async (showNoUpdateDialogForResult = false) => {
     if (!notificationDeferred) {
       notifyAllWindows('updater:update-available', updateInfo);
     }
+    void hydrateOlderReleaseHistory(updateInfo);
     return getStateSnapshot();
   } catch (err) {
     if (sessionPolicy.deferCheck({ interactive })) {
@@ -325,6 +348,7 @@ const ensureUpdaterConfigured = () => {
     if (!notificationDeferred) {
       notifyAllWindows('updater:update-available', updateInfo);
     }
+    void hydrateOlderReleaseHistory(updateInfo);
     currentCheckIsInteractive = false;
   });
 
@@ -411,6 +435,20 @@ export function getUpdaterState() {
   return getStateSnapshot();
 }
 
+const revealProgressWindow = ({ parent } = {}) => {
+  const progress = createProgressWindow({ parent, initialState: getStateSnapshot() });
+  if (!progress || progress.isDestroyed()) return progress;
+
+  try {
+    if (progress.isMinimized()) progress.restore();
+    progress.show();
+    progress.focus();
+  } catch {
+  }
+
+  return progress;
+};
+
 export function checkForUpdates(showNoUpdateDialogForResult = false) {
   if (isWindowsStoreUpdater()) {
     const snapshot = setState({
@@ -435,7 +473,12 @@ export function checkForUpdates(showNoUpdateDialogForResult = false) {
     return Promise.resolve(getStateSnapshot());
   }
 
-  if (state.status === 'downloading' || state.status === 'installing') {
+  if (state.status === 'downloading') {
+    revealProgressWindow();
+    return Promise.resolve(getStateSnapshot());
+  }
+
+  if (state.status === 'installing') {
     return Promise.resolve(getStateSnapshot());
   }
 
@@ -509,14 +552,7 @@ export async function downloadAvailableUpdate({ parent } = {}) {
   }
 
   if (downloadPromise) {
-    const progress = createProgressWindow({ parent, initialState: getStateSnapshot() });
-    if (progress && !progress.isDestroyed()) {
-      try {
-        progress.show();
-        progress.focus();
-      } catch {
-      }
-    }
+    revealProgressWindow({ parent });
     return { success: true, inProgress: true, state: getStateSnapshot() };
   }
 

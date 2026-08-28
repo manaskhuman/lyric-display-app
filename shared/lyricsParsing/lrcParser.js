@@ -6,10 +6,9 @@ import {
   sanitizeMaxLinesPerGroup,
   setRuntimeGroupingConfig
 } from './runtimeConfig.js';
-import { isTranslationLine } from './translation.js';
 import { isStructureTag } from './structureTags.js';
-import { isNormalGroupCandidate } from './normalGroupCandidates.js';
-import { createNormalGroup } from './helpers.js';
+import { isNormalGroupCandidate, isTranslationLine } from './lineClassification.js';
+import { createNormalGroup } from './grouping.js';
 import { deriveSectionsFromProcessedLines } from './sections.js';
 
 /**
@@ -77,7 +76,10 @@ function applyIntelligentSplittingWithTimestamps(entries = [], options = {}) {
 function parseTimeMatch(match) {
   const mm = parseInt(match?.[1], 10) || 0;
   const ss = parseInt(match?.[2], 10) || 0;
-  const cs = match?.[3] ? parseInt(match[3].slice(0, 2).padEnd(2, '0'), 10) : 0;
+  const milliseconds = match?.[3]
+    ? parseInt(match[3].padEnd(3, '0'), 10)
+    : 0;
+  const cs = Math.round(milliseconds / 10);
   return mm * 60 * 100 + ss * 100 + cs;
 }
 
@@ -132,7 +134,10 @@ export function parseLrcContent(rawText = '', options = {}) {
         times.push(parseTimeMatch(match));
       }
 
-      const stripped = stripEnhancedTimestamps(line.replace(TIME_TAG_REGEX, '').trim());
+      const lineWithoutTimestamps = line.replace(TIME_TAG_REGEX, '').trim();
+      if (META_TAG_REGEX.test(lineWithoutTimestamps)) continue;
+
+      const stripped = stripEnhancedTimestamps(lineWithoutTimestamps);
       let text = stripped.text;
       text = preprocessText(text);
       const enhancedTimestamps = stripped.enhancedTimestamps;

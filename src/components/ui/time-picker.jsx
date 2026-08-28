@@ -4,6 +4,7 @@ import { Check, ChevronDown, Clock3, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
+import { SlidingTabIndicator } from '@/components/ui/sliding-tab-indicator'
 
 const TIME_VALUE_PATTERN = /^(\d{2}):(\d{2})$/
 
@@ -195,20 +196,27 @@ const TimePicker = React.forwardRef(({
       <PopoverContent
         align="start"
         sideOffset={6}
-        className={cn('z-[1600] w-[290px] rounded-xl p-0 shadow-xl', surfaceClass, contentClassName)}
+        className={cn('z-1600 w-72.5 rounded-xl p-0 shadow-xl', surfaceClass, contentClassName)}
       >
         <div className={cn('flex items-center justify-between border-b px-4 py-3', darkMode ? 'border-slate-800' : 'border-slate-200')}>
           <p className="text-xs font-semibold">Select time</p>
-          <div className={cn('flex rounded-lg p-1', darkMode ? 'bg-slate-800' : 'bg-slate-100')}>
+          <div
+            className={cn('tab-switcher-squircle relative isolate flex rounded-2xl p-1', darkMode ? 'bg-slate-800' : 'bg-slate-100')}
+            role="tablist"
+            aria-label="Hour format"
+          >
+            <SlidingTabIndicator className={darkMode ? 'bg-slate-950 shadow-sm' : 'bg-white shadow-sm'} />
             {['12', '24'].map((format) => (
               <button
                 key={format}
                 type="button"
+                role="tab"
+                aria-selected={hourFormat === format}
                 onClick={() => changeHourFormat(format)}
                 className={cn(
-                  'rounded-md px-2.5 py-1.5 text-[10px] font-semibold transition-colors',
+                  'tab-switcher-item-squircle relative z-10 rounded-xl px-2.5 py-1.5 text-[10px] font-semibold transition-colors',
                   hourFormat === format
-                    ? (darkMode ? 'bg-slate-950 text-white shadow-sm' : 'bg-white text-slate-900 shadow-sm')
+                    ? (darkMode ? 'text-white' : 'text-slate-900')
                     : mutedClass
                 )}
               >

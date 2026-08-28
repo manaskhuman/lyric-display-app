@@ -49,8 +49,8 @@ export default function PresentationImportModal({ isOpen, onClose, darkMode }) {
     ? 'bg-gray-700 border-gray-600 text-gray-200'
     : 'bg-white border-gray-300';
   const selectContentClass = darkMode
-    ? 'z-[1450] bg-gray-700 border-gray-600 text-gray-200'
-    : 'z-[1450] bg-white border-gray-300';
+    ? 'z-1450 bg-gray-700 border-gray-600 text-gray-200'
+    : 'z-1450 bg-white border-gray-300';
 
   const getStoredFolderPath = useCallback(() => {
     try {
@@ -110,10 +110,11 @@ export default function PresentationImportModal({ isOpen, onClose, darkMode }) {
   useEffect(() => {
     if (isOpen && !destinationPath && window?.electronAPI?.presentation?.getUserHome) {
       window.electronAPI.presentation.getUserHome().then((result) => {
-        if (result?.success && result.homedir) {
+        if (result?.success && (result.documentsPath || result.homedir)) {
           const platform = window.electronAPI.getPlatform();
           const separator = platform === 'win32' ? '\\' : '/';
-          setDestinationPath(`${result.homedir}${separator}Documents${separator}Imported Lyrics from Presentations`);
+          const documentsPath = result.documentsPath || `${result.homedir}${separator}Documents`;
+          setDestinationPath(`${documentsPath}${separator}LyricDisplay${separator}Imported Lyrics from Presentations`);
         }
       }).catch((err) => {
         console.error('Failed to get user home directory:', err);
@@ -336,10 +337,11 @@ export default function PresentationImportModal({ isOpen, onClose, darkMode }) {
   const topMenuHeight = typeof document !== 'undefined'
     ? (getComputedStyle(document.body).getPropertyValue('--top-menu-height')?.trim() || '0px')
     : '0px';
+  const availableImportCount = importResults.successful + importResults.skipped;
 
   return (
     <div
-      className="fixed inset-x-0 bottom-0 z-[1400] flex items-center justify-center p-4"
+      className="fixed inset-x-0 bottom-0 z-1400 flex items-center justify-center p-4"
       style={{ top: topMenuHeight }}
     >
       <div
@@ -353,7 +355,7 @@ export default function PresentationImportModal({ isOpen, onClose, darkMode }) {
       <div
         className={cn(
           'relative w-full max-w-3xl overflow-hidden rounded-2xl border shadow-2xl flex flex-col',
-          'h-[650px]',
+          'h-162.5',
           'transform transition-all duration-200',
           isMounted ? 'translate-y-0 opacity-100 scale-100' : 'translate-y-8 opacity-0 scale-95',
           darkMode ? 'bg-gray-900 text-gray-50 border-slate-800/80' : 'bg-white text-gray-900 border-slate-200/80'
@@ -436,14 +438,14 @@ export default function PresentationImportModal({ isOpen, onClose, darkMode }) {
                 </div>
 
                 {isValid === true && (
-                  <p className="text-sm text-green-600 dark:text-green-400 mt-2 flex items-center gap-1">
+                  <p className="text-xs text-green-600 dark:text-green-400 mt-2 flex items-center gap-1">
                     <CheckCircle2 className="w-4 h-4" />
                     Found {discoveredPresentations.length} presentation file{discoveredPresentations.length !== 1 ? 's' : ''}
                   </p>
                 )}
 
                 {isValid === false && validationError && (
-                  <p className="text-sm text-red-600 dark:text-red-400 mt-2 flex items-center gap-1">
+                  <p className="text-xs text-red-600 dark:text-red-400 mt-2 flex items-center gap-1">
                     <AlertCircle className="w-4 h-4" />
                     {validationError}
                   </p>
@@ -455,7 +457,7 @@ export default function PresentationImportModal({ isOpen, onClose, darkMode }) {
                   'p-4 rounded-lg',
                   darkMode ? 'bg-yellow-500/10 border border-yellow-500/20' : 'bg-yellow-50 border border-yellow-100'
                 )}>
-                  <p className={cn('text-sm', darkMode ? 'text-yellow-300' : 'text-yellow-700')}>
+                  <p className={cn('text-xs', darkMode ? 'text-yellow-300' : 'text-yellow-700')}>
                     Folder is valid, but no `.pptx` files were found.
                   </p>
                 </div>
@@ -467,7 +469,7 @@ export default function PresentationImportModal({ isOpen, onClose, darkMode }) {
             <div className="space-y-4">
               <div>
                 <h3 className="text-lg font-semibold mb-2">Select Presentations to Import</h3>
-                <p className={cn('text-sm', darkMode ? 'text-gray-400' : 'text-gray-600')}>
+                <p className={cn('text-xs', darkMode ? 'text-gray-400' : 'text-gray-600')}>
                   Choose one or more presentation files to convert into lyric text files.
                 </p>
               </div>
@@ -510,7 +512,7 @@ export default function PresentationImportModal({ isOpen, onClose, darkMode }) {
 
               <div className={cn('border rounded-lg max-h-96 overflow-y-auto', darkMode ? 'border-gray-700' : 'border-gray-200')}>
                 {filteredPresentations.length === 0 ? (
-                  <div className="p-8 text-center text-gray-500">
+                  <div className="p-8 text-center text-sm text-gray-500">
                     {searchQuery ? 'No files match your search' : 'No presentation files found'}
                   </div>
                 ) : (
@@ -528,8 +530,8 @@ export default function PresentationImportModal({ isOpen, onClose, darkMode }) {
                           onCheckedChange={() => togglePresentation(item.id)}
                         />
                         <div className="flex-1 min-w-0">
-                          <p className="font-medium truncate">{item.title || 'Untitled'}</p>
-                          <p className={cn('text-sm truncate', darkMode ? 'text-gray-400' : 'text-gray-600')}>
+                          <p className="text-sm font-medium truncate">{item.title || 'Untitled'}</p>
+                          <p className={cn('text-xs truncate', darkMode ? 'text-gray-400' : 'text-gray-600')}>
                             {item.fileName}
                           </p>
                         </div>
@@ -635,13 +637,27 @@ export default function PresentationImportModal({ isOpen, onClose, darkMode }) {
               <div className="text-center">
                 <div className={cn(
                   'w-16 h-16 mx-auto mb-4 rounded-full flex items-center justify-center',
-                  importResults.failed === 0 ? 'bg-green-500/10 text-green-500' : 'bg-yellow-500/10 text-yellow-500'
+                  importResults.failed === 0
+                    ? 'bg-green-500/10 text-green-500'
+                    : availableImportCount > 0
+                      ? 'bg-yellow-500/10 text-yellow-500'
+                      : 'bg-red-500/10 text-red-500'
                 )}>
                   {importResults.failed === 0 ? <CheckCircle2 className="w-8 h-8" /> : <AlertCircle className="w-8 h-8" />}
                 </div>
-                <h3 className="text-lg font-semibold mb-2">Import Complete!</h3>
+                <h3 className="text-lg font-semibold mb-2">
+                  {importResults.failed === 0
+                    ? 'Import Complete!'
+                    : availableImportCount > 0
+                      ? 'Import Finished with Issues'
+                      : 'Import Failed'}
+                </h3>
                 <p className={cn('text-sm', darkMode ? 'text-gray-400' : 'text-gray-600')}>
-                  Your presentation lyrics have been imported and are ready to use.
+                  {importResults.failed === 0
+                    ? 'Your converted presentation lyrics are ready to use in LyricDisplay.'
+                    : availableImportCount > 0
+                      ? 'Some presentation lyrics are ready, but one or more imports failed. Review the errors below.'
+                      : 'No presentation lyrics were imported. Review the errors below and try again.'}
                 </p>
               </div>
 
@@ -679,6 +695,31 @@ export default function PresentationImportModal({ isOpen, onClose, darkMode }) {
                   </div>
                 </div>
               )}
+
+              <div className={cn(
+                'p-4 rounded-lg',
+                darkMode ? 'bg-blue-500/10 border border-blue-500/20' : 'bg-blue-50 border border-blue-100'
+              )}>
+                <h4 className={cn('text-sm font-medium mb-2', darkMode ? 'text-blue-300' : 'text-blue-700')}>
+                  {availableImportCount > 0 ? 'Next Steps' : 'Try Again'}
+                </h4>
+                {availableImportCount > 0 ? (
+                  <ul className={cn('text-xs space-y-1', darkMode ? 'text-blue-300/80' : 'text-blue-600')}>
+                    <li>• Open File → Load Lyrics and search by presentation title; the destination is indexed automatically</li>
+                    <li>• If the folder is not listed there, use Add folders to index it manually</li>
+                    <li>• Review the extracted text before presenting; complex slide layouts may need cleanup</li>
+                    <li>• Use "Open Folder" below to view or manage the generated .txt files</li>
+                    {importResults.failed > 0 && (
+                      <li>• Retry failed presentations after resolving the errors shown above</li>
+                    )}
+                  </ul>
+                ) : (
+                  <ul className={cn('text-xs space-y-1', darkMode ? 'text-blue-300/80' : 'text-blue-600')}>
+                    <li>• Review each failed import above for the specific conversion error</li>
+                    <li>• Confirm the source is a readable .pptx file with slide text, then run the import again</li>
+                  </ul>
+                )}
+              </div>
             </div>
           )}
         </div>

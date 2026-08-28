@@ -128,8 +128,8 @@ const FontSizeSettingsSection = ({
     : 'bg-white border-gray-300';
 
   return (
-    <div>
-      <div className="flex items-center justify-between gap-4">
+    <div data-output-setting-group data-expanded={fontSizeAdvancedExpanded}>
+      <div className="flex items-center justify-between gap-4" data-output-setting-row>
         <Tooltip content="Adjust text size in pixels (24-300)" side="right">
           <LabelWithIcon icon={TextCursorInput} text="Font Size" darkMode={darkMode} />
         </Tooltip>
@@ -189,11 +189,11 @@ const FontSizeSettingsSection = ({
               className={
                 settings.maxLinesEnabled
                   ? darkMode
-                    ? '!bg-white !text-gray-900 hover:!bg-white !border-gray-300'
-                    : '!bg-black !text-white hover:!bg-black !border-gray-300'
+                    ? 'bg-white! text-gray-900! hover:bg-white! border-gray-300!'
+                    : 'bg-black! text-white! hover:bg-black! border-gray-300!'
                   : darkMode
-                    ? '!bg-transparent !border-gray-600 !text-gray-200 hover:!bg-gray-700'
-                    : '!bg-transparent !border-gray-300 !text-gray-700 hover:!bg-gray-100'
+                    ? 'bg-transparent! border-gray-600! text-gray-200! hover:bg-gray-700!'
+                    : 'bg-transparent! border-gray-300! text-gray-700! hover:bg-gray-100!'
               }
             >
               <ListStart className="h-3.5 w-3.5" />
@@ -202,9 +202,9 @@ const FontSizeSettingsSection = ({
         </div>
       </div>
 
-      <AdvancedCollapse expanded={fontSizeAdvancedExpanded}>
-        <div className="flex items-center justify-between gap-4 mb-4">
-          <div className="flex items-center gap-2">
+      <AdvancedCollapse expanded={fontSizeAdvancedExpanded} openMarginTop={0}>
+        <div className="flex items-center justify-between gap-3" data-output-setting-subrow>
+          <div className="flex min-w-0 items-center gap-2">
             <label className={`text-[13px] leading-5 ${darkMode ? 'text-gray-200' : 'text-gray-700'} ${!maxLinesEnabled ? 'opacity-50' : ''}`}>
               Max Lines
             </label>
@@ -221,7 +221,7 @@ const FontSizeSettingsSection = ({
               className={`w-16 ${innerClassBase} ${!maxLinesEnabled ? 'opacity-50 cursor-not-allowed' : ''}`}
             />
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-2">
             <label className={`text-[13px] leading-5 ${darkMode ? 'text-gray-200' : 'text-gray-700'} ${!maxLinesEnabled ? 'opacity-50' : ''}`}>
               Min Font Size
             </label>
@@ -244,7 +244,7 @@ const FontSizeSettingsSection = ({
           </div>
         </div>
 
-        <div className="flex items-center justify-between w-full">
+        <div className="flex items-center justify-between" data-output-setting-subrow>
           <label className={`text-[13px] leading-5 whitespace-nowrap ${darkMode ? 'text-gray-200' : 'text-gray-700'}`}>
             Translation Size
           </label>
@@ -254,7 +254,7 @@ const FontSizeSettingsSection = ({
               value={translationFontSizeMode}
               onValueChange={handleTranslationFontSizeModeChange}
             >
-              <SelectTrigger className={`w-[120px] ${innerClassBase}`}>
+              <SelectTrigger className={`w-30 ${innerClassBase}`}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className={darkMode ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300'}>

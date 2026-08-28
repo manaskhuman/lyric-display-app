@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { createTimerSlice } from '../src/context/lyricsStore/timerSlice.js';
+import { getTextFitShape } from '../src/hooks/useAutoFitText.js';
 import {
   MAX_TIMER_SETS,
   getTimerDisplay,
@@ -10,6 +12,7 @@ import {
   normalizeTimerDisplaySettings,
   normalizeTimerState,
   resetActiveTimerRuntime,
+  shouldShowGlobalClockDuringPause,
   shouldShowGlobalTimeForManualScheduleItem,
 } from '../src/utils/timerUtils.js';
 
@@ -30,6 +33,37 @@ function createTimerStoreHarness() {
     getUpdateCount: () => updateCount,
   };
 }
+
+test('timer-control preview auto-fits hour-long timer values to its own bounds', async () => {
+  const timerControlSource = await readFile(
+    new URL('../src/components/TimerControlModule.jsx', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(timerControlSource, /useAutoFitText/);
+  assert.match(timerControlSource, /getTextFitShape\(previewValue\)/);
+  assert.match(timerControlSource, /ref=\{containerRef\}/);
+  assert.match(timerControlSource, /ref=\{textRef\}/);
+  assert.doesNotMatch(timerControlSource, /clamp\(4rem, 12vw, 10rem\)/);
+  assert.notEqual(getTextFitShape('59:59'), getTextFitShape('1:00:00'));
+  assert.equal(getTextFitShape('1:00:00'), getTextFitShape('9:59:59'));
+});
+
+test('timer autofit invalidates cached measurements after projection routing and visibility flicker', async () => {
+  const [autoFitSource, outputRegistrySource, projectOutputSource] = await Promise.all([
+    readFile(new URL('../src/hooks/useAutoFitText.js', import.meta.url), 'utf8'),
+    readFile(new URL('../shared/outputRegistry.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/components/ProjectOutputModal.jsx', import.meta.url), 'utf8'),
+  ]);
+
+  assert.match(outputRegistrySource, /PROJECTION_SYNC_CHANNEL/);
+  assert.match(projectOutputSource, /new BroadcastChannel\(PROJECTION_SYNC_CHANNEL\)/);
+  assert.match(autoFitSource, /new BroadcastChannel\(PROJECTION_SYNC_CHANNEL\)/);
+  assert.match(autoFitSource, /addEventListener\('resize', scheduleRecoveryFit\)/);
+  assert.match(autoFitSource, /addEventListener\('pageshow', scheduleRecoveryFit\)/);
+  assert.match(autoFitSource, /addEventListener\('visibilitychange', recoverWhenVisible\)/);
+  assert.match(autoFitSource, /scheduleFit\(\{ ignoreCache: true \}\)/);
+});
 
 test('timer progress advances for normalized stage panel countdown state', () => {
   const startTime = 1_000_000;
@@ -299,6 +333,20 @@ test('manual schedule items show global time by default and respect the schedule
     mode: 'countdown',
     sets: [{ id: 'timed', label: 'Welcome', durationMs: 60_000, timed: true }],
   }), false);
+});
+
+test('paused timers show the global clock only when the explicit option is enabled', () => {
+  const pausedTimer = normalizeTimerState({
+    status: 'paused',
+    running: true,
+    paused: true,
+    showGlobalClockDuringPause: true,
+  });
+
+  assert.equal(shouldShowGlobalClockDuringPause(pausedTimer), true);
+  assert.equal(shouldShowGlobalClockDuringPause({ ...pausedTimer, showGlobalClockDuringPause: false }), false);
+  assert.equal(shouldShowGlobalClockDuringPause({ ...pausedTimer, paused: false }), false);
+  assert.equal(shouldShowGlobalClockDuringPause({ ...pausedTimer, running: false }), false);
 });
 
 test('timer state normalization keeps runtime schedule fields internally consistent', () => {

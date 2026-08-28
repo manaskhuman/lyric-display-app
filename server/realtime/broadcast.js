@@ -118,8 +118,12 @@ export const emitOutputVisibilityEvent = (io, eventName, payload) => (
   ))
 );
 
-export const emitIndividualOutputEvent = (io, eventName, payload = {}) => (
+export const emitIndividualOutputEvent = (io, eventName, payload = {}, { excludeSocket = null } = {}) => (
   emitToClients(io, eventName, payload, (client) => {
+    if (excludeSocket && client?.socket === excludeSocket) return false;
+    if (payload.output === 'preview') {
+      return isOutputDiscoveryClient(client) && client?.purpose === 'preview';
+    }
     if (isControllerClient(client)) return true;
     if (payload.output === 'stage') return isStageDisplayClient(client);
     return isOutputDisplayClient(client) && client.type === payload.output;
@@ -134,9 +138,23 @@ export const emitOutputRegistry = (io, payload) => (
   ))
 );
 
-export const emitOutputMetricsUpdate = (io, payload = {}) => (
-  emitToClients(io, 'outputMetrics', payload, (client) => (
+export const enrichOutputMetricsPayload = (payload = {}) => {
+  const allInstances = Array.isArray(payload.allInstances) ? payload.allInstances : [];
+  const remoteInstanceCount = allInstances.reduce((count, instance) => (
+    count + (instance?.connectionScope === 'remote' ? 1 : 0)
+  ), 0);
+  return {
+    ...payload,
+    remoteInstanceCount,
+    hasRemoteInstances: remoteInstanceCount > 0,
+  };
+};
+
+export const emitOutputMetricsUpdate = (io, payload = {}) => {
+  const enrichedPayload = enrichOutputMetricsPayload(payload);
+
+  return emitToClients(io, 'outputMetrics', enrichedPayload, (client) => (
     isControllerClient(client) ||
     (isOutputDisplayClient(client) && client.type === payload.output)
-  ))
-);
+  ));
+};

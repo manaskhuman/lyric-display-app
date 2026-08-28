@@ -56,7 +56,7 @@ export default function LyricRow({
 
   if (typeof currentLine === 'string' && isStructureTagLine(currentLine)) {
     if (!virtualized) {
-      return <div data-line-index={index} className={`${compact ? 'px-2 h-1' : 'px-4 h-2'} pointer-events-none`} />;
+      return <div data-line-index={index} className={`${compact ? 'px-2 h-1' : 'px-3 h-2'} pointer-events-none`} />;
     }
 
     return (
@@ -72,7 +72,7 @@ export default function LyricRow({
     <div
       data-line-index={virtualized ? index : undefined}
       style={virtualized ? getVirtualizedStyle(style) : undefined}
-      className={virtualized ? undefined : compact ? 'px-2' : 'px-4'}
+      className={virtualized ? undefined : compact ? 'px-2' : 'px-3'}
     >
       {sectionLabel && (
         <div className={`${compact ? 'text-[10px]' : 'text-xs'} font-semibold ${compact ? 'mb-1' : virtualized ? 'mb-3' : 'mb-2'} flex items-center gap-2 ${getSectionClassName(isActiveSection, darkMode, virtualized, compact)}`}>
@@ -95,7 +95,7 @@ export default function LyricRow({
         <div className={hasTimestamp ? 'flex items-stretch gap-3 pr-9' : 'pr-9'}>
           {hasTimestamp && (
             <div
-              className={`shrink-0 self-stretch rounded-md border px-2 py-1 font-mono ${compact ? 'w-[4.5rem] text-[10px]' : 'w-[5.25rem] text-[11px]'} flex items-center justify-center ${darkMode
+              className={`shrink-0 self-stretch rounded-md border px-2 py-1 font-mono ${compact ? 'w-18 text-[10px]' : 'w-21 text-[11px]'} flex items-center justify-center ${darkMode
                 ? 'border-gray-600 bg-gray-900/35 text-gray-300'
                 : 'border-gray-200 bg-white/80 text-gray-500'
                 }`}
@@ -123,7 +123,7 @@ export default function LyricRow({
               onClick={(e) => handleSplitGroup(e, index)}
               onMouseEnter={() => setHoveredButtonIndex(index)}
               onMouseLeave={() => setHoveredButtonIndex(null)}
-              className={`absolute top-1.5 right-1.5 rounded-md shadow-sm flex items-center transition-all duration-200 ease-in-out ${hoveredButtonIndex === index ? 'p-1.5 gap-1.5' : 'p-1.5'
+              className={`absolute top-1.5 right-1.5 h-7 min-w-7 rounded-full px-[7.5px] shadow-sm flex items-center justify-center transition-all duration-200 ease-in-out ${hoveredButtonIndex === index ? 'gap-1.5' : 'gap-0'
                 } ${index === selectedLine
                   ? 'bg-blue-500 hover:bg-blue-600 text-white border border-blue-400'
                   : darkMode
@@ -131,10 +131,10 @@ export default function LyricRow({
                     : 'bg-white hover:bg-gray-50 text-gray-700 border border-gray-300'
                 }`}
             >
-              <Ungroup className="w-3.5 h-3.5 shrink-0" />
+              <Ungroup className="h-3.25 w-3.25 shrink-0" />
               <span
-                className={`text-xs font-medium whitespace-nowrap overflow-hidden transition-all duration-200 ease-in-out ${hoveredButtonIndex === index
-                  ? 'max-w-[60px] opacity-100 ml-0'
+                className={`text-[11px] font-medium whitespace-nowrap overflow-hidden transition-all duration-200 ease-in-out ${hoveredButtonIndex === index
+                  ? 'max-w-15 opacity-100 ml-0'
                   : 'max-w-0 opacity-0'
                   }`}
               >

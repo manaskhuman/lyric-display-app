@@ -1,5 +1,5 @@
 import React from 'react';
-import { Globe, ListMusic, MonitorUp, Moon, RefreshCw, Settings, Sun, Timer } from 'lucide-react';
+import { Globe, ListMusic, MonitorUp, Moon, Settings, Sun, Timer, View } from 'lucide-react';
 import { Tooltip } from '@/components/ui/tooltip';
 import AuthStatusIndicator from '../AuthStatusIndicator';
 
@@ -11,12 +11,8 @@ export default function ControlPanelHeaderActions({
   handleOpenOnlineLyricsSearch,
   handleOpenSetlist,
   handleOpenTimerControl,
-  handleSyncOutputs,
   iconButtonClass,
-  isAuthenticated,
-  isConnected,
   maxSetlistFiles,
-  ready,
   refreshAuthToken,
   setDarkMode,
   setThemeMode,
@@ -48,16 +44,6 @@ export default function ControlPanelHeaderActions({
           </button>
         </Tooltip>
 
-        <Tooltip content="Force refresh all output displays with current state" side="bottom">
-          <button
-            disabled={!isConnected || !isAuthenticated || !ready}
-            className={iconButtonClass(!isConnected || !isAuthenticated || !ready)}
-            onClick={handleSyncOutputs}
-          >
-            <RefreshCw className="h-4 w-4" />
-          </button>
-        </Tooltip>
-
         <Tooltip content={
           themeMode === 'system'
             ? "Theme is managed by system preferences. Change in Preferences -> Appearance."
@@ -81,23 +67,23 @@ export default function ControlPanelHeaderActions({
           </button>
         </Tooltip>
 
-        <Tooltip content="Application preferences and settings" side="bottom">
+        <Tooltip content="Preview all output displays" side="bottom">
           <button
+            aria-label="Preview Outputs"
             className={iconButtonClass(false)}
             onClick={() => {
               showModal({
-                title: 'Preferences',
-                headerDescription: 'Configure application settings and preferences',
-                component: 'UserPreferences',
+                title: 'Preview Outputs',
+                headerDescription: 'Preview output, stage, time, and custom displays regardless of live visibility.',
+                component: 'PreviewOutputs',
                 variant: 'info',
-                size: 'lg',
-                actions: [],
-                allowBackdropClose: false,
-                customLayout: true
+                size: 'large',
+                dismissLabel: 'Close',
+                className: 'max-w-4xl'
               });
             }}
           >
-            <Settings className="h-4 w-4" />
+            <View className="h-4 w-4" />
           </button>
         </Tooltip>
 
@@ -129,6 +115,26 @@ export default function ControlPanelHeaderActions({
             onClick={handleOpenTimerControl}
           >
             <Timer className="h-4 w-4" />
+          </button>
+        </Tooltip>
+
+        <Tooltip content="Application preferences and settings" side="bottom">
+          <button
+            className={iconButtonClass(false)}
+            onClick={() => {
+              showModal({
+                title: 'Preferences',
+                headerDescription: 'Configure application settings and preferences',
+                component: 'UserPreferences',
+                variant: 'info',
+                size: 'lg',
+                actions: [],
+                allowBackdropClose: false,
+                customLayout: true
+              });
+            }}
+          >
+            <Settings className="h-4 w-4" />
           </button>
         </Tooltip>
 

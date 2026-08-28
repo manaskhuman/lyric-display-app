@@ -1,6 +1,9 @@
 import { BrowserWindow, ipcMain, nativeTheme, app } from 'electron';
 import { saveDarkModePreference } from '../themePreferences.js';
-import { getLogPaths } from '../logging.js';
+import { clearAllFileLogs, getLogPaths } from '../logging.js';
+import { isDev } from '../paths.js';
+import { assertTrustedAppRenderer } from './senderValidation.js';
+import { requestAppDataResetAndRelaunch } from '../appReset.js';
 import {
   getObsDockSetupInfo,
   getObsDockStartupStatus,
@@ -12,7 +15,11 @@ import {
  * Register app-level IPC handlers
  * Handles app version, dark mode, and general app settings
  */
-export function registerAppHandlers({ updateDarkModeMenu }) {
+export function registerAppHandlers({ updateDarkModeMenu, prepareForAppDataReset }) {
+  const senderOptions = {
+    development: isDev,
+    backendPort: Number(process.env.PORT) || 4000,
+  };
 
   ipcMain.handle('get-dark-mode', () => {
     return false;
@@ -71,6 +78,17 @@ export function registerAppHandlers({ updateDarkModeMenu }) {
     } catch (error) {
       return { success: false, error: error.message };
     }
+  });
+
+  ipcMain.handle('app:logs:clear', async (event) => {
+    assertTrustedAppRenderer(event, 'app:logs:clear', senderOptions);
+    return clearAllFileLogs();
+  });
+
+  ipcMain.handle('app:data:reset-and-relaunch', async (event) => {
+    assertTrustedAppRenderer(event, 'app:data:reset-and-relaunch', senderOptions);
+    await prepareForAppDataReset?.();
+    return requestAppDataResetAndRelaunch({ appApi: app });
   });
 
   ipcMain.handle('app:obs-dock-startup:get', () => getObsDockStartupStatus());

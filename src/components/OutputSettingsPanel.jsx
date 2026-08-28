@@ -1,6 +1,6 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
-import { useDarkModeState, useOutput1Settings, useOutput2Settings, useOutputSettings as useOutputSettingsSelector, useStageSettings, useIndividualOutputState, useOutputEnabled, useSetOutputEnabledAction } from '../hooks/useStoreSelectors';
+import { useDarkModeState, useOutputSettings as useOutputSettingsSelector, useStageSettings, useIndividualOutputState, useOutputEnabled, useSetOutputEnabledAction } from '../hooks/useStoreSelectors';
 import { useOptionalControlSocket } from '../context/ControlSocketProvider';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
@@ -15,8 +15,7 @@ import useAdvancedSectionPersistence from '../hooks/OutputSettingsPanel/useAdvan
 import useTypographyAndBands from '../hooks/OutputSettingsPanel/useTypographyAndBands';
 import useFullscreenModeState from '../hooks/OutputSettingsPanel/useFullscreenModeState';
 import useFullscreenElementMedia from '../hooks/OutputSettingsPanel/useFullscreenElementMedia';
-import useFullscreenAdvancedAutoExpand from '../hooks/OutputSettingsPanel/useFullscreenAdvancedAutoExpand';
-import { Clock, Sparkles, Type, PaintBucket, Square, Move, AlignVerticalSpaceAround, TextAlignJustify, SquareMenu, User, X } from 'lucide-react';
+import { Clock, LayoutGrid, Type, PaintBucket, Square, Move, AlignVerticalSpaceAround, TextAlignJustify, SquareMenu, User, X } from 'lucide-react';
 import FontSelect from './FontSelect';
 import StageSettingsPanel from './StageSettingsPanel';
 import BackgroundBandSettingsSection from './OutputSettingsPanel/BackgroundBandSettingsSection';
@@ -26,29 +25,74 @@ import FullscreenSettingsSection from './OutputSettingsPanel/FullscreenSettingsS
 import PanelHeaderActions from './OutputSettingsPanel/PanelHeaderActions';
 import TransitionSettingsSection from './OutputSettingsPanel/TransitionSettingsSection';
 import TypographySpacingSection from './OutputSettingsPanel/TypographySpacingSection';
-import { blurInputOnEnter, AdvancedCollapse, AdvancedToggle, LabelWithIcon, EmphasisRow, AlignmentRow } from './OutputSettingsShared';
+import ButterchurnVisualizerSettings from './ButterchurnVisualizerSettings';
+import { blurInputOnEnter, AdvancedCollapse, AdvancedToggle, EmphasisRow, AlignmentRow } from './OutputSettingsShared';
 import { sanitizeIntegerInput, sanitizeNumberInput } from '../utils/numberInput';
 import { outputTemplates } from '../utils/outputTemplates';
+import { SlidingTabIndicator } from './ui/sliding-tab-indicator';
 
-const SettingRow = ({ icon, label, tooltip, children, rightClassName = 'flex items-center gap-2 justify-end', justifyEnd = true, darkMode }) => (
-  <div className="flex items-center justify-between gap-4">
+const SettingRow = ({ icon, label, tooltip, children, rightClassName = 'flex items-center gap-2 justify-end', darkMode }) => (
+  <div className="flex items-center justify-between gap-4" data-output-setting-row>
     <Tooltip content={tooltip} side="right">
-      <div className="flex items-center gap-2 min-w-[140px]">
-        {icon ? React.createElement(icon, { className: `h-3.5 w-3.5 ${darkMode ? 'text-gray-400' : 'text-gray-500'}` }) : null}
+      <div className="flex items-center gap-2 min-w-35" data-output-setting-label>
+        {icon ? (
+          <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full" data-output-setting-icon>
+            {React.createElement(icon, { className: `h-3.5 w-3.5 ${darkMode ? 'text-gray-300' : 'text-gray-600'}` })}
+          </span>
+        ) : null}
         <label className={`text-[13px] leading-5 ${darkMode ? 'text-gray-200' : 'text-gray-700'}`}>{label}</label>
       </div>
     </Tooltip>
-    <div className={`${rightClassName} ${justifyEnd ? '' : ''}`}>
+    <div className={rightClassName}>
       {children}
     </div>
   </div>
+);
+
+// These wrappers intentionally live at module scope. Dock settings receive live
+// updates while their portal-based pickers are open, so changing a wrapper's
+// component identity during a render would remount the picker and close it.
+const CompactSettingField = ({ label, children }) => (
+  <div className="space-y-1" data-output-compact-setting-field>
+    <div className="text-[11px] font-medium uppercase tracking-wide text-gray-400">{label}</div>
+    {children}
+  </div>
+);
+
+const CompactSettingSection = ({ title, children }) => (
+  <section className="output-compact-setting-section text-gray-100">
+    <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-300">{title}</div>
+    {children}
+  </section>
+);
+
+const CompactSettingsGrid = ({ children }) => (
+  <div
+    className="grid gap-2"
+    style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(128px, 1fr))' }}
+  >
+    {children}
+  </div>
+);
+
+const CompactToggleButton = ({ active, disabled = false, onClick, children, className = '' }) => (
+  <button
+    type="button"
+    disabled={disabled}
+    onClick={onClick}
+    className={`h-8 rounded-md border px-2 text-xs font-semibold transition-colors ${active
+      ? 'border-blue-500 bg-blue-500/15 text-blue-100'
+      : 'border-gray-800 bg-gray-900 text-gray-300 hover:bg-gray-800'
+      } ${disabled ? 'cursor-not-allowed opacity-50' : ''} ${className}`}
+  >
+    {children}
+  </button>
 );
 
 const LyricsPositionSection = ({
   darkMode,
   lyricsPositionValue,
   handleLyricsPositionChange,
-  fullScreenModeChecked
 }) => (
   <SettingRow
     icon={AlignVerticalSpaceAround}
@@ -283,6 +327,8 @@ const OutputSettingsPanel = ({
   settings: controlledSettings,
   onSettingsChange,
   localMode = false,
+  hideFullScreenSettings = false,
+  hideBackgroundSettings = false,
   title,
 }) => {
   const { darkMode: storedDarkMode } = useDarkModeState();
@@ -380,13 +426,7 @@ const OutputSettingsPanel = ({
         ? 'bg-gray-800 border-gray-700 text-gray-100'
         : 'bg-white border-gray-300 text-gray-900'
         }`;
-      const compactLabelClass = `text-[11px] font-medium uppercase tracking-wide ${darkMode ? 'text-gray-400' : 'text-gray-500'}`;
-      const CompactField = ({ label, children }) => (
-        <div className="space-y-1">
-          <div className={compactLabelClass}>{label}</div>
-          {children}
-        </div>
-      );
+      const CompactField = CompactSettingField;
 
       return (
         <div className="space-y-3" onKeyDown={blurInputOnEnter}>
@@ -546,17 +586,43 @@ const OutputSettingsPanel = ({
     showToast,
   });
 
-  const {
-    fullScreenAdvancedRef,
-    fullScreenAdvancedVisible,
-    fullScreenControlsDisabled,
-    handleFullScreenToggleWithExpand,
-  } = useFullscreenAdvancedAutoExpand({
-    fullScreenAdvancedExpanded,
-    fullScreenModeChecked,
-    handleFullScreenToggle,
-    setFullScreenAdvancedExpanded,
-  });
+  React.useEffect(() => {
+    if (!fullScreenModeChecked && !fullScreenAdvancedExpanded) {
+      setFullScreenAdvancedExpanded(true);
+    }
+  }, [fullScreenAdvancedExpanded, fullScreenModeChecked, setFullScreenAdvancedExpanded]);
+
+  const handleFullScreenHeaderToggle = React.useCallback((checked) => {
+    handleFullScreenToggle(checked);
+  }, [handleFullScreenToggle]);
+
+  const openVisualizerSettings = React.useCallback(() => {
+    showModal({
+      title: 'MilkDrop Visualizer',
+      headerDescription: 'Choose a specific preset or a seeded random preset for this output.',
+      variant: 'info',
+      size: 'lg',
+      modalKey: `fullscreen-visualizer-${outputKey}`,
+      body: (
+        <ButterchurnVisualizerSettings
+          value={settings.fullScreenVisualizer}
+          onChange={(fullScreenVisualizer) => applySettings({
+            fullScreenVisualizer,
+            fullScreenVisualizerInitialized: true,
+          })}
+          darkMode={darkMode}
+          layout="two-column"
+        />
+      ),
+      actions: [
+        {
+          label: 'Done',
+          value: 'done',
+          variant: 'default',
+        },
+      ],
+    });
+  }, [applySettings, darkMode, outputKey, settings.fullScreenVisualizer, showModal]);
 
   const applyDockTemplateSettings = React.useCallback((templateSettings, sourceLabel = 'Template') => {
     const sanitized = sanitizeDockTemplateSettings(templateSettings);
@@ -598,41 +664,10 @@ const OutputSettingsPanel = ({
       ? 'bg-gray-800 border-gray-700 text-gray-100'
       : 'bg-white border-gray-300 text-gray-900'
       }`;
-    const compactLabelClass = `text-[11px] font-medium uppercase tracking-wide ${darkMode ? 'text-gray-400' : 'text-gray-500'}`;
-
-    const CompactField = ({ label, children }) => (
-      <div className="space-y-1">
-        <div className={compactLabelClass}>{label}</div>
-        {children}
-      </div>
-    );
-    const CompactSection = ({ title, children }) => (
-      <section className={`rounded-md border p-2.5 ${darkMode ? 'border-gray-800 bg-gray-950/35' : 'border-gray-200 bg-gray-50/70'}`}>
-        <div className={`mb-2 text-[11px] font-semibold uppercase tracking-wide ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>{title}</div>
-        {children}
-      </section>
-    );
-    const CompactGrid = ({ children }) => (
-      <div
-        className="grid gap-2"
-        style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(128px, 1fr))' }}
-      >
-        {children}
-      </div>
-    );
-    const ToggleButton = ({ active, disabled = false, onClick, children, className = '' }) => (
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={onClick}
-        className={`h-8 rounded-md border px-2 text-xs font-semibold transition-colors ${active
-          ? darkMode ? 'border-blue-500 bg-blue-500/15 text-blue-100' : 'border-blue-500 bg-blue-50 text-blue-900'
-          : darkMode ? 'border-gray-800 bg-gray-900 text-gray-300 hover:bg-gray-800' : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-100'
-          } ${disabled ? 'cursor-not-allowed opacity-50' : ''} ${className}`}
-      >
-        {children}
-      </button>
-    );
+    const CompactField = CompactSettingField;
+    const CompactSection = CompactSettingSection;
+    const CompactGrid = CompactSettingsGrid;
+    const ToggleButton = CompactToggleButton;
     const compactContentClass = darkMode ? 'bg-gray-900 border-gray-700 text-gray-100' : 'bg-white border-gray-300 text-gray-900';
     const compactItemClass = 'py-1.5 text-[11px] leading-4';
     const compactSelectContentProps = {
@@ -652,7 +687,7 @@ const OutputSettingsPanel = ({
       const meta = saved
         ? formatTemplateDate(template.createdAt)
         : template.description;
-      const Icon = saved ? User : Sparkles;
+      const Icon = saved ? User : null;
 
       return (
         <button
@@ -661,7 +696,7 @@ const OutputSettingsPanel = ({
           className="w-full rounded-md border border-gray-800 bg-gray-950 px-3 py-2 text-left transition-colors hover:border-blue-500/60 hover:bg-gray-900"
         >
           <div className="flex min-w-0 items-start gap-2">
-            <Icon className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${saved ? 'text-purple-300' : 'text-blue-300'}`} />
+            {Icon && <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-purple-300" />}
             <div className="min-w-0 flex-1">
               <div className="truncate text-xs font-semibold text-gray-100">{title || 'Template'}</div>
               {meta && (
@@ -688,7 +723,7 @@ const OutputSettingsPanel = ({
     };
     const templateSheet = templatePopoverOpen && typeof document !== 'undefined' ? createPortal(
       <div
-        className="fixed inset-0 z-[2350] bg-black/45 p-2"
+        className="fixed inset-0 z-2350 bg-black/45 p-2"
         onMouseDown={(event) => {
           if (event.target === event.currentTarget) setTemplatePopoverOpen(false);
         }}
@@ -710,19 +745,28 @@ const OutputSettingsPanel = ({
           </div>
 
           <div className="border-b border-gray-800 p-3">
-            <div className="grid grid-cols-2 gap-1 rounded-md bg-gray-900 p-1">
+            <div
+              className="tab-switcher-squircle relative isolate grid grid-cols-2 gap-1 rounded-2xl bg-gray-900 p-1"
+              role="tablist"
+              aria-label="Template sources"
+            >
+              <SlidingTabIndicator className="bg-gray-800" />
               <button
                 type="button"
+                role="tab"
+                aria-selected={templateTab === 'presets'}
                 onClick={() => setTemplateTab('presets')}
-                className={`flex items-center justify-center gap-1.5 rounded px-2 py-2 text-xs font-semibold ${templateTab === 'presets' ? 'bg-gray-800 text-white' : 'text-gray-400 hover:text-gray-200'}`}
+                className={`tab-switcher-item-squircle relative z-10 flex items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-xs font-semibold transition-colors ${templateTab === 'presets' ? 'text-white' : 'text-gray-400 hover:text-gray-200'}`}
               >
-                <Sparkles className="h-3.5 w-3.5" />
+                <LayoutGrid className="h-3.5 w-3.5" />
                 Presets
               </button>
               <button
                 type="button"
+                role="tab"
+                aria-selected={templateTab === 'saved'}
                 onClick={() => setTemplateTab('saved')}
-                className={`flex items-center justify-center gap-1.5 rounded px-2 py-2 text-xs font-semibold ${templateTab === 'saved' ? 'bg-gray-800 text-white' : 'text-gray-400 hover:text-gray-200'}`}
+                className={`tab-switcher-item-squircle relative z-10 flex items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-xs font-semibold transition-colors ${templateTab === 'saved' ? 'text-white' : 'text-gray-400 hover:text-gray-200'}`}
               >
                 <User className="h-3.5 w-3.5" />
                 My Templates
@@ -763,7 +807,7 @@ const OutputSettingsPanel = ({
     ) : null;
 
     return (
-      <div className="space-y-3" onKeyDown={blurInputOnEnter}>
+      <div className="output-settings-panel output-settings-panel--compact space-y-3" data-theme={darkMode ? 'dark' : 'light'} onKeyDown={blurInputOnEnter}>
         <div className={`flex items-center justify-between rounded-md border px-3 py-2 ${darkMode ? 'border-gray-800 bg-gray-900' : 'border-gray-200 bg-white'}`}>
           <div>
             <div className={`text-[13px] font-semibold leading-5 ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>{outputKey.replace('output', 'Output ')}</div>
@@ -785,9 +829,9 @@ const OutputSettingsPanel = ({
           <button
             type="button"
             onClick={() => setTemplatePopoverOpen(true)}
-            className="flex h-9 w-full items-center justify-center gap-2 rounded-md border border-gray-800 bg-gray-900 px-3 text-xs font-semibold text-gray-100 transition-colors hover:bg-gray-800"
+            className="flex h-9 w-full items-center justify-center gap-2 rounded-full border border-gray-800 bg-gray-900 px-3 text-xs font-semibold text-gray-100 transition-colors hover:bg-gray-800"
           >
-            <Sparkles className="h-3.5 w-3.5 text-blue-300" />
+            <LayoutGrid className="h-3.5 w-3.5 text-blue-300" />
             Load Template
           </button>
           {templateSheet}
@@ -1154,24 +1198,15 @@ const OutputSettingsPanel = ({
     );
   }
 
-  const SettingRow = ({ icon, label, tooltip, children, rightClassName = 'flex items-center gap-2 justify-end', justifyEnd = true }) => (
-    <div className="flex items-center justify-between gap-4">
-      <Tooltip content={tooltip} side="right">
-        <LabelWithIcon icon={icon} text={label} darkMode={darkMode} />
-      </Tooltip>
-      <div className={`${rightClassName} ${justifyEnd ? '' : ''}`}>
-        {children}
-      </div>
-    </div>
-  );
-
   return (
-    <div className="output-settings-panel space-y-4" onKeyDown={blurInputOnEnter}>
+    <div className="output-settings-panel" data-theme={darkMode ? 'dark' : 'light'} onKeyDown={blurInputOnEnter}>
       <PanelHeaderActions
         applySettings={applySettings}
         darkMode={darkMode}
         hideLiveActions={localMode}
         handleToggleOutput={handleToggleOutput}
+        handleFullScreenToggle={handleFullScreenHeaderToggle}
+        fullScreenModeChecked={fullScreenModeChecked}
         isOutputEnabled={isOutputEnabled}
         onDeleteOutput={onDeleteOutput}
         outputKey={outputKey}
@@ -1180,12 +1215,38 @@ const OutputSettingsPanel = ({
         showModal={showModal}
         showToast={showToast}
       />
+      {!hideFullScreenSettings && (
+        <AdvancedCollapse expanded={fullScreenModeChecked} openMarginTop={0}>
+          <div>
+            <FullscreenSettingsSection
+              darkMode={darkMode}
+              fullScreenAdvancedExpanded={fullScreenAdvancedExpanded}
+              setFullScreenAdvancedExpanded={setFullScreenAdvancedExpanded}
+              fullScreenBackgroundTypeValue={fullScreenBackgroundTypeValue}
+              handleFullScreenBackgroundTypeChange={handleFullScreenBackgroundTypeChange}
+              fullScreenBackgroundColorValue={fullScreenBackgroundColorValue}
+              fullScreenBackgroundPaintValue={fullScreenBackgroundPaintValue}
+              handleFullScreenPaintChange={handleFullScreenPaintChange}
+              openMediaLibrary={openMediaLibrary}
+              hasBackgroundMedia={hasBackgroundMedia}
+              uploadedMediaName={uploadedMediaName}
+              settings={settings}
+              update={update}
+              openFullScreenElementMediaLibrary={openFullScreenElementMediaLibrary}
+              hasFullScreenElementMedia={hasFullScreenElementMedia}
+              fullScreenElementMediaName={fullScreenElementMediaName}
+              handleFullScreenElementToggle={handleFullScreenElementToggle}
+              openVisualizerSettings={openVisualizerSettings}
+            />
+          </div>
+        </AdvancedCollapse>
+      )}
+      <div className={`space-y-2 ${fullScreenModeChecked && !hideFullScreenSettings ? 'mt-2' : ''}`}>
       {/* Lyrics Position */}
       <LyricsPositionSection
         darkMode={darkMode}
         lyricsPositionValue={lyricsPositionValue}
         handleLyricsPositionChange={handleLyricsPositionChange}
-        fullScreenModeChecked={fullScreenModeChecked}
       />
 
       {/* Font Picker */}
@@ -1208,7 +1269,7 @@ const OutputSettingsPanel = ({
         translationFontSizeMode={translationFontSizeMode}
         update={update}
       />
-      <div>
+      <div data-output-setting-group data-expanded={fontColorAdvancedExpanded}>
         {/* Font Color */}
         <FontColorSection
           darkMode={darkMode}
@@ -1219,8 +1280,8 @@ const OutputSettingsPanel = ({
         />
 
         {/* Font Color Advanced Settings Row */}
-        <AdvancedCollapse expanded={fontColorAdvancedExpanded}>
-          <div className="flex items-center justify-between w-full">
+        <AdvancedCollapse expanded={fontColorAdvancedExpanded} openMarginTop={0}>
+          <div className="flex items-center justify-between" data-output-setting-subrow>
             <label className={`text-[13px] leading-5 whitespace-nowrap ${darkMode ? 'text-gray-200' : 'text-gray-700'}`}>
               Translation Colour
             </label>
@@ -1272,7 +1333,8 @@ const OutputSettingsPanel = ({
         settings={settings}
         update={update}
       />
-      <div>
+      {!hideBackgroundSettings && (
+      <div data-output-setting-group data-expanded={backgroundAdvancedExpanded && !fullScreenModeChecked}>
         {/* Background */}
         <BackgroundSection
           applySettings={applySettings}
@@ -1302,6 +1364,7 @@ const OutputSettingsPanel = ({
           update={update}
         />
       </div>
+      )}
       {/* X and Y Margins */}
       <MarginsSection
         darkMode={darkMode}
@@ -1316,31 +1379,7 @@ const OutputSettingsPanel = ({
         transitionAdvancedExpanded={transitionAdvancedExpanded}
         update={update}
       />
-      <FullscreenSettingsSection
-        darkMode={darkMode}
-        fullScreenAdvancedExpanded={fullScreenAdvancedExpanded}
-        setFullScreenAdvancedExpanded={setFullScreenAdvancedExpanded}
-        fullScreenModeChecked={fullScreenModeChecked}
-        handleFullScreenToggleWithExpand={handleFullScreenToggleWithExpand}
-        fullScreenAdvancedRef={fullScreenAdvancedRef}
-        fullScreenAdvancedVisible={fullScreenAdvancedVisible}
-        fullScreenControlsDisabled={fullScreenControlsDisabled}
-        fullScreenBackgroundTypeValue={fullScreenBackgroundTypeValue}
-        handleFullScreenBackgroundTypeChange={handleFullScreenBackgroundTypeChange}
-        fullScreenBackgroundColorValue={fullScreenBackgroundColorValue}
-        fullScreenBackgroundPaintValue={fullScreenBackgroundPaintValue}
-        handleFullScreenPaintChange={handleFullScreenPaintChange}
-        openMediaLibrary={openMediaLibrary}
-        hasBackgroundMedia={hasBackgroundMedia}
-        uploadedMediaName={uploadedMediaName}
-        settings={settings}
-        update={update}
-        openFullScreenElementMediaLibrary={openFullScreenElementMediaLibrary}
-        hasFullScreenElementMedia={hasFullScreenElementMedia}
-        fullScreenElementMediaName={fullScreenElementMediaName}
-        handleFullScreenElementToggle={handleFullScreenElementToggle}
-      />
-
+      </div>
     </div>
   );
 };

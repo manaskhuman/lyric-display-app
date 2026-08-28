@@ -39,12 +39,19 @@ flowchart LR
 | Concern | Development | Packaged application |
 | --- | --- | --- |
 | Renderer URL | Vite on `http://localhost:5173` | Backend serves `dist/` on `http://127.0.0.1:4000` |
-| Router | `BrowserRouter` | `HashRouter` |
-| Backend | Electron forks `server/index.js` with `NODE_ENV=development` | Electron forks the unpacked backend with `NODE_ENV=production` |
+| Router | `BrowserRouter` | `BrowserRouter` |
+| Backend | Electron forks `server/index.js` with `NODE_ENV=development` | Electron forks the ASAR-packaged backend with `NODE_ENV=production` and a real `userData` working directory |
 | API/socket access | Vite proxies `/api`, `/socket.io`, and `/media` to port `4000`; Electron renderers resolve port `4000` directly | Same origin as the backend-served renderer |
 | Native bridge | Electron windows only | Electron windows only |
+| Persistent profile | Isolated `LyricDisplay-Dev` Electron, Chromium, backend, and credential namespaces | Production `LyricDisplay` profile with legacy-data migration |
 
-The backend is a separate npm package with its own [`server/package.json`](../server/package.json) and lockfile. A clean checkout therefore needs both root and server dependencies installed. The optional `lyricdisplay-ndi/` directory is a separately cloned, ignored repository, not part of this repository's tracked tree.
+The backend is a separate npm package with its own [`server/package.json`](../server/package.json) and lockfile. A clean checkout therefore needs both root and server dependencies installed. Backend production dependencies are also listed in the root manifest so electron-builder can package and resolve them beside the ASAR-hosted server; keep the two manifests aligned when those dependencies change. The optional `lyricdisplay-ndi/` directory is a separately cloned, ignored repository, not part of this repository's tracked tree.
+
+Development and packaged profiles can coexist on disk, but they intentionally retain the same backend and external-control ports and therefore are not supported concurrently. Backend readiness probes carry a per-child challenge so one profile cannot mistake the other profile's running backend for its own.
+
+Electron-builder smart-unpacks the native runtime modules required by the packaged app. Packaging filters remove compiler sources and intermediate build products from `better-sqlite3` and `@julusian/midi`, but retain their runtime `.node` binaries and published prebuilds for each target platform.
+
+Windows upgrades intentionally retain electron-builder's default atomic NSIS replacement flow: the old installation directory is removed while app data is kept, then the new payload is installed. Do not define a custom NSIS `customRemoveFiles` macro without preserving that complete replacement behavior. macOS application bundles and Linux AppImages likewise keep packaged code separate from user data. Release and platform-test workflows run [`scripts/verify-packaged-runtime.js`](../scripts/verify-packaged-runtime.js) on each operating system before accepting an artifact.
 
 ## Top-Level Repository Map
 
@@ -61,7 +68,8 @@ lyric-display-app/
 |-- shared/                  # Cross-runtime contracts, parsing, validation, and bundled data
 |-- src/                     # Vite/React renderer application
 |-- tests/                   # Node test runner suites
-|-- dist/                    # Generated renderer/package output; ignored
+|-- dist/                    # Generated Vite renderer output; ignored
+|-- release/                 # Generated Electron packages/installers; ignored
 |-- uploads/                 # Development runtime media; ignored
 |-- lyricdisplay-ndi/        # Optional ignored clone of the NDI companion repository
 |-- index.html               # Vite HTML entry
@@ -76,7 +84,7 @@ lyric-display-app/
 `-- jsconfig.json            # Editor alias for @/* -> src/*
 ```
 
-Generated or machine-local paths are `node_modules/`, `server/node_modules/`, `dist/`, `release/`, `out/`, `uploads/`, logs, and the optional `lyricdisplay-ndi/` clone. The files inside `build/` are tracked packaging inputs and should be changed when installer behavior changes.
+Generated or machine-local paths are `node_modules/`, `server/node_modules/`, `dist/`, `release/`, `out/`, `uploads/`, logs, and the optional `lyricdisplay-ndi/` clone. The files inside `build/` are tracked packaging inputs and should be changed when installer behavior changes. Run `npm run generate:appx-assets` after changing the source icon; it regenerates the transparent, theme-aware Windows assets in `build/appx/` and the Partner Center upload image in `build/store/`.
 
 ## Entry Points and Startup
 
@@ -85,7 +93,7 @@ Generated or machine-local paths are `node_modules/`, `server/node_modules/`, `d
 1. [`main.js`](../main.js) establishes app identity and the custom media scheme, takes the single-instance lock, initializes file logging, registers IPC, and wires protocol/file-open lifecycle events.
 2. [`main/startup.js`](../main/startup.js) starts the backend, obtains the backend-generated admin key, prewarms providers/fonts, initializes display/NDI/external-control services, and creates the main window.
 3. [`main/backend.js`](../main/backend.js) forks [`server/index.js`](../server/index.js), passes the user-data paths and app-session ID, waits for health readiness, mirrors logs, and applies bounded restart recovery.
-4. [`main/windows.js`](../main/windows.js) creates secured `BrowserWindow` instances and loads either the Vite route or the backend-served hash route.
+4. [`main/windows.js`](../main/windows.js) creates secured `BrowserWindow` instances and loads either the Vite route or the backend-served clean route.
 5. [`src/main.jsx`](../src/main.jsx) initializes the persisted Zustand store, chunk recovery, global styles, and the React root. [`src/App.jsx`](../src/App.jsx) selects the router and route tree.
 
 Headless OBS Dock mode follows the same backend startup but deliberately skips creating renderer windows. Its relaunch/protocol behavior is owned by [`main/obsDockStartup.js`](../main/obsDockStartup.js), [`main/tray.js`](../main/tray.js), and the app-control backend route.
@@ -96,11 +104,11 @@ The source of truth is [`src/App.jsx`](../src/App.jsx). Custom output routes are
 
 | Route | Main component | Runtime role |
 | --- | --- | --- |
-| `/` | `pages/ControlPanel.jsx` -> `components/LyricDisplayApp.jsx` | Primary operator UI; wrapped in the control socket provider and desktop shell when applicable |
+| `/` | `components/LyricDisplayApp.jsx` | Primary operator UI; wrapped in the control socket provider and desktop shell when applicable |
 | `/?dock=obs` and `/obs-dock` | `components/ObsDockLayout.jsx` | Compact OBS dock controller using an `obsDock` client identity |
 | `/new-song` | `components/NewSongCanvas.jsx` | Lyrics authoring/editor workflow |
 | `/lyric-video-studio` | `pages/LyricVideoStudio.jsx` | Timeline, preview, style, and export UI |
-| `/output1`, `/output2` | `pages/Output1.jsx`, `pages/Output2.jsx` -> `pages/OutputPage.jsx` | Default socket-driven lyric outputs |
+| `/output1`, `/output2` | `pages/OutputPage.jsx` | Default socket-driven lyric outputs selected by route-provided output ID |
 | `/output3` ... `/output6` | `pages/OutputPage.jsx` | Custom socket-driven lyric outputs |
 | `/stage` | `pages/Stage.jsx` | Stage display: current/next/previous lyrics, timer, messages, upcoming song |
 | `/time` | `pages/TimeDisplay.jsx` | Dedicated timer/clock projection |
@@ -124,6 +132,8 @@ Passive display routes skip the global modal/toast providers. Output, stage, tim
 | [`main/windowSecurity.js`](../main/windowSecurity.js) | Route-to-preload-role policy |
 | [`main/singleInstance.js`](../main/singleInstance.js) | Single-instance lock and second-launch dispatch |
 | [`main/fileHandler.js`](../main/fileHandler.js) | OS file association and pending-open handling |
+| [`main/lyricFiles.js`](../main/lyricFiles.js) | Canonical path validation, extraction, recent-file updates, and write grants for local lyric files |
+| [`main/fileNavigator.js`](../main/fileNavigator.js) | Persistent indexed roots, filesystem watching, search records, previews, and safe browse/open resolution |
 | [`main/menuBridge.js`](../main/menuBridge.js) | Native menu construction and renderer menu events |
 | [`main/modalBridge.js`](../main/modalBridge.js) | Promise-based requests from main process to renderer modals |
 | [`main/tray.js`](../main/tray.js) | Desktop/headless system tray |
@@ -144,7 +154,7 @@ Passive display routes skip the global modal/toast providers. Output, stage, tim
 
 ### IPC organization
 
-[`main/ipc.js`](../main/ipc.js) is only a compatibility re-export. [`main/ipc/index.js`](../main/ipc/index.js) is the registration hub; domain ownership is below it.
+[`main/ipc/index.js`](../main/ipc/index.js) is the registration hub; domain ownership is below it.
 
 | Domain file | Renderer capability |
 | --- | --- |
@@ -152,6 +162,7 @@ Passive display routes skip the global modal/toast providers. Output, stage, tim
 | `auth.js` | Desktop JWT, join code, connection diagnostics, secure token store |
 | `display.js` | Display inventory, projection, output/timer/OBS setup windows |
 | `files.js` | Lyric open/save/parse and lyric-video audio grants |
+| `fileNavigator.js` | Indexed-root management, browse/search/preview, batch selection, and reveal/open operations |
 | `recents.js` | Recent-file list and open behavior |
 | `lyrics.js` | Online provider discovery, credentials, search, fetch, cancellation |
 | `easyworship.js` | EasyWorship database validation and import |
@@ -268,9 +279,9 @@ The backend accepts authenticated client types defined in `server/config/clientT
 
 ### Backend data and media
 
-In Electron, [`main/backend.js`](../main/backend.js) sets `LYRICDISPLAY_DATA_DIR` to `<Electron userData>/backend`. The backend stores its realtime snapshot and uploaded media beneath that root. When `server/index.js` is launched directly without that environment variable, it falls back to the repository root, which is why development `uploads/` is ignored.
+In Electron, [`main/backend.js`](../main/backend.js) sets `LYRICDISPLAY_DATA_DIR` to `<Electron userData>/backend`. The backend stores its realtime snapshot and uploaded media beneath that root. Development uses the persistent `LyricDisplay-Dev` profile while packaged builds use `LyricDisplay`, so development state and Chromium storage cannot alter installed state. User-authored and imported files beneath Documents remain shared intentionally. When `server/index.js` is launched directly without that environment variable, it falls back to the repository root, which is why development `uploads/` is ignored.
 
-Authentication secrets prefer the OS keychain and use an encrypted platform config fallback. Renderer auth/provider tokens likewise prefer secure main-process storage. Never add secrets, admin keys, raw JWTs, or user-data paths to logs or socket payloads.
+Authentication secrets prefer the OS keychain and use an encrypted platform config fallback. Renderer auth/provider tokens likewise prefer secure main-process storage. Development appends `-Dev` to credential-vault services and platform fallback roots; production names remain unchanged. Never add secrets, admin keys, raw JWTs, or user-data paths to logs or socket payloads.
 
 ## Renderer Map
 
@@ -299,7 +310,7 @@ src/
 - [`components/NewSongCanvas.jsx`](../src/components/NewSongCanvas.jsx), `components/NewSongCanvas/`, and `hooks/NewSongCanvas/` own authoring, clipboard/history, search, measurements, timestamps, drafts, and saving.
 - [`components/OutputSettingsPanel.jsx`](../src/components/OutputSettingsPanel.jsx), its directory, and `hooks/OutputSettingsPanel/` own output styling controls. Shared output rendering belongs in [`components/output/LyricVisualFrame.jsx`](../src/components/output/LyricVisualFrame.jsx).
 - `components/LyricVideoStudio/` plus the lyric-video pages/utilities own preview, transport, timeline, styling, and export UX.
-- `components/UserPreferencesModal/` and its hooks own preference editing; persistence itself crosses preload IPC into `main/userPreferences.js`.
+- `components/UserPreferencesModal/` and its hooks own preference editing; its indexed-folder page manages navigator sources through the file-navigator IPC, while ordinary preference persistence crosses preload IPC into `main/userPreferences.js`.
 - `components/routes/` decides which routes get the control socket provider and desktop shell.
 - `components/bridges/` converts Electron events into renderer modals/actions without coupling feature components directly to raw IPC listeners.
 - `components/modal/`, `components/toast/`, and `components/ui/` are reusable infrastructure. Add primitives here instead of cloning controls inside a feature.
@@ -339,12 +350,11 @@ This store is both UI state and a local persistence cache. The backend remains a
 
 | File or directory | Responsibility |
 | --- | --- |
-| `lyricsParsing.js` | Compatibility barrel for the modular parser |
-| `lyricsParsing/` | Text/LRC/online parsing, cleanup, grouping, translation, structure tags, sections, line splitting, runtime config |
-| `lineSplitting.js` | Compatibility barrel for parser line-splitting exports |
+| `lyricsParsing/` | Text/LRC parsing, cleanup, grouping, translation, structure tags, sections, line splitting, runtime config |
 | `documentTextExtraction.js` | Markdown/RTF/DOCX extraction and unified import parsing |
 | `lyricImportRegistry.js` | Supported extensions, parser types, labels, accept strings, dialog filters |
 | `lyricImportLimits.js` | Import and extracted-document size limits |
+| `fileNavigatorSearch.js` | Normalization, query filters, typo-tolerant relevance scoring, LRC previews, and match snippets |
 | `outputRegistry.js` | Default output IDs, custom-output count, routable IDs |
 | `setlistLimits.js` | Setlist count, payload, item, and string limits |
 | `timerAuthority.js` | Revisioned timer validation, clock localization, boundary advancement |
@@ -362,10 +372,11 @@ If a limit, event name, output ID, timer shape, or parser behavior is consumed i
 ### Load lyrics and cue a line
 
 ```text
-file/online/setlist input
+file navigator / drag-and-drop / online / setlist input
   -> renderer file/import hook
   -> asyncLyricsParser
-       Electron: preload -> main/ipc/files.js -> shared parser
+       Indexed file: preload -> main/ipc/fileNavigator.js -> main/lyricFiles.js
+       Electron parser: preload -> main/ipc/files.js -> shared parser
        Browser: Web Worker -> shared parser
        Fallback: shared parser in renderer
   -> Zustand lyrics session slice
@@ -377,6 +388,17 @@ file/online/setlist input
 ```
 
 When changing this flow, check import limits/format registry, parser result shape, renderer store setters, socket payload validation, session persistence, and output/stage readers.
+
+### Save lyrics
+
+```text
+Canvas Save / Save & Load
+  -> compact indexed-folder save navigator
+  -> preload -> main/ipc/fileNavigator.js validates the destination and grants the write
+       Optional: Save in different folder -> native Save As dialog
+  -> main/ipc/files.js writes TXT/LRC and refreshes the navigator index
+  -> recent files and the active setlist copy are refreshed
+```
 
 ### Change an output style
 
@@ -406,7 +428,7 @@ control panel action
   -> metrics reported to the control panel
 ```
 
-Projection changes should be checked on display reconnect/removal, custom-output deletion, crash recovery, fullscreen/focus behavior, and packaged hash routes.
+Projection changes should be checked on display reconnect/removal, custom-output deletion, crash recovery, fullscreen/focus behavior, and packaged routes.
 
 ### Authenticate and connect
 

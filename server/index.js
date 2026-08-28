@@ -31,17 +31,33 @@ import { registerTemplateRoutes } from './routes/templates.js';
 import { loadPersistedSessionState } from './realtime/sessionPersistence.js';
 import { setLyricsParsingConfig } from './realtime/lyricsParsingConfig.js';
 import { emitControllerEvent } from './realtime/broadcast.js';
+import { notifyOutputPresenceChange } from './realtime/state.js';
 import { REALTIME_EVENTS } from '../shared/apiContractRegistry.js';
+import { isStorageCapacityError, toStorageWriteFailure } from '../shared/storageErrors.js';
 
 dotenv.config();
 
+const reportFatalStorageFailure = (error) => {
+  if (!isStorageCapacityError(error) || typeof process.send !== 'function') return;
+  try {
+    process.send({
+      type: 'storage-write-failed',
+      operation: 'backend',
+      ...toStorageWriteFailure(error, { subject: 'application data' }),
+    });
+  } catch {
+  }
+};
+
 process.on('uncaughtException', (error) => {
   console.error('Backend uncaught exception:', error);
+  reportFatalStorageFailure(error);
   process.exit(1);
 });
 
 process.on('unhandledRejection', (reason) => {
   console.error('Backend unhandled rejection:', reason);
+  reportFatalStorageFailure(reason);
   process.exit(1);
 });
 
@@ -120,7 +136,7 @@ registerOutputRoutes(app, { getOutputRegistry, hasOutput });
 registerIntegrationRoutes(app, { getOutputRegistry, port: PORT });
 registerAppControlRoutes(app, { localhostOnly });
 registerTemplateRoutes(app, { localhostOnly });
-registerAuthRoutes(app, { secrets, tokenService, localhostOnly });
+registerAuthRoutes(app, { secrets, tokenService, localhostOnly, hasOutput });
 registerConnectionRoutes(app, { authenticateRequest });
 registerMediaRoutes(app, {
   authenticateRequest,
@@ -140,6 +156,7 @@ const io = new Server(server, {
 
 io.use(createSocketAuthenticator({
   verifyToken: tokenService.verifyToken,
+  hasOutput,
 }));
 
 registerSocketEvents(io, { hasPermission });
@@ -185,7 +202,12 @@ if (!isDev) {
     if (req.path.startsWith('/api/')) {
       return res.status(404).json({ error: 'API endpoint not found' });
     }
-    res.sendFile(path.join(frontendPath, 'index.html'));
+    const customOutputMatch = req.path.match(/^\/(output[3-6])\/?$/);
+    if (customOutputMatch && !hasOutput(customOutputMatch[1])) {
+      res.set('Cache-Control', 'no-store');
+      return res.status(404).sendFile('index.html', { root: frontendPath });
+    }
+    return res.sendFile('index.html', { root: frontendPath });
   });
 }
 
@@ -215,6 +237,7 @@ server.listen(PORT, async () => {
   console.log('Server fully initialized and listening on port', PORT);
 
   if (process.send) {
+    notifyOutputPresenceChange({ force: true });
     process.send({
       status: 'ready',
       port: PORT,

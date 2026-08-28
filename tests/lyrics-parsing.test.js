@@ -1,15 +1,114 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createGroupingPlan } from '../shared/lyricsParsing/groupingPlan.js';
+import { isManualNormalGroupCandidate } from '../shared/lyricsParsing/lineClassification.js';
+import { parseLrcContent } from '../shared/lyricsParsing/lrcParser.js';
 import {
   buildLyricsParsingOptions,
-  createGroupingPlan,
-  extractExplicitGroupingDirective,
-  isManualNormalGroupCandidate,
   normalizeLyricsParsingOptions,
-  parseLrcContent,
+} from '../shared/lyricsParsing/preferenceOptions.js';
+import { isStructureTag } from '../shared/lyricsParsing/structureTags.js';
+import {
+  extractExplicitGroupingDirective,
   parseTxtContent,
-} from '../shared/lyricsParsing.js';
+} from '../shared/lyricsParsing/txtParser.js';
+import { DEFAULT_SECTION_TAG_PHRASES } from '../shared/sectionTagPhrases.js';
+import { buildSongSectionOptions } from '../src/constants/songCanvas.js';
+import {
+  buildEnhancedTimestampPlaceholder,
+  buildStandardTimestampInsertion,
+} from '../src/hooks/NewSongCanvas/useTimestampOperations.js';
 import { formatLyrics, formatLyricsWithStats, reconstructEditableText } from '../src/utils/lyricsFormat.js';
+import {
+  getLineOutputText,
+  isStageOnlyLine,
+  stripStageOnlyPrefix,
+  toggleStageOnlyPrefix,
+} from '../src/utils/parseLyrics.js';
+import { applyTextCasing, TEXT_CASING } from '../src/utils/textCasing.js';
+import { hasValidTimestamps } from '../src/utils/timestampHelpers.js';
+import {
+  extractFirstValidLine,
+  isUsableLyricsTitle,
+  UNTITLED_LYRICS_TITLE,
+} from '../src/utils/titlePrefill.js';
+
+test('song canvas section options include every recognized preference phrase', () => {
+  const options = buildSongSectionOptions([
+    'Verse',
+    'call and response',
+    'Chorus',
+    'CALL AND RESPONSE',
+  ]);
+
+  assert.deepEqual(options.map((option) => option.label), [
+    'Verse',
+    'Verse 1',
+    'Verse 2',
+    'Verse 3',
+    'Call And Response',
+    'Chorus',
+  ]);
+});
+
+test('song canvas section options track defaults and explicit empty preferences', () => {
+  const defaultLabels = buildSongSectionOptions().map((option) => option.label);
+
+  DEFAULT_SECTION_TAG_PHRASES.forEach((phrase) => {
+    assert.equal(defaultLabels.includes(phrase), true);
+  });
+  assert.deepEqual(buildSongSectionOptions([]), []);
+});
+
+test('the new-song title is a visible but unsavable default', () => {
+  assert.equal(isUsableLyricsTitle(UNTITLED_LYRICS_TITLE), false);
+  assert.equal(isUsableLyricsTitle(`  ${UNTITLED_LYRICS_TITLE.toUpperCase()}  `), false);
+  assert.equal(isUsableLyricsTitle(''), false);
+});
+
+test('manual and auto-prefilled song titles are usable', () => {
+  assert.equal(isUsableLyricsTitle('Amazing Grace'), true);
+  assert.equal(isUsableLyricsTitle('Untitled Hymn'), true);
+});
+
+test('stage-only markers are detected and stripped for Stage output', () => {
+  assert.equal(isStageOnlyLine('// Next: Amazing Grace'), true);
+  assert.equal(isStageOnlyLine('  // Next: Amazing Grace'), true);
+  assert.equal(isStageOnlyLine('https://example.com'), false);
+  assert.equal(stripStageOnlyPrefix('  //   Next: Amazing Grace'), 'Next: Amazing Grace');
+  assert.equal(getLineOutputText('// Next: Amazing Grace', 'stage'), 'Next: Amazing Grace');
+  assert.equal(getLineOutputText('// Next: Amazing Grace', 'output'), '');
+});
+
+test('stage-only toggle preserves indentation and round-trips line content', () => {
+  const original = '  Next: Amazing Grace';
+  const marked = toggleStageOnlyPrefix(original);
+
+  assert.equal(marked, '  // Next: Amazing Grace');
+  assert.equal(toggleStageOnlyPrefix(marked), original);
+  assert.equal(toggleStageOnlyPrefix('//    Watch the director'), 'Watch the director');
+});
+
+test('selection casing supports uppercase and lowercase', () => {
+  assert.equal(applyTextCasing('Grace Is HERE', TEXT_CASING.UPPERCASE), 'GRACE IS HERE');
+  assert.equal(applyTextCasing('Grace Is HERE', TEXT_CASING.LOWERCASE), 'grace is here');
+});
+
+test('sentence casing capitalizes sentences and lyric lines', () => {
+  assert.equal(
+    applyTextCasing('THIS is ONE. and THIS? yes!\nA NEW LINE', TEXT_CASING.SENTENCE),
+    'This is one. And this? Yes!\nA new line',
+  );
+});
+
+test('word and toggle casing handle punctuation and mixed case', () => {
+  assert.equal(
+    applyTextCasing("DON'T stop-believing", TEXT_CASING.CAPITALIZE_WORDS),
+    "Don't Stop-Believing",
+  );
+  assert.equal(applyTextCasing('Amazing GRACE 123!', TEXT_CASING.TOGGLE), 'aMAZING grace 123!');
+  assert.equal(applyTextCasing('Keep Me', 'unknown'), 'Keep Me');
+});
 
 test('persisted parsing preferences map to the same parser options on every load path', () => {
   const options = buildLyricsParsingOptions({
@@ -32,6 +131,7 @@ test('persisted parsing preferences map to the same parser options on every load
     maxLinesPerGroup: 2,
     enableCrossBlankLineGrouping: true,
     structureTagMode: 'keep',
+    sectionTagPhrases: [...DEFAULT_SECTION_TAG_PHRASES],
   });
 });
 
@@ -68,6 +168,7 @@ test('the complete parsing profile normalizes every exposed splitting value and 
     maxLinesPerGroup: 4,
     enableCrossBlankLineGrouping: false,
     structureTagMode: 'keep',
+    sectionTagPhrases: [...DEFAULT_SECTION_TAG_PHRASES],
   });
 });
 
@@ -205,6 +306,43 @@ test('LRC parsing preserves blank timestamped lines without visible placeholders
   assert.equal(parsed.rawText, '\nFirst line\n\nSecond line');
 });
 
+test('LRC parsing accepts millisecond timestamps for intelligent autoplay eligibility', () => {
+  const parsed = parseLrcContent([
+    '[01:01.846] One thing is finding wisdom',
+    '[01:06.849] One thing to spread it around',
+    '[01:44.000]',
+    '[01:52.342] One thing is running hours',
+  ].join('\n'), { enableSplitting: false });
+
+  assert.deepEqual(parsed.processedLines, [
+    'One thing is finding wisdom',
+    'One thing to spread it around',
+    '',
+    'One thing is running hours',
+  ]);
+  assert.deepEqual(parsed.timestamps, [6185, 6685, 10400, 11234]);
+  assert.equal(hasValidTimestamps(parsed.timestamps), true);
+});
+
+test('new-song timestamp insertion uses millisecond precision placeholders', () => {
+  assert.equal(
+    buildStandardTimestampInsertion('One thing is finding wisdom').lineText,
+    '[00:00.000] One thing is finding wisdom',
+  );
+  assert.equal(
+    buildStandardTimestampInsertion('  [01:01.846] One thing').lineText,
+    '  [01:01.846][00:00.000] One thing',
+  );
+  assert.equal(
+    buildEnhancedTimestampPlaceholder('[01:01.846] One thing'),
+    '<01:01.846>',
+  );
+  assert.equal(
+    buildEnhancedTimestampPlaceholder('[01:01.84] One thing'),
+    '<01:01.840>',
+  );
+});
+
 test('plain text parsing keeps section metadata aligned with processed lines', () => {
   const parsed = parseTxtContent([
     '[Verse 1]',
@@ -225,6 +363,50 @@ test('plain text parsing keeps section metadata aligned with processed lines', (
   assert.equal(parsed.sections[1].label, 'Chorus');
   assert.equal(parsed.lineToSection[1], parsed.sections[0].id);
   assert.equal(parsed.lineToSection[3], parsed.sections[1].id);
+});
+
+test('custom section-tag phrases drive recognition and replace removed defaults', () => {
+  assert.equal(isStructureTag('Response II', ['Response']), true);
+  assert.equal(isStructureTag('[Response: Congregation]', ['Response']), true);
+  assert.equal(isStructureTag('Verse', ['Response']), false);
+
+  const parsed = parseTxtContent('Response\nWe lift our voices', {
+    enableSplitting: false,
+    groupingConfig: {
+      enableAutoLineGrouping: false,
+      sectionTagPhrases: ['Response'],
+    },
+  });
+
+  assert.deepEqual(parsed.processedLines, ['Response', 'We lift our voices']);
+  assert.equal(parsed.sections.length, 1);
+  assert.equal(parsed.sections[0].label, 'Response');
+
+  const removedDefault = parseTxtContent('Chorus\nSing this once\nResponse\nChorus', {
+    enableSplitting: false,
+    groupingConfig: {
+      enableAutoLineGrouping: false,
+      sectionTagPhrases: ['Response'],
+    },
+  });
+
+  assert.deepEqual(removedDefault.processedLines, ['Chorus', 'Sing this once', 'Response', 'Chorus']);
+  assert.deepEqual(removedDefault.sections.map((section) => section.label), ['Response']);
+});
+
+test('new-song title prediction skips default and custom section headings', () => {
+  assert.equal(
+    extractFirstValidLine('Verse\nAmazing grace\nHow sweet the sound'),
+    'Amazing grace',
+  );
+  assert.equal(
+    extractFirstValidLine('Verse II\nAmazing grace'),
+    'Amazing grace',
+  );
+  assert.equal(
+    extractFirstValidLine('Response\nThe people sing', { sectionTagPhrases: ['Response'] }),
+    'The people sing',
+  );
 });
 
 test('app-owned grouping plans round-trip editor group and ungroup boundaries without modifying TXT', () => {
@@ -317,6 +499,43 @@ test('formatter capitalizes lyric text after leading LRC timestamps', () => {
   assert.equal(formatLyrics('[00:01.00] hello god', { enableSplitting: false }), '[00:01.00] Hello God');
 });
 
+test('formatter capitalizes the first word inside bracketed lyric lines when enabled', () => {
+  const options = { enableSplitting: false, capitalizeReligious: false };
+
+  assert.equal(formatLyrics('(hello world)', options), '(Hello world)');
+  assert.equal(formatLyrics('{  grace carries me}', options), '{ Grace carries me}');
+  assert.equal(formatLyrics('[translated lyric]', options), '[Translated lyric]');
+  assert.equal(formatLyrics('<another language>', options), '<Another language>');
+  assert.equal(formatLyrics('[00:01.00] (hello again)', options), '[00:01.00]\n(Hello again)');
+});
+
+test('formatter leaves bracketed lyric capitalization unchanged when disabled', () => {
+  assert.equal(formatLyrics('(hello world)', {
+    enableSplitting: false,
+    capitalizeFirst: false,
+    capitalizeReligious: false,
+  }), '(hello world)');
+});
+
+test('formatter does not treat metadata or structure tags as bracketed lyrics', () => {
+  const options = { enableSplitting: false, capitalizeReligious: false };
+
+  assert.equal(formatLyrics('[ti:lowercase title]', options), '[ti:lowercase title]');
+  assert.equal(formatLyrics('[verse]', options), '[verse]');
+});
+
+test('formatter uses the user-configured capitalized words list', () => {
+  assert.equal(formatLyrics('we sing to jesus and abba', {
+    enableSplitting: false,
+    capitalizedWords: ['abba'],
+  }), 'We sing to jesus and Abba');
+
+  assert.equal(formatLyrics('we sing to god', {
+    enableSplitting: false,
+    capitalizedWords: [],
+  }), 'We sing to god');
+});
+
 test('LRC parsing strips enhanced word timestamps from visible lyric text', () => {
   const parsed = parseLrcContent('[ti:Example]\n[00:01.00]Hello <00:01.25>world', { enableSplitting: false });
 
@@ -342,6 +561,17 @@ test('LRC parsing uses enhanced-only timestamps as line timestamps for autoplay'
 
 test('LRC parsing ignores metadata tags with inconsistent spacing', () => {
   const parsed = parseLrcContent('[ ti : Example Song ]\n[00:01.00]First line', { enableSplitting: false });
+
+  assert.deepEqual(parsed.processedLines, ['First line']);
+  assert.deepEqual(parsed.timestamps, [100]);
+});
+
+test('LRC parsing strips ID metadata even when it has a timestamp prefix', () => {
+  const parsed = parseLrcContent([
+    '[id: 42]',
+    '[00:00.00][id: 42]',
+    '[00:01.00]First line',
+  ].join('\n'), { enableSplitting: false });
 
   assert.deepEqual(parsed.processedLines, ['First line']);
   assert.deepEqual(parsed.timestamps, [100]);

@@ -93,6 +93,35 @@ export const useAllOutputIds = () =>
         shallow
     );
 
+const connectedOutputsEqual = (previous, next) => (
+    previous.length === next.length
+    && previous.every((output, index) => (
+        output.id === next[index]?.id
+        && output.instanceCount === next[index]?.instanceCount
+        && output.enabled === next[index]?.enabled
+        && output.masterControlled === next[index]?.masterControlled
+    ))
+);
+
+export const useConnectedOutputs = () =>
+    useStoreWithEqualityFn(
+        useLyricsStore,
+        // Time is health-tracked, but intentionally omitted because lyric output controls do not govern it.
+        (state) => [...DEFAULT_OUTPUT_IDS, ...(state.customOutputIds || []), 'stage'].reduce((connected, id) => {
+            const instanceCount = Number(state.outputConnectionCounts?.[id]) || 0;
+            if (instanceCount > 0) {
+                connected.push({
+                    id,
+                    instanceCount,
+                    enabled: id === 'stage' ? state.stageEnabled !== false : state[`${id}Enabled`] !== false,
+                    masterControlled: true,
+                });
+            }
+            return connected;
+        }, []),
+        connectedOutputsEqual
+    );
+
 export const useStageSettings = () => useOutputSettingsBase('stage');
 
 export const useDarkModeState = () =>
@@ -119,6 +148,9 @@ export const useKeyboardNavigationPreferences = () =>
 
 export const useCanvasFloatingToolbarPreference = () =>
     useLyricsStore((state) => state.showCanvasFloatingToolbar);
+
+export const usePreviewSettings = () =>
+    useLyricsStore((state) => state.previewSettings);
 
 export const useSetlistState = () =>
     useStoreWithEqualityFn(

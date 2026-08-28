@@ -14,7 +14,6 @@ import {
   MousePointer2,
   Power,
   SlidersHorizontal,
-  Sparkles,
   X,
 } from 'lucide-react';
 import { FIRST_RUN_TOUR_STEP_EVENT, getTourCardPosition } from '../utils/firstRunTour';
@@ -23,7 +22,7 @@ const TOUR_STEPS = [
   {
     id: 'welcome',
     kind: 'welcome',
-    icon: Sparkles,
+    logoSrc: '/LyricDisplay-icon.png',
     eyebrow: 'Welcome to LyricDisplay',
     title: 'Your lyrics, live in minutes',
     description: 'Let’s walk through the essentials for preparing lyrics, styling an output, and presenting with confidence.',
@@ -34,7 +33,7 @@ const TOUR_STEPS = [
     icon: FolderOpen,
     eyebrow: 'Bring in a song',
     title: 'Start with your lyrics',
-    description: 'Load a lyrics file, drag one into the workspace, or create a song from scratch. LyricDisplay also supports online search from the globe button above.',
+    description: 'Search your indexed lyric folders, drag a file into the workspace, or create a song from scratch. LyricDisplay also supports online search from the globe button above.',
     tip: 'Shortcut: Ctrl/Cmd + O',
     placement: 'right',
   },
@@ -356,7 +355,7 @@ export default function FirstRunTour({ darkMode = false, onFinish, onSkip }) {
 
   return createPortal(
     <div
-      className={`fixed inset-0 z-[10000] font-sans transition-opacity duration-200 ease-out ${isExiting ? 'opacity-0' : 'opacity-100'}`}
+      className={`fixed inset-0 z-10000 font-sans transition-opacity duration-200 ease-out ${isExiting ? 'opacity-0' : 'opacity-100'}`}
       data-first-run-tour="true"
     >
       {!targetRect && (
@@ -388,7 +387,7 @@ export default function FirstRunTour({ darkMode = false, onFinish, onSkip }) {
           aria-describedby="first-run-tour-description"
           tabIndex={-1}
           style={cardStyle}
-          className={`${isCentered ? 'relative w-full max-w-[540px]' : 'fixed w-[min(400px,calc(100vw-32px))]'} overflow-hidden rounded-3xl border shadow-2xl outline-none transition-[transform,opacity] duration-200 ease-out ${isExiting ? 'translate-y-2 scale-[0.97] opacity-0' : 'translate-y-0 scale-100 opacity-100 animate-in fade-in-0 zoom-in-95'} ${
+          className={`${isCentered ? 'relative w-full max-w-135' : 'fixed w-[min(400px,calc(100vw-32px))]'} overflow-hidden rounded-3xl border shadow-2xl outline-none transition-[transform,opacity] duration-200 ease-out ${isExiting ? 'translate-y-2 scale-[0.97] opacity-0' : 'translate-y-0 scale-100 opacity-100 animate-in fade-in-0 zoom-in-95'} ${
             darkMode
               ? 'border-slate-700/80 bg-slate-900 text-white shadow-black/50'
               : 'border-white/80 bg-white text-slate-950 shadow-slate-950/25'
@@ -428,13 +427,22 @@ export default function FirstRunTour({ darkMode = false, onFinish, onSkip }) {
             ) : (
               <>
                 <div className="flex items-start justify-between gap-4">
-                  <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${
-                    currentStep.kind === 'complete'
-                      ? darkMode ? 'bg-emerald-400/10 text-emerald-300' : 'bg-emerald-50 text-emerald-700'
-                      : darkMode ? 'bg-blue-400/10 text-blue-300' : 'bg-blue-50 text-blue-700'
-                  }`}>
-                    <Icon className="h-5 w-5" />
-                  </div>
+                  {currentStep.logoSrc ? (
+                    <img
+                      src={currentStep.logoSrc}
+                      alt=""
+                      className="h-10 w-10 shrink-0"
+                      draggable={false}
+                    />
+                  ) : (
+                    <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${
+                      currentStep.kind === 'complete'
+                        ? darkMode ? 'bg-emerald-400/10 text-emerald-300' : 'bg-emerald-50 text-emerald-700'
+                        : darkMode ? 'bg-blue-400/10 text-blue-300' : 'bg-blue-50 text-blue-700'
+                    }`}>
+                      <Icon className="h-5 w-5" />
+                    </div>
+                  )}
                   {!isLast && (
                     <button
                       type="button"

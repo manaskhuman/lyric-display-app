@@ -2,15 +2,21 @@ import React from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Input } from '../ui/input';
 import { Button } from '../ui/button';
+import { PaintPicker } from '../ui/paint-picker';
 import { Palette, SlidersHorizontal } from 'lucide-react';
 import { Switch } from '../ui/switch';
 import { Textarea } from '../ui/textarea';
 import AlwaysInfoButton from './AlwaysInfoButton';
+import {
+  LYRIC_VIDEO_BACKGROUND_SOURCES,
+  normalizeLyricVideoVisualizer,
+} from '../../../shared/lyricVideoVisualizer.js';
+import ButterchurnVisualizerSettings from '../ButterchurnVisualizerSettings';
 
-const inputClassName = 'h-9 rounded-md border-gray-300 bg-white !text-xs text-gray-900 md:!text-xs focus-visible:border-blue-500/40 focus-visible:ring-blue-500/15 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder:text-gray-400 dark:focus-visible:border-blue-500/50 dark:focus-visible:ring-blue-500/20';
-const textareaClassName = 'min-h-[72px] rounded-md border-gray-300 bg-white !text-xs text-gray-900 md:!text-xs focus-visible:border-blue-500/40 focus-visible:ring-blue-500/15 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder:text-gray-400 dark:focus-visible:border-blue-500/50 dark:focus-visible:ring-blue-500/20';
-const selectTriggerClassName = 'h-9 rounded-md border-gray-300 bg-white px-3 !text-xs text-gray-900 md:!text-xs focus:ring-1 focus:ring-blue-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200';
-const selectContentClassName = 'rounded-md border-gray-300 bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200';
+const inputClassName = 'h-9 rounded-md border-gray-300 bg-white text-xs! text-gray-900 md:text-xs! focus-visible:border-blue-500/40 focus-visible:ring-blue-500/15 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder:text-gray-400 dark:focus-visible:border-blue-500/50 dark:focus-visible:ring-blue-500/20';
+const textareaClassName = 'min-h-18 rounded-md border-gray-300 bg-white text-xs! text-gray-900 md:text-xs! focus-visible:border-blue-500/40 focus-visible:ring-blue-500/15 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder:text-gray-400 dark:focus-visible:border-blue-500/50 dark:focus-visible:ring-blue-500/20';
+const selectTriggerClassName = 'h-9 rounded-md border-gray-300 bg-white px-3 text-xs! text-gray-900 md:text-xs! focus:ring-1 focus:ring-blue-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200';
+const selectContentClassName = 'rounded-xl border-gray-300 bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200';
 const ghostButtonClassName = 'rounded-full text-gray-600 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:text-gray-400 dark:hover:bg-blue-500/10 dark:hover:text-blue-300';
 
 const clampInteger = (value, fallback, min, max) => {
@@ -30,6 +36,9 @@ export default function LyricVideoSettingsPanel({
   project,
   outputIds,
   onProjectChange,
+  backgroundSettings,
+  onBackgroundSettingsChange,
+  onChooseBackgroundMedia,
   onOpenStyleEditor,
   onOpenExport,
 }) {
@@ -49,6 +58,26 @@ export default function LyricVideoSettingsPanel({
     },
   }));
   const intro = project.intro || project.openingScreen || {};
+  const visualizer = normalizeLyricVideoVisualizer(project.visualizer);
+  const safeBackgroundSettings = backgroundSettings || {};
+  const darkMode = typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
+  const patchVisualizer = (updates) => onProjectChange?.((current) => ({
+    ...current,
+    visualizer: normalizeLyricVideoVisualizer({
+      ...current.visualizer,
+      ...updates,
+    }),
+  }));
+  const handleBackgroundSourceChange = (source) => {
+    patchVisualizer({ source });
+    onBackgroundSettingsChange?.({
+      fullScreenMode: true,
+      alwaysShowBackground: true,
+      fullScreenBackgroundType: source === LYRIC_VIDEO_BACKGROUND_SOURCES.BUTTERCHURN
+        ? 'visualizer'
+        : source,
+    });
+  };
 
   return (
     <div className="h-full overflow-y-auto bg-white dark:bg-gray-900">
@@ -63,7 +92,7 @@ export default function LyricVideoSettingsPanel({
             <AlwaysInfoButton
               side="left"
               ariaLabel="Sync offset help"
-              content="Positive values show lyrics a little earlier. Negative values hold them back if the words are arriving too soon."
+              content="Positive values show lyrics a little earlier. Negative values hold them back if the words are arriving too soon. Changes apply immediately, including during playback."
             />
           </div>
           <Field label="Global Offset (ms)">
@@ -95,7 +124,7 @@ export default function LyricVideoSettingsPanel({
 
         <section className="space-y-4 border-t border-gray-100 pt-5 dark:border-gray-800">
           <h3 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Visuals</h3>
-          <Field label="Style Source">
+          <Field label="Lyrics Style Source">
             <Select value={project.styleSource} onValueChange={(styleSource) => patchProject({ styleSource })}>
               <SelectTrigger className={selectTriggerClassName}>
                 <SelectValue />
@@ -113,8 +142,65 @@ export default function LyricVideoSettingsPanel({
           {project.styleSource === 'lyricVideo' && (
             <Button type="button" variant="ghost" className={`w-full justify-start ${ghostButtonClassName}`} onClick={onOpenStyleEditor}>
               <Palette className="h-4 w-4" />
-              Edit Lyric Video Style
+              Edit Lyrics Style
             </Button>
+          )}
+          <div className="flex items-center justify-between gap-3">
+            <h4 className="text-[11px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Background Source</h4>
+            <AlwaysInfoButton
+              side="left"
+              ariaLabel="Audio-reactive background help"
+              content="MilkDrop reacts to the attached song. It replaces the style background while preserving lyric text and layout styling."
+            />
+          </div>
+          <Select value={visualizer.source} onValueChange={handleBackgroundSourceChange}>
+            <SelectTrigger className={selectTriggerClassName}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className={selectContentClassName}>
+              <SelectItem value={LYRIC_VIDEO_BACKGROUND_SOURCES.COLOR}>Colour</SelectItem>
+              <SelectItem value={LYRIC_VIDEO_BACKGROUND_SOURCES.MEDIA}>Media</SelectItem>
+              <SelectItem value={LYRIC_VIDEO_BACKGROUND_SOURCES.BUTTERCHURN}>Visualizer</SelectItem>
+            </SelectContent>
+          </Select>
+          {visualizer.source === LYRIC_VIDEO_BACKGROUND_SOURCES.COLOR && (
+            <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/50">
+              <span className="text-xs font-medium text-gray-600 dark:text-gray-300">Background colour</span>
+              <PaintPicker
+                value={safeBackgroundSettings.fullScreenBackgroundPaint}
+                fallbackColor={safeBackgroundSettings.fullScreenBackgroundColor || '#000000'}
+                onChange={(paint) => onBackgroundSettingsChange?.({
+                  fullScreenBackgroundPaint: paint,
+                  ...(paint?.type === 'solid' ? { fullScreenBackgroundColor: paint.color } : {}),
+                })}
+                darkMode={darkMode}
+                popoverAlign="end"
+              />
+            </div>
+          )}
+          {visualizer.source === LYRIC_VIDEO_BACKGROUND_SOURCES.MEDIA && (
+            <div className="space-y-2 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/50">
+              <Button type="button" variant="outline" className="h-9 w-full text-xs" onClick={onChooseBackgroundMedia}>
+                {safeBackgroundSettings.fullScreenBackgroundMedia ? 'Change Media' : 'Choose Media'}
+              </Button>
+              {safeBackgroundSettings.fullScreenBackgroundMedia && (
+                <p
+                  className="truncate text-xs text-gray-500 dark:text-gray-400"
+                  title={safeBackgroundSettings.fullScreenBackgroundMediaName || safeBackgroundSettings.fullScreenBackgroundMedia?.name}
+                >
+                  {safeBackgroundSettings.fullScreenBackgroundMediaName || safeBackgroundSettings.fullScreenBackgroundMedia?.name || 'Selected media'}
+                </p>
+              )}
+            </div>
+          )}
+          {visualizer.source === LYRIC_VIDEO_BACKGROUND_SOURCES.BUTTERCHURN && (
+            <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/50">
+              <ButterchurnVisualizerSettings
+                value={visualizer}
+                onChange={(nextVisualizer) => patchVisualizer(nextVisualizer)}
+                darkMode={darkMode}
+              />
+            </div>
           )}
           <Field label="No-Lyric Behavior">
             <Select value={project.gapBehavior} onValueChange={(gapBehavior) => patchProject({ gapBehavior })}>
@@ -152,7 +238,8 @@ export default function LyricVideoSettingsPanel({
               checked={Boolean(intro.enabled)}
               onCheckedChange={(enabled) => patchIntro({ enabled })}
               aria-label="Enable intro"
-              className="data-[state=checked]:bg-blue-600"
+              size="compact"
+              variant="blue"
             />
           </div>
           {intro.enabled && (

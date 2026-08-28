@@ -31,6 +31,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { DatePicker, formatDateLabel } from '@/components/ui/date-picker';
 import { TimePicker, formatTimeLabel, isTimeValueInFuture } from '@/components/ui/time-picker';
 import useModal from '../hooks/useModal';
+import useToast from '../hooks/useToast';
 import {
   MAX_SCHEDULE_ITEMS,
   calculateScheduleItemStartTimes,
@@ -41,7 +42,6 @@ import {
   resolveScheduleOccurrence,
 } from '../../shared/scheduleUtils.js';
 import { downloadScheduleFile, importScheduleFile } from '../utils/scheduleFiles.js';
-import { getTimerToggleProps } from '../utils/timerUtils';
 
 const STEPS = [
   { label: 'Details', icon: CalendarClock },
@@ -54,14 +54,10 @@ const IMPORT_OPTIONS = {
   ldsch: {
     accept: '.ldsch',
     buttonLabel: 'Choose .ldsch file',
-    heading: 'LyricDisplay Schedule',
-    description: 'Open a schedule previously saved by LyricDisplay.',
   },
   document: {
     accept: '.txt,.md,.markdown,.rtf,.docx',
     buttonLabel: 'Choose document',
-    heading: 'Schedule document',
-    description: 'Choose a plain text, Markdown, rich text, or Word document.',
   },
 };
 
@@ -136,13 +132,13 @@ const SortableScheduleItem = ({ id, disabled, children }) => {
 
 const ScheduleCreatorWizard = ({ initialSchedule, isEditing = false, darkMode = false, onApply, onClose }) => {
   const { showModal } = useModal();
+  const { showToast } = useToast();
   const [step, setStep] = React.useState(0);
   const [draft, setDraft] = React.useState(() => normalizeScheduleDocument(initialSchedule));
   const [importMethod, setImportMethod] = React.useState(() => (isEditing ? '' : 'ldsch'));
   const [pasteText, setPasteText] = React.useState('');
   const [selectedFile, setSelectedFile] = React.useState(null);
   const [pendingImport, setPendingImport] = React.useState(null);
-  const [parseInfo, setParseInfo] = React.useState(null);
   const [error, setError] = React.useState('');
   const [busy, setBusy] = React.useState(false);
   const [downloaded, setDownloaded] = React.useState(false);
@@ -210,14 +206,13 @@ const ScheduleCreatorWizard = ({ initialSchedule, isEditing = false, darkMode = 
     ? 'border-slate-700/80 bg-slate-900/55 shadow-black/10'
     : 'border-slate-200 bg-white shadow-slate-950/5';
   const insetClass = darkMode ? 'border-slate-700/70 bg-slate-950/35' : 'border-slate-200 bg-slate-50/85';
-  const outlineButtonClass = darkMode ? 'border-slate-700 bg-slate-900 text-slate-100 hover:bg-slate-800' : 'border-slate-300 bg-white hover:bg-slate-50';
+  const outlineButtonClass = darkMode ? 'border-slate-600 bg-slate-800 text-slate-100 hover:border-slate-500 hover:bg-slate-700' : 'border-slate-300 bg-white hover:bg-slate-50';
   const fieldLabelClass = `block text-[11px] font-semibold tracking-wide ${darkMode ? 'text-slate-300' : 'text-slate-600'}`;
   const cardHeaderClass = darkMode ? 'border-slate-700/70 bg-slate-950/20' : 'border-slate-200 bg-slate-50/70';
   const hairlineBorder = darkMode ? 'border-slate-800' : 'border-slate-200';
   const hairlineDivide = darkMode ? 'divide-slate-800' : 'divide-slate-200';
   const rowHoverClass = darkMode ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50';
   const numberBadgeClass = darkMode ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-500';
-  const scheduleSwitchProps = getTimerToggleProps(darkMode);
   const itemTitleClass = darkMode
     ? 'h-8 min-w-0 flex-1 border border-transparent bg-transparent px-2 text-xs font-medium text-slate-100 shadow-none focus-visible:border-slate-700 focus-visible:bg-slate-950/50 focus-visible:ring-1 focus-visible:ring-blue-500/30 md:text-xs'
     : 'h-8 min-w-0 flex-1 border border-transparent bg-transparent px-2 text-xs font-medium text-slate-900 shadow-none focus-visible:border-slate-200 focus-visible:bg-white focus-visible:ring-1 focus-visible:ring-blue-500/30 md:text-xs';
@@ -304,7 +299,6 @@ const ScheduleCreatorWizard = ({ initialSchedule, isEditing = false, darkMode = 
     });
     if (result !== 'clear') return;
     setDraft((current) => ({ ...current, items: [] }));
-    setParseInfo(null);
     setActiveItemId(null);
     setPendingScrollItemId(null);
   }, [draft.items.length, showModal]);
@@ -327,7 +321,6 @@ const ScheduleCreatorWizard = ({ initialSchedule, isEditing = false, darkMode = 
     const item = createBlankItem(0);
     setPendingScrollItemId(item.id);
     setDraft((current) => ({ ...current, items: [item] }));
-    setParseInfo(null);
     setPasteText('');
     setSelectedFile(null);
     setPendingImport(null);
@@ -366,11 +359,21 @@ const ScheduleCreatorWizard = ({ initialSchedule, isEditing = false, darkMode = 
         ? importedSchedule
         : { ...current, items: importedSchedule.items }
     ));
-    setParseInfo(result);
+    const sourceName = result.sourceName || 'Imported schedule';
+    const itemCount = result.stats?.itemCount || importedSchedule.items.length;
+    const warningText = Array.isArray(result.warnings) && result.warnings.length > 0
+      ? ` ${result.warnings.join(' ')}`
+      : '';
+    showToast({
+      title: result.sourceType === 'ldsch' ? 'Schedule imported' : 'Schedule items imported',
+      message: `${sourceName}: ${itemCount} ${itemCount === 1 ? 'item' : 'items'} found.${warningText}`,
+      variant: warningText ? 'info' : 'success',
+      duration: warningText ? 8000 : 5000,
+    });
     setError('');
     setDownloaded(false);
     setStep(1);
-  }, []);
+  }, [showToast]);
 
   const handleFile = React.useCallback(async (event) => {
     const file = event.target.files?.[0];
@@ -733,19 +736,7 @@ const ScheduleCreatorWizard = ({ initialSchedule, isEditing = false, darkMode = 
                 </div>
               </div>
 
-              <div className={`space-y-4 border-t pt-6 ${hairlineBorder}`}>
-                <div className="flex items-center gap-2.5">
-                  <FileText className="h-4 w-4 text-blue-500" />
-                  <div>
-                    <h4 className="text-xs font-semibold">{isEditing ? 'Change Schedule' : 'Add schedule items'}</h4>
-                    <p className={`mt-0.5 text-[11px] ${mutedText}`}>
-                      {isEditing
-                        ? 'Optional: documents and pasted text replace the items; a .ldsch file replaces the full schedule.'
-                        : 'Choose one source for this schedule.'}
-                    </p>
-                  </div>
-                </div>
-
+              <div className="flex flex-col gap-4">
                 <div role="radiogroup" aria-label="Schedule source" className="grid gap-2.5 sm:grid-cols-4">
                   {IMPORT_METHODS.map((method) => {
                     const MethodIcon = method.icon;
@@ -836,10 +827,6 @@ const ScheduleCreatorWizard = ({ initialSchedule, isEditing = false, darkMode = 
                         <div className={`flex h-11 w-11 items-center justify-center rounded-full ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-white text-slate-500 shadow-sm'}`}>
                           <FileUp className="h-5 w-5" />
                         </div>
-                        <div className="min-w-0">
-                          <h5 className="text-xs font-semibold">{IMPORT_OPTIONS[importMethod].heading}</h5>
-                          <p className={`mt-1 text-[11px] leading-relaxed ${mutedText}`}>{IMPORT_OPTIONS[importMethod].description}</p>
-                        </div>
                         <span className={`inline-flex h-8 items-center justify-center gap-2 rounded-md border px-3 text-xs font-medium shadow-sm ${outlineButtonClass}`}>
                           <FileUp className="h-4 w-4" /> {IMPORT_OPTIONS[importMethod].buttonLabel}
                         </span>
@@ -858,10 +845,7 @@ const ScheduleCreatorWizard = ({ initialSchedule, isEditing = false, darkMode = 
                 <Button
                   type="button"
                   size="sm"
-                  variant="outline"
-                  className={darkMode
-                    ? 'border-red-400/30 bg-red-500/10 text-red-300 hover:border-red-400/40 hover:bg-red-500/15 hover:text-red-200'
-                    : `${outlineButtonClass} text-red-600 hover:text-red-700`}
+                  variant="destructiveOutline"
                   onClick={confirmClearItems}
                   disabled={draft.items.length === 0}
                 >
@@ -871,25 +855,6 @@ const ScheduleCreatorWizard = ({ initialSchedule, isEditing = false, darkMode = 
                   <Plus className="h-4 w-4" /> Add item
                 </Button>
               </div>
-
-              {parseInfo && (
-                <div className={`flex items-start gap-3 rounded-xl border px-4 py-3 ${darkMode ? 'border-emerald-400/20 bg-emerald-500/10' : 'border-emerald-200 bg-emerald-50/70'}`}>
-                  <CheckCircle2 className={`mt-0.5 h-4 w-4 shrink-0 ${darkMode ? 'text-emerald-300' : 'text-emerald-600'}`} />
-                  <div className="min-w-0 text-xs">
-                    <p><span className="font-semibold">{parseInfo.sourceName || 'Imported schedule'}</span><span className={mutedText}> · {parseInfo.stats?.itemCount || draft.items.length} items found</span></p>
-                    {parseInfo.warnings?.map((warning) => <p key={warning} className={`mt-1 leading-relaxed ${mutedText}`}>{warning}</p>)}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setParseInfo(null)}
-                    className={`ml-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors ${darkMode ? 'text-emerald-300/70 hover:bg-emerald-400/10 hover:text-emerald-200' : 'text-emerald-700/60 hover:bg-emerald-100 hover:text-emerald-800'}`}
-                    aria-label="Dismiss import summary"
-                    title="Dismiss"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              )}
 
               {draft.items.length > 0 ? (
                 <DndContext
@@ -947,7 +912,7 @@ const ScheduleCreatorWizard = ({ initialSchedule, isEditing = false, darkMode = 
                       <p className="text-xs font-semibold">Auto-start the next timed item</p>
                       <p className={`mt-1 text-[11px] leading-relaxed ${mutedText}`}>Manual items always wait for the operator.</p>
                     </div>
-                    <Switch checked={draft.autoStartNext} onCheckedChange={(checked) => updateDraft({ autoStartNext: checked })} {...scheduleSwitchProps} />
+                    <Switch checked={draft.autoStartNext} onCheckedChange={(checked) => updateDraft({ autoStartNext: checked })} size="small" variant="control" />
                   </div>
 
                   <div className="flex items-start gap-3 p-4">
@@ -956,7 +921,16 @@ const ScheduleCreatorWizard = ({ initialSchedule, isEditing = false, darkMode = 
                       <p className="text-xs font-semibold">Show global time during manual items</p>
                       <p className={`mt-1 text-[11px] leading-relaxed ${mutedText}`}>Displays the global time during schedule items without set duration.</p>
                     </div>
-                    <Switch checked={draft.showGlobalTimeDuringManualItems} onCheckedChange={(checked) => updateDraft({ showGlobalTimeDuringManualItems: checked })} {...scheduleSwitchProps} />
+                    <Switch checked={draft.showGlobalTimeDuringManualItems} onCheckedChange={(checked) => updateDraft({ showGlobalTimeDuringManualItems: checked })} size="small" variant="control" />
+                  </div>
+
+                  <div className="flex items-start gap-3 p-4">
+                    <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${darkMode ? 'bg-emerald-500/10 text-emerald-300' : 'bg-emerald-50 text-emerald-600'}`}><Clock3 className="h-4 w-4" /></div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-semibold">Show global clock during schedule pause</p>
+                      <p className={`mt-1 text-[11px] leading-relaxed ${mutedText}`}>Replace the paused timer with the current time until the schedule resumes.</p>
+                    </div>
+                    <Switch checked={Boolean(draft.showGlobalClockDuringPause)} onCheckedChange={(checked) => updateDraft({ showGlobalClockDuringPause: checked })} size="small" variant="control" />
                   </div>
 
                   <div className="p-4">
@@ -966,7 +940,7 @@ const ScheduleCreatorWizard = ({ initialSchedule, isEditing = false, darkMode = 
                         <p className="text-xs font-semibold">Transition indicator</p>
                         <p className={`mt-1 text-[11px] leading-relaxed ${mutedText}`}>Show a short up-next countdown between schedule items.</p>
                       </div>
-                      <Switch checked={draft.indicator.enabled} onCheckedChange={(checked) => updateDraft({ indicator: { ...draft.indicator, enabled: checked } })} {...scheduleSwitchProps} />
+                      <Switch checked={draft.indicator.enabled} onCheckedChange={(checked) => updateDraft({ indicator: { ...draft.indicator, enabled: checked } })} size="small" variant="control" />
                     </div>
                     <div className={`grid transition-all duration-200 ease-out ${draft.indicator.enabled ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}>
                       <div className="overflow-hidden">
@@ -984,7 +958,7 @@ const ScheduleCreatorWizard = ({ initialSchedule, isEditing = false, darkMode = 
                       <p className="text-xs font-semibold">Timing alerts</p>
                       <p className={`mt-1 text-[11px] leading-relaxed ${mutedText}`}>Notify the operator when a manual item begins or the projected finish runs late.</p>
                     </div>
-                    <Switch checked={draft.notificationsEnabled} onCheckedChange={handleNotificationsChange} {...scheduleSwitchProps} />
+                    <Switch checked={draft.notificationsEnabled} onCheckedChange={handleNotificationsChange} size="small" variant="control" />
                   </div>
                 </div>
               </div>

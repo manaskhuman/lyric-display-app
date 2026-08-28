@@ -1,4 +1,4 @@
-import { app, ipcMain, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain } from 'electron';
 import * as userPreferences from '../userPreferences.js';
 import { recordSuccessfulAppLaunch } from '../telemetry.js';
 import { setUpdateSessionActive } from '../updater.js';
@@ -7,7 +7,14 @@ import { setUpdateSessionActive } from '../updater.js';
  * Register user preferences IPC handlers
  * Handles getting, setting, and resetting user preferences
  */
-export function registerPreferencesHandlers({ getMainWindow, syncBackendParsingConfig }) {
+export function registerPreferencesHandlers({ syncBackendParsingConfig }) {
+  const broadcastPreferencesUpdated = (category) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win || win.isDestroyed()) continue;
+      try { win.webContents.send('preferences:updated', { category }); } catch { }
+    }
+  };
+
   const syncParsingConfig = () => {
     if (typeof syncBackendParsingConfig !== 'function') return;
     syncBackendParsingConfig(userPreferences.getParsingConfig());
@@ -48,17 +55,21 @@ export function registerPreferencesHandlers({ getMainWindow, syncBackendParsingC
       const usageSharingWasEnabled = path === 'advanced.shareAnonymousUsageData'
         ? userPreferences.getPreference(path) === true
         : false;
-      userPreferences.setPreference(path, value);
+      const result = userPreferences.setPreference(path, value);
+      if (!result.success) return result;
       if (path === 'general.liveSafetyMode') {
         setUpdateSessionActive(Boolean(value));
       }
       if (typeof path === 'string' && (path.startsWith('parsing.') || path.startsWith('lineSplitting.'))) {
         syncParsingConfig();
       }
+      if (typeof path === 'string') {
+        broadcastPreferencesUpdated(path.split('.')[0] || null);
+      }
       if (app.isPackaged && path === 'advanced.shareAnonymousUsageData' && value === true && !usageSharingWasEnabled) {
         void recordSuccessfulAppLaunch({ enabled: true });
       }
-      return { success: true };
+      return result;
     } catch (error) {
       console.error('[UserPreferences] Error setting preference:', error);
       return { success: false, error: error.message };
@@ -74,6 +85,7 @@ export function registerPreferencesHandlers({ getMainWindow, syncBackendParsingC
       }
       if (result.success) {
         syncParsingConfig();
+        broadcastPreferencesUpdated(null);
       }
       if (app.isPackaged && result.success && preferences?.advanced?.shareAnonymousUsageData === true && !usageSharingWasEnabled) {
         void recordSuccessfulAppLaunch({ enabled: true });
@@ -87,9 +99,11 @@ export function registerPreferencesHandlers({ getMainWindow, syncBackendParsingC
 
   ipcMain.handle('preferences:reset-category', async (_event, { category }) => {
     try {
-      userPreferences.resetCategoryToDefaults(category);
+      const result = userPreferences.resetCategoryToDefaults(category);
+      if (!result.success) return result;
       if (category === 'advanced') {
-        userPreferences.setPreference('advanced.telemetryConsentDecided', true);
+        const decisionResult = userPreferences.setPreference('advanced.telemetryConsentDecided', true);
+        if (!decisionResult.success) return decisionResult;
       }
       if (category === 'general') {
         setUpdateSessionActive(false);
@@ -97,7 +111,8 @@ export function registerPreferencesHandlers({ getMainWindow, syncBackendParsingC
       if (category === 'parsing' || category === 'lineSplitting') {
         syncParsingConfig();
       }
-      return { success: true };
+      broadcastPreferencesUpdated(category);
+      return result;
     } catch (error) {
       console.error('[UserPreferences] Error resetting category:', error);
       return { success: false, error: error.message };
@@ -108,34 +123,15 @@ export function registerPreferencesHandlers({ getMainWindow, syncBackendParsingC
     try {
       const result = userPreferences.resetAllToDefaults();
       if (result.success) {
-        userPreferences.setPreference('advanced.telemetryConsentDecided', true);
+        const decisionResult = userPreferences.setPreference('advanced.telemetryConsentDecided', true);
+        if (!decisionResult.success) return decisionResult;
         setUpdateSessionActive(false);
         syncParsingConfig();
+        broadcastPreferencesUpdated(null);
       }
       return result;
     } catch (error) {
       console.error('[UserPreferences] Error resetting all preferences:', error);
-      return { success: false, error: error.message };
-    }
-  });
-
-  ipcMain.handle('preferences:browse-default-path', async () => {
-    try {
-      const win = getMainWindow?.();
-      const result = await dialog.showOpenDialog(win || undefined, {
-        title: 'Select Default Lyrics Folder',
-        properties: ['openDirectory', 'createDirectory']
-      });
-
-      if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
-        return { success: false, canceled: true };
-      }
-
-      const selectedPath = result.filePaths[0];
-      userPreferences.setPreference('fileHandling.defaultLyricsPath', selectedPath);
-      return { success: true, path: selectedPath };
-    } catch (error) {
-      console.error('[UserPreferences] Error browsing for default path:', error);
       return { success: false, error: error.message };
     }
   });

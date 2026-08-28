@@ -1,6 +1,7 @@
 import React from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
-import { ControlSocketProvider } from '../../context/ControlSocketProvider';
+import { ControlSocketProvider, useControlSocket } from '../../context/ControlSocketProvider';
+import { usePreviewSettings } from '../../hooks/useStoreSelectors';
 import ConditionalDesktopShell from './ConditionalDesktopShell';
 import StartupReadinessReporter from './StartupReadinessReporter';
 
@@ -13,6 +14,35 @@ const ShortcutsHelpBridge = React.lazy(() => import('../bridges/ShortcutsHelpBri
 const SupportDevelopmentBridge = React.lazy(() => import('../bridges/SupportDevelopmentBridge'));
 const UpdaterBridge = React.lazy(() => import('../bridges/UpdaterBridge'));
 const FirstRunTourBridge = React.lazy(() => import('../bridges/FirstRunTourBridge'));
+const FileNavigatorModal = React.lazy(() => import('../FileNavigatorModal'));
+const FileSaveNavigatorModal = React.lazy(() => import('../FileSaveNavigatorModal'));
+
+function PreviewSettingsSyncBridge() {
+  const previewSettings = usePreviewSettings();
+  const {
+    emitStyleUpdate,
+    isAuthenticated,
+    isConnected,
+    ready,
+    socket,
+  } = useControlSocket();
+  const lastSentSignatureRef = React.useRef('');
+
+  React.useEffect(() => {
+    if (!isConnected || !isAuthenticated || !ready || !previewSettings) {
+      lastSentSignatureRef.current = '';
+      return;
+    }
+
+    const signature = `${socket?.id || 'socket'}:${JSON.stringify(previewSettings)}`;
+    if (signature === lastSentSignatureRef.current) return;
+    if (emitStyleUpdate('preview', previewSettings)) {
+      lastSentSignatureRef.current = signature;
+    }
+  }, [emitStyleUpdate, isAuthenticated, isConnected, previewSettings, ready, socket?.id]);
+
+  return null;
+}
 
 function MainWindowBridges() {
   return (
@@ -43,7 +73,12 @@ export default function MainWindowShell() {
     <ConditionalDesktopShell>
       <ControlSocketProvider>
         <StartupReadinessReporter />
+        <PreviewSettingsSyncBridge />
         <MainWindowBridges />
+        <React.Suspense fallback={null}>
+          <FileNavigatorModal />
+          <FileSaveNavigatorModal />
+        </React.Suspense>
         <Outlet />
       </ControlSocketProvider>
     </ConditionalDesktopShell>

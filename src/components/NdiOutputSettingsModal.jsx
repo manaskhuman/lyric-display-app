@@ -121,7 +121,7 @@ const NdiOutputSettingsModal = ({ darkMode, outputKey, onClose }) => {
 
   if (loading || !settings) {
     return (
-      <div className="flex items-center justify-center h-[200px]">
+      <div className="flex items-center justify-center h-50">
         <div className={`w-6 h-6 border-2 border-t-transparent rounded-full animate-spin ${darkMode ? 'border-gray-400' : 'border-gray-500'}`} />
       </div>
     );
@@ -167,11 +167,8 @@ const NdiOutputSettingsModal = ({ darkMode, outputKey, onClose }) => {
           <Switch
             checked={settings.enabled || false}
             onCheckedChange={(checked) => updateSetting('enabled', checked)}
-            className={`!h-7 !w-14 !border-0 shadow-sm transition-colors ${darkMode
-              ? 'data-[state=checked]:bg-green-400 data-[state=unchecked]:bg-gray-600'
-              : 'data-[state=checked]:bg-black data-[state=unchecked]:bg-gray-300'
-              }`}
-            thumbClassName="!h-5 !w-6 data-[state=checked]:!translate-x-7 data-[state=unchecked]:!translate-x-1"
+            size="medium"
+            variant="control"
           />
         </div>
 

@@ -1,15 +1,18 @@
 import React from 'react';
-import { AlertTriangle, CheckCircle2, Monitor, MonitorUp, Network, Power, Tv2, Radio, Loader2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, LayoutGrid, Monitor, MonitorUp, Network, Power, Tv2, PictureInPicture2, Loader2, Timer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import useToast from '@/hooks/useToast';
 import useLyricsStore from '@/context/LyricsStore';
 import { formatOutputLabel } from '@/utils/outputLabels';
 import { cn } from '@/lib/utils';
 import { ModalActionButton, ModalFooter } from '@/components/modal/modalActions';
-import { DEFAULT_OUTPUT_IDS } from '../../shared/outputRegistry.js';
+import {
+  DEFAULT_OUTPUT_IDS,
+  PROJECTION_STATE_CHANGED_MESSAGE,
+  PROJECTION_SYNC_CHANNEL,
+} from '../../shared/outputRegistry.js';
 
 const DESKTOP_TARGET = 'desktop';
-const PROJECTION_SYNC_CHANNEL = 'lyricdisplay-projection-state';
 
 const toDisplayId = (value) => {
   if (value === null || typeof value === 'undefined') return null;
@@ -42,6 +45,7 @@ const projectionTargetLabel = (projection) => {
 const outputHint = (value, option = {}) => {
   if (option.hint) return option.hint;
   if (value === 'lyric-video-studio') return 'Live studio preview';
+  if (value === 'preview') return 'All output previews';
   if (value === 'stage') return 'Presenter view';
   if (value === 'time') return 'Clock and timer';
   if (value === 'output1') return 'Main lyrics display';
@@ -50,9 +54,10 @@ const outputHint = (value, option = {}) => {
 };
 
 const outputIcon = (value) => {
-  if (value === 'stage') return Radio;
-  if (value === 'time') return Monitor;
+  if (value === 'stage') return PictureInPicture2;
+  if (value === 'time') return Timer;
   if (value === 'lyric-video-studio') return MonitorUp;
+  if (value === 'preview') return LayoutGrid;
   return Tv2;
 };
 
@@ -97,7 +102,7 @@ const ProjectOutputModal = ({
   const syncSenderIdRef = React.useRef(`projection-modal-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 
   const outputOptions = React.useMemo(() => {
-    const baseOptions = [...DEFAULT_OUTPUT_IDS, ...customOutputIds, 'stage', 'time']
+    const baseOptions = [...DEFAULT_OUTPUT_IDS, ...customOutputIds, 'stage', 'time', 'preview']
       .map((value) => ({ value, label: formatOutputLabel(value) }));
     const byValue = new Map(baseOptions.map((option) => [option.value, option]));
 
@@ -155,7 +160,7 @@ const ProjectOutputModal = ({
     try {
       const channel = new BroadcastChannel(PROJECTION_SYNC_CHANNEL);
       channel.postMessage({
-        type: 'projection-state-changed',
+        type: PROJECTION_STATE_CHANGED_MESSAGE,
         senderId: syncSenderIdRef.current,
         sentAt: Date.now(),
       });
@@ -168,7 +173,7 @@ const ProjectOutputModal = ({
     const channel = new BroadcastChannel(PROJECTION_SYNC_CHANNEL);
     channel.onmessage = (event) => {
       if (
-        event?.data?.type === 'projection-state-changed'
+        event?.data?.type === PROJECTION_STATE_CHANGED_MESSAGE
         && event.data.senderId !== syncSenderIdRef.current
       ) {
         loadProjectionState();

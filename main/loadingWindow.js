@@ -105,7 +105,7 @@ export function createLoadingWindow() {
           border-radius: 22px;
           display: flex;
           overflow: hidden;
-          box-shadow: 0 10px 24px -8px rgba(0, 0, 0, 0.42);
+          box-shadow: 0 8px 18px -10px rgba(0, 0, 0, 0.42);
           position: relative;
         }
 
@@ -140,7 +140,7 @@ export function createLoadingWindow() {
           display: flex;
           flex-direction: column;
           padding: 42px 40px 28px;
-          background: linear-gradient(135deg, #000000 0%, #1F2937 50%, #111827 100%);
+          background: linear-gradient(135deg, #020408 0%, #101722 52%, #070B12 100%);
         }
         
         .center-content {

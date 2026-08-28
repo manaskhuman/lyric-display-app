@@ -1,4 +1,4 @@
-import { Palette, Power, Save, Trash2, CircleHelp } from 'lucide-react';
+import { CircleHelp, Fullscreen, Palette, Power, Save, Trash2 } from 'lucide-react';
 import { Tooltip } from '@/components/ui/tooltip';
 import { formatOutputLabel } from '../../utils/outputLabels';
 
@@ -14,6 +14,8 @@ const PanelHeaderActions = ({
   darkMode,
   hideLiveActions = false,
   handleToggleOutput,
+  handleFullScreenToggle,
+  fullScreenModeChecked,
   isOutputEnabled,
   onDeleteOutput,
   outputKey,
@@ -23,7 +25,7 @@ const PanelHeaderActions = ({
   showToast,
 }) => (
   <div className="flex items-center justify-between mb-4">
-    <h3 className={`text-[13px] font-medium uppercase leading-5 tracking-wide ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+    <h3 className={`text-xs font-medium uppercase leading-5 tracking-wide ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
       {title || `${formatOutputLabel(outputKey, { uppercase: true })} SETTINGS`}
     </h3>
 
@@ -60,6 +62,27 @@ const PanelHeaderActions = ({
               }`}
           >
             <Power className="w-4 h-4" />
+          </button>
+        </Tooltip>
+      )}
+
+      {!hideLiveActions && (
+        <Tooltip content={fullScreenModeChecked ? 'Turn off full screen mode' : 'Turn on full screen mode'} side="bottom">
+          <button
+            type="button"
+            onClick={() => handleFullScreenToggle(!fullScreenModeChecked)}
+            aria-label="Toggle full screen mode"
+            aria-pressed={fullScreenModeChecked}
+            className={`p-1.5 rounded-lg transition-colors ${fullScreenModeChecked
+              ? darkMode
+                ? 'bg-green-500/20 text-green-300 hover:bg-green-500/30'
+                : 'bg-green-100 text-green-700 hover:bg-green-200'
+              : darkMode
+                ? 'hover:bg-gray-700 text-gray-400 hover:text-gray-200'
+                : 'hover:bg-gray-100 text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            <Fullscreen className="h-4 w-4" />
           </button>
         </Tooltip>
       )}
@@ -145,13 +168,14 @@ const PanelHeaderActions = ({
         <button
           onClick={() => {
             showModal({
-              title: 'Output Templates',
-              headerDescription: 'Choose from professionally designed output presets',
+              title: 'Choose an output look',
+              headerDescription: `Preview a style, then apply it to ${formatOutputLabel(outputKey)}`,
               component: 'OutputTemplates',
               variant: 'info',
-              size: 'large',
-              scrollBehavior: 'scroll',
-              dismissLabel: 'Close',
+              size: 'xl',
+              icon: <Palette className="h-6 w-6" />,
+              customLayout: true,
+              actions: [],
               outputKey,
               onApplyTemplate: (template) => {
                 const templateSettings = template.getSettings

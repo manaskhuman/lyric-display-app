@@ -14,8 +14,6 @@ export default function QuickParserPopover({
   quickParserLoading,
   quickParserOpen,
   quickParserSettings,
-  quickSwitchClassName,
-  quickSwitchThumbClassName,
   reloadingWithParser,
   setQuickParserOpen,
   updateQuickParserSetting,
@@ -45,8 +43,8 @@ export default function QuickParserPopover({
         <Switch
           checked={quickParserSettings.enableAutoLineGrouping}
           onCheckedChange={(checked) => updateQuickParserSetting('enableAutoLineGrouping', checked)}
-          className={quickSwitchClassName}
-          thumbClassName={quickSwitchThumbClassName}
+          size="medium"
+          variant="control"
         />
       </div>
 
@@ -72,8 +70,8 @@ export default function QuickParserPopover({
         <Switch
           checked={quickParserSettings.enableTranslationGrouping}
           onCheckedChange={(checked) => updateQuickParserSetting('enableTranslationGrouping', checked)}
-          className={quickSwitchClassName}
-          thumbClassName={quickSwitchThumbClassName}
+          size="medium"
+          variant="control"
         />
       </div>
     </div>
@@ -119,7 +117,7 @@ export default function QuickParserPopover({
                   variant="outline"
                   size="icon"
                   onClick={() => setQuickParserOpen(false)}
-                  className={darkMode ? 'border-gray-800 bg-gray-900 text-gray-200 hover:bg-gray-800' : ''}
+                  className={darkMode ? 'border-gray-600 bg-gray-800 text-gray-200 hover:border-gray-500 hover:bg-gray-700 hover:text-white' : ''}
                   aria-label="Close quick parser"
                 >
                   <X className="h-4 w-4" />
