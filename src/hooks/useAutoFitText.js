@@ -12,6 +12,28 @@ export const getTextFitShape = (text) => String(text || '')
   .replace(/[A-Z]/g, 'A')
   .replace(/[a-z]/g, 'a');
 
+export const doesTextElementFit = (textEl, availableWidth, availableHeight) => {
+  if (!textEl) return false;
+  const measuredWidth = Math.max(
+    Number(textEl.scrollWidth) || 0,
+    Number(textEl.offsetWidth) || 0,
+  );
+  const measuredHeight = Math.max(
+    Number(textEl.scrollHeight) || 0,
+    Number(textEl.offsetHeight) || 0,
+  );
+  return measuredWidth <= availableWidth && measuredHeight <= availableHeight;
+};
+
+export const createLatestElementRef = (setElement) => (element) => {
+  if (!element) return undefined;
+  setElement(element);
+  return () => {
+    // AnimatePresence can release an exiting node after its replacement is already attached.
+    setElement((current) => (current === element ? null : current));
+  };
+};
+
 const rememberAutoFit = (key, value) => {
   if (autoFitCache.has(key)) {
     autoFitCache.delete(key);
@@ -26,6 +48,8 @@ const useAutoFitText = ({ enabled = true, fitKey }) => {
   const [containerEl, setContainerEl] = React.useState(null);
   const [textEl, setTextEl] = React.useState(null);
   const [fontSize, setFontSize] = React.useState(null);
+  const containerRef = React.useMemo(() => createLatestElementRef(setContainerEl), []);
+  const textRef = React.useMemo(() => createLatestElementRef(setTextEl), []);
 
   React.useLayoutEffect(() => {
     if (!enabled || !containerEl || !textEl) return undefined;
@@ -49,8 +73,7 @@ const useAutoFitText = ({ enabled = true, fitKey }) => {
       while (low <= high) {
         const mid = Math.floor((low + high) / 2);
         textEl.style.fontSize = `${mid}px`;
-        const rect = textEl.getBoundingClientRect();
-        if (rect.width <= availableWidth && rect.height <= availableHeight) {
+        if (doesTextElementFit(textEl, availableWidth, availableHeight)) {
           best = mid;
           low = mid + 1;
         } else {
@@ -127,8 +150,8 @@ const useAutoFitText = ({ enabled = true, fitKey }) => {
   }, [containerEl, enabled, fitKey, textEl]);
 
   return {
-    containerRef: setContainerEl,
-    textRef: setTextEl,
+    containerRef,
+    textRef,
     fontSize,
   };
 };

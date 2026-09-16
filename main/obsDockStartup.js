@@ -2,6 +2,8 @@ import { app } from 'electron';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import { appRoot, isDev } from './paths.js';
+import { getBackendPort } from './backend.js';
+import { flushRendererPersistentStorage } from './rendererPersistentStorage.js';
 
 const OBS_DOCK_LOGIN_ARGS = ['--headless', '--obs-dock'];
 
@@ -15,7 +17,8 @@ function getDockFilePath() {
 
 function getDockFileUrl(dockFilePath) {
   const dockFileUrl = pathToFileURL(dockFilePath).href;
-  return isDev ? `${dockFileUrl}?mode=dev` : dockFileUrl;
+  const query = isDev ? 'mode=dev' : `port=${getBackendPort()}`;
+  return `${dockFileUrl}?${query}`;
 }
 
 function getRelaunchArgs() {
@@ -96,7 +99,7 @@ export function getObsDockSetupInfo() {
     dockFileUrl: getDockFileUrl(dockFilePath),
     controllerUrl: isDev
       ? 'http://127.0.0.1:5173/?dock=obs&clientType=obsDock'
-      : 'http://127.0.0.1:4000/obs-dock',
+      : `http://127.0.0.1:${getBackendPort()}/obs-dock`,
     headlessCommand: isDev
       ? 'npm run electron-dev:headless'
       : `"${process.execPath}" ${OBS_DOCK_LOGIN_ARGS.join(' ')}`,
@@ -106,6 +109,8 @@ export function getObsDockSetupInfo() {
 
 export function relaunchInObsDockHeadlessMode() {
   try {
+    const storageResult = flushRendererPersistentStorage();
+    if (!storageResult.success) return storageResult;
     app.relaunch({ args: getRelaunchArgs() });
     app.exit(0);
     return { success: true };
@@ -117,6 +122,8 @@ export function relaunchInObsDockHeadlessMode() {
 
 export function relaunchInDesktopMode() {
   try {
+    const storageResult = flushRendererPersistentStorage();
+    if (!storageResult.success) return storageResult;
     clearHeadlessEnvironment();
     app.isQuitting = true;
     app.relaunch({ args: getDesktopRelaunchArgs() });

@@ -38,16 +38,18 @@ flowchart LR
 
 | Concern | Development | Packaged application |
 | --- | --- | --- |
-| Renderer URL | Vite on `http://localhost:5173` | Backend serves `dist/` on `http://127.0.0.1:4000` |
+| Renderer URL | Vite on `http://localhost:5173` | Backend serves `dist/` on `http://127.0.0.1:<port>` (`4000` by default) |
 | Router | `BrowserRouter` | `BrowserRouter` |
 | Backend | Electron forks `server/index.js` with `NODE_ENV=development` | Electron forks the ASAR-packaged backend with `NODE_ENV=production` and a real `userData` working directory |
-| API/socket access | Vite proxies `/api`, `/socket.io`, and `/media` to port `4000`; Electron renderers resolve port `4000` directly | Same origin as the backend-served renderer |
+| API/socket access | Vite proxies `/api`, `/socket.io`, and `/media` to port `4000`; Electron development resolves port `4000` directly | Same origin as the backend-served renderer; the launch-time production port comes from Advanced preferences |
 | Native bridge | Electron windows only | Electron windows only |
 | Persistent profile | Isolated `LyricDisplay-Dev` Electron, Chromium, backend, and credential namespaces | Production `LyricDisplay` profile with legacy-data migration |
 
 The backend is a separate npm package with its own [`server/package.json`](../server/package.json) and lockfile. A clean checkout therefore needs both root and server dependencies installed. Backend production dependencies are also listed in the root manifest so electron-builder can package and resolve them beside the ASAR-hosted server; keep the two manifests aligned when those dependencies change. The optional `lyricdisplay-ndi/` directory is a separately cloned, ignored repository, not part of this repository's tracked tree.
 
-Development and packaged profiles can coexist on disk, but they intentionally retain the same backend and external-control ports and therefore are not supported concurrently. Backend readiness probes carry a per-child challenge so one profile cannot mistake the other profile's running backend for its own.
+Development and packaged profiles can coexist on disk. Development always uses backend port `4000`; packaged builds default to `4000` but can select another production port in Advanced preferences. Backend readiness probes carry a per-child challenge so one profile cannot mistake another backend for its own.
+
+Persistent Electron renderer state is mirrored through the preload bridge into the native `renderer-persistent-storage` store. On first use it adopts the active origin's existing browser storage; after that, the native snapshot remains authoritative when the packaged server port changes. This prevents a new HTTP origin from replaying onboarding or resetting timer, output, and workspace state. Port changes are rejected while the requested port is occupied; if a saved port becomes occupied later, native startup recovery can select another available port without discarding renderer state. Browser-only clients continue to use their own origin-scoped storage.
 
 Electron-builder smart-unpacks the native runtime modules required by the packaged app. Packaging filters remove compiler sources and intermediate build products from `better-sqlite3` and `@julusian/midi`, but retain their runtime `.node` binaries and published prebuilds for each target platform.
 

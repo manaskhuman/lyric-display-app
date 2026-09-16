@@ -6,7 +6,7 @@
 
 Real-time lyric control and multi-output display for live events, worship services, streaming, and production environments.
 
-**Version:** 6.8.6 · **License:** GPL-3.0-or-later
+**Version:** 6.8.7 · **License:** GPL-3.0-or-later
 
 [Download LyricDisplay](https://github.com/PeterAlaks/lyric-display-app/releases/latest) · [Installation guide](INSTALLATION.md) · [Contributing](CONTRIBUTING.md) · [Architecture map](docs/PROJECT_STRUCTURE.md)
 
@@ -54,6 +54,8 @@ http://localhost:4000/output1
 
 LyricDisplay must remain running while browser sources or remote controllers are in use. See the [integration guide](INSTALLATION.md#browser-output-urls) for all output routes.
 
+Packaged builds use port `4000` by default. The production port can be changed under **Preferences > Advanced**; restart the app before using the updated URLs.
+
 ## Development
 
 ### Prerequisites
@@ -72,7 +74,7 @@ npm --prefix server install
 npm run electron-dev
 ```
 
-The full development command starts Vite and Electron; Electron starts and monitors the backend. The backend uses port `4000`, and Vite uses port `5173`.
+The full development command starts Vite and Electron; Electron starts and monitors the backend. Development keeps the backend on port `4000`, and Vite uses port `5173`. The packaged app's configurable production-port preference does not alter the development topology.
 
 ### Common Commands
 
@@ -114,6 +116,8 @@ LyricDisplay is free software licensed under the [GNU General Public License, ve
 Developed by Peter Alakembi with contributions from David Okaliwe and the LyricDisplay community.
 
 Lyric provider content and metadata remain the property of their respective rights holders. NDI is a trademark of Vizrt NDI AB; LyricDisplay is not affiliated with or endorsed by Vizrt NDI AB. See [TRADEMARK](TRADEMARK) for project trademark terms.
+
+Third-party software and media credits are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Support
 

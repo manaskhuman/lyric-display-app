@@ -1,6 +1,24 @@
-import { normalizeTimerControlSettings } from './timerUtils.js';
+import {
+  DEFAULT_TIMER_CONTROL_SETTINGS,
+  normalizeTimerControlSettings,
+} from './timerUtils.js';
+import { getPersistentStorage } from './persistentStorage.js';
 
 export const TIMER_SCHEDULE_STORAGE_KEY = 'lyricdisplay_saved_timer_schedule_v1';
+
+export const clearTimerScheduleSettings = (settings, settingsUpdatedAt = Date.now()) => (
+  normalizeTimerControlSettings({
+    ...settings,
+    useSets: true,
+    sets: [],
+    scheduleTitle: DEFAULT_TIMER_CONTROL_SETTINGS.scheduleTitle,
+    scheduleEventStartTime: '',
+    scheduleEventDate: '',
+    scheduleScheduledStartAt: null,
+    scheduleIdealEndTime: '',
+    settingsUpdatedAt,
+  })
+);
 
 const selectTimerScheduleSettings = (settings) => ({
   useSets: settings.useSets,
@@ -25,11 +43,7 @@ const selectTimerScheduleSettings = (settings) => ({
 const getStorage = (storage) => {
   if (storage) return storage;
   if (typeof window === 'undefined') return null;
-  try {
-    return window.localStorage || null;
-  } catch {
-    return null;
-  }
+  return getPersistentStorage() || null;
 };
 
 export const buildTimerScheduleSnapshot = (settings, savedAt = Date.now()) => {

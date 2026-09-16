@@ -1,6 +1,6 @@
 {
   "name": "lyric-display-app",
-  "version": "6.8.6",
+  "version": "6.8.7",
   "description": "Real-time lyric display app with control panel and multiple output displays",
   "license": "GPL-3.0-or-later",
   "author": {
@@ -29,6 +29,7 @@
     "check:static": "node scripts/check-static.js",
     "check:contracts": "node scripts/validate-api-contracts.js",
     "test:unit": "node --test tests/*.test.js",
+    "test:renderer-storage": "node scripts/run-renderer-storage-smoke.js",
     "test:lyrics-canary": "node --test tests/*.canary.js",
     "test:security": "node --test tests/security-hardening.test.js",
     "test:platform-builds": "gh workflow run test-platform-builds.yml",

@@ -10,6 +10,8 @@ import {
   relaunchInObsDockHeadlessMode,
   setObsDockStartupEnabled,
 } from '../obsDockStartup.js';
+import { getBackendPort, getBackendPortStatus } from '../backend.js';
+import { flushRendererPersistentStorage } from '../rendererPersistentStorage.js';
 
 /**
  * Register app-level IPC handlers
@@ -18,7 +20,7 @@ import {
 export function registerAppHandlers({ updateDarkModeMenu, prepareForAppDataReset }) {
   const senderOptions = {
     development: isDev,
-    backendPort: Number(process.env.PORT) || 4000,
+    backendPort: getBackendPort(),
   };
 
   ipcMain.handle('get-dark-mode', () => {
@@ -70,6 +72,7 @@ export function registerAppHandlers({ updateDarkModeMenu, prepareForAppDataReset
   ipcMain.handle('app:get-runtime-info', () => ({
     success: true,
     isPackaged: app.isPackaged,
+    ...getBackendPortStatus(),
   }));
 
   ipcMain.handle('app:get-log-paths', () => {
@@ -103,6 +106,8 @@ export function registerAppHandlers({ updateDarkModeMenu, prepareForAppDataReset
 
   ipcMain.handle('app:relaunch', () => {
     try {
+      const storageResult = flushRendererPersistentStorage();
+      if (!storageResult.success) return storageResult;
       app.relaunch();
       app.exit(0);
       return { success: true };

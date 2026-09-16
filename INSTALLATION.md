@@ -2,7 +2,7 @@
 
 Install LyricDisplay, connect production outputs, and resolve common setup problems.
 
-Version: 6.8.6
+Version: 6.8.7
 
 ## Contents
 
@@ -36,10 +36,10 @@ Current packages:
 
 Direct assets for this version:
 
-- [Windows x64 installer](https://github.com/PeterAlaks/lyric-display-app/releases/download/v6.8.6/LyricDisplay-6.8.6-Windows-Setup.exe)
-- [macOS Apple Silicon DMG](https://github.com/PeterAlaks/lyric-display-app/releases/download/v6.8.6/LyricDisplay-6.8.6-macOS-arm64.dmg)
-- [macOS Intel DMG](https://github.com/PeterAlaks/lyric-display-app/releases/download/v6.8.6/LyricDisplay-6.8.6-macOS-x64.dmg)
-- [Linux x64 AppImage](https://github.com/PeterAlaks/lyric-display-app/releases/download/v6.8.6/LyricDisplay-6.8.6-Linux.AppImage)
+- [Windows x64 installer](https://github.com/PeterAlaks/lyric-display-app/releases/download/v6.8.7/LyricDisplay-6.8.7-Windows-Setup.exe)
+- [macOS Apple Silicon DMG](https://github.com/PeterAlaks/lyric-display-app/releases/download/v6.8.7/LyricDisplay-6.8.7-macOS-arm64.dmg)
+- [macOS Intel DMG](https://github.com/PeterAlaks/lyric-display-app/releases/download/v6.8.7/LyricDisplay-6.8.7-macOS-x64.dmg)
+- [Linux x64 AppImage](https://github.com/PeterAlaks/lyric-display-app/releases/download/v6.8.7/LyricDisplay-6.8.7-Linux.AppImage)
 
 For a typical production workflow, 8 GB of RAM and a 1920×1080-capable display are a practical baseline. Multiple high-resolution video backgrounds, several browser sources, lyric video export, or NDI output benefit from more memory and GPU capacity. Wired Ethernet is strongly recommended when outputs or controllers run on other devices.
 
@@ -96,7 +96,7 @@ Desktop integration varies by distribution. Keep the AppImage in a stable locati
 
 ## First Launch Checklist
 
-1. Let LyricDisplay finish opening before adding browser sources; the local backend listens on port `4000`.
+1. Let LyricDisplay finish opening before adding browser sources; the local backend listens on port `4000` by default.
 2. If the operating system asks about network access, allow private-network access only when using another computer, mobile controllers, or network integrations.
 3. Load a lyric file or create a song.
 4. Configure an output and open **Output > Preview Outputs**.
@@ -108,6 +108,8 @@ LyricDisplay must remain running while browser sources, controllers, or NDI outp
 ## Browser Output URLs
 
 Use these routes in software that accepts a web/browser source:
+
+These examples use the default port, `4000`. Packaged-app users can choose another port under **Preferences > Advanced > Production Server Port**. Restart LyricDisplay after changing it, then replace `4000` in every URL and firewall rule with the selected port. The in-app guides and generated URLs update automatically after that restart.
 
 | View | Local URL | Notes |
 | --- | --- | --- |
@@ -180,10 +182,10 @@ http://<LYRICDISPLAY-IP>:4000/output1
 - Allow LyricDisplay on **private/trusted networks** when prompted.
 - On Windows, use **Windows Defender Firewall > Allow an app through firewall** and select the installed LyricDisplay executable.
 - Do not enable public-network access unless the production network and exposure are understood.
-- Port `4000` must be reachable from devices that load LyricDisplay browser views or controllers.
+- The active server port (`4000` by default) must be reachable from devices that load LyricDisplay browser views or controllers.
 - Client isolation/guest Wi-Fi can prevent devices on the same network name from communicating.
 
-Do not expose port `4000` directly to the public internet. Use LyricDisplay on a trusted LAN or through a deliberately secured network tunnel.
+Do not expose the LyricDisplay server port directly to the public internet. Use LyricDisplay on a trusted LAN or through a deliberately secured network tunnel.
 
 ## LyricDisplay Dock for OBS
 
@@ -275,9 +277,9 @@ For live operation:
 
 ## Troubleshooting
 
-### LyricDisplay reports that port 4000 is in use
+### LyricDisplay reports that its server port is in use
 
-Only one LyricDisplay backend can use the default port. Close other desktop/headless LyricDisplay processes, then start the intended mode. Do not run a packaged instance and development instance simultaneously unless one is configured to use a different backend port.
+Only one process can use a server port at a time. Packaged builds reject an occupied port before saving it. If another application claims a previously saved port before the next launch, LyricDisplay offers to switch to an available recovery port and restart without removing application data. You can instead quit, close the conflicting application or service, and reopen LyricDisplay. Electron development keeps using port `4000`.
 
 ### Browser source is black, blank, or unavailable
 
@@ -306,7 +308,7 @@ Only one LyricDisplay backend can use the default port. Close other desktop/head
 ### Mobile controller cannot pair
 
 - Confirm both devices are on the same trusted LAN and not a guest/client-isolated network.
-- Verify `http://<LYRICDISPLAY-IP>:4000/api/health` loads on the mobile device.
+- Verify `http://<LYRICDISPLAY-IP>:4000/api/health` loads on the mobile device, replacing `4000` if a custom production port is configured.
 - Request a fresh QR URL/join code after restarting LyricDisplay.
 - Check the LyricDisplay computer's firewall access.
 
