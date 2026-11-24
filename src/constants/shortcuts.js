@@ -4,6 +4,40 @@ export const isAutoplayKeyboardShortcut = (event) => (
   && String(event?.key || '').toLowerCase() === 'p'
 );
 
+const NEXT_LINE_KEYS = new Set(['PageDown', 'ArrowRight', 'ArrowDown']);
+const PREVIOUS_LINE_KEYS = new Set(['PageUp', 'ArrowLeft', 'ArrowUp']);
+// Space, plus the B / . keys presentation clickers send from their "blank screen" button.
+const TOGGLE_OUTPUT_KEYS = new Set([' ', 'b', 'B', '.']);
+const SECTION_JUMP_LETTERS = new Set(['C', 'V', 'B', 'P', 'T', 'I', 'O', 'E']);
+
+/**
+ * Unmodified live-navigation keys, including the PageUp/PageDown and arrow keys sent by
+ * presentation clickers.
+ * @returns {'next'|'previous'|'first'|'last'|'toggle-output'|null}
+ */
+export const getLiveNavigationKeyAction = (event) => {
+  if (!event || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return null;
+  const key = event.key;
+  if (NEXT_LINE_KEYS.has(key) || event.keyCode === 40) return 'next';
+  if (PREVIOUS_LINE_KEYS.has(key) || event.keyCode === 38) return 'previous';
+  if (key === 'Home') return 'first';
+  if (key === 'End') return 'last';
+  if (TOGGLE_OUTPUT_KEYS.has(key) || event.code === 'Space') return 'toggle-output';
+  return null;
+};
+
+/**
+ * Shift + letter jumps to the next section of that type (Shift+C for Chorus). Shift keeps
+ * stray typing from cueing lyrics live.
+ * @returns {string|null} Upper-case section letter.
+ */
+export const getSectionJumpHotkey = (event) => {
+  if (!event?.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return null;
+  const letter = /^Key([A-Z])$/.exec(event.code || '')?.[1]
+    || (/^[a-z]$/i.test(event.key || '') ? event.key.toUpperCase() : null);
+  return letter && SECTION_JUMP_LETTERS.has(letter) ? letter : null;
+};
+
 export const SHORTCUTS = [
   {
     category: 'General & Window',
@@ -47,12 +81,17 @@ export const SHORTCUTS = [
     category: 'Control Panel — Live Control',
     items: [
       { label: 'Toggle output visibility', combo: 'Space' },
+      { label: 'Blank output (presentation clicker blank button)', combo: 'B / .' },
       { label: 'Toggle autoplay', combo: 'Ctrl/Cmd + P' },
       { label: 'Toggle intelligent autoplay (timestamped lyrics)', combo: 'Ctrl/Cmd + Shift + P' },
       { label: 'Clear output outside text fields', combo: 'Ctrl/Cmd + C' },
       { label: 'Send previewed lyric line', combo: 'Enter' },
       { label: 'Previous / next lyric line', combo: '↑ / ↓' },
+      { label: 'Previous / next lyric line', combo: '← / →' },
+      { label: 'Previous / next lyric line (presentation clickers)', combo: 'Page Up / Page Down' },
       { label: 'First / last lyric line', combo: 'Home / End' },
+      { label: 'Jump to next Chorus / Verse / Bridge / Pre-Chorus', combo: 'Shift + C / V / B / P' },
+      { label: 'Jump to next Tag / Intro / Outro / Ending', combo: 'Shift + T / I / O / E' },
     ],
   },
   {
@@ -60,6 +99,29 @@ export const SHORTCUTS = [
     items: [
       { label: 'Switch to Output 1–6 (when available)', combo: '1–6' },
       { label: 'Switch to Stage', combo: '0' },
+    ],
+  },
+  {
+    category: 'LyricDisplay Dock',
+    items: [
+      { label: 'Previous / next lyric line', combo: '↑ / ↓ or ← / →' },
+      { label: 'Previous / next lyric line (presentation clickers)', combo: 'Page Up / Page Down' },
+      { label: 'First / last lyric line', combo: 'Home / End' },
+      { label: 'Toggle output visibility', combo: 'Space' },
+      { label: 'Blank output (presentation clicker blank button)', combo: 'B / .' },
+      { label: 'Clear output outside text fields', combo: 'Ctrl/Cmd + C' },
+      { label: 'Jump to next Chorus / Verse / Bridge / Pre-Chorus', combo: 'Shift + C / V / B / P' },
+      { label: 'Jump to next Tag / Intro / Outro / Ending', combo: 'Shift + T / I / O / E' },
+      { label: 'Focus lyric search', combo: 'Ctrl/Cmd + F' },
+      { label: 'Send highlighted search match', combo: 'Enter' },
+      { label: 'Clear lyric search', combo: 'Escape' },
+      { label: 'Previous / next setlist song', combo: 'Ctrl/Cmd + Shift + ← / →' },
+      { label: 'Open setlist', combo: 'Ctrl/Cmd + Shift + S' },
+      { label: 'Add current song to setlist', combo: 'Ctrl/Cmd + Alt + S' },
+      { label: 'Open lyrics file', combo: 'Ctrl/Cmd + O' },
+      { label: 'Create song', combo: 'Ctrl/Cmd + N' },
+      { label: 'Edit loaded lyrics', combo: 'Ctrl/Cmd + E' },
+      { label: 'Select output for settings (Output 1–6 / Stage)', combo: '1–6 / 0' },
     ],
   },
   {
@@ -75,6 +137,21 @@ export const SHORTCUTS = [
       { label: 'Previous / next search match', combo: 'Shift + ↑ / ↓' },
       { label: 'Close search/selection or return', combo: 'Escape' },
       { label: 'Return when outside an editor', combo: 'Backspace' },
+    ],
+  },
+  {
+    category: 'Song Editor — Structured',
+    items: [
+      { label: 'Add a line below', combo: 'Enter' },
+      { label: 'Start a new slide after this line', combo: 'Shift + Enter' },
+      { label: 'Add a translation line below', combo: 'Ctrl/Cmd + T' },
+      { label: 'Mark a line as a stage-only note', combo: 'Ctrl/Cmd + /' },
+      { label: 'Remove an empty line', combo: 'Backspace' },
+      { label: 'Move between lines', combo: '↑ / ↓' },
+      { label: 'Paste lyrics and lay them out into sections and slides', combo: 'Ctrl/Cmd + V' },
+      { label: 'Undo / redo', combo: 'Ctrl/Cmd + Z / Ctrl/Cmd + Shift + Z' },
+      { label: 'Save song', combo: 'Ctrl/Cmd + S' },
+      { label: 'Save and load into Control Panel', combo: 'Ctrl/Cmd + Shift + L' },
     ],
   },
   {

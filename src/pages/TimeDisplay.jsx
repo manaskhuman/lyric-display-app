@@ -8,11 +8,13 @@ import {
   getRemainingMs,
   isTimerVisiblyActive,
   shouldShowGlobalClockDuringPause,
+  shouldFlashTimerDisplay,
   shouldShowGlobalTimeForManualScheduleItem,
   splitClockPeriod,
 } from '../utils/timerUtils';
 import { useTimerDisplaySettings } from '../hooks/useStoreSelectors';
 import { paintToCss } from '../utils/paint';
+import { toViewportLength } from '../utils/outputLabels';
 import ProjectionExitHint from '../components/ProjectionExitHint';
 import useAutoFitText, { getTextFitShape } from '../hooks/useAutoFitText';
 import { calculateScheduleProjection } from '../../shared/scheduleUtils.js';
@@ -52,36 +54,205 @@ const getFontFitKey = (display) => [
   display.timerAlign || 'center',
 ].join('|');
 
-const TimeDisplay = () => {
-  const location = useLocation();
-  const searchParams = new URLSearchParams(location.search);
-  const isPreviewMode = searchParams.get('preview') === 'true';
-  const isProjectionMode = ['1', 'true'].includes((searchParams.get('projection') || '').toLowerCase());
-  const showProjectionExitHint = ['1', 'true'].includes((searchParams.get('escapeHint') || '').toLowerCase());
-
-  const { isConnected, isAuthenticated, emitOutputMetrics } = useSocket('stage', {
-    preview: isPreviewMode,
-    purpose: 'time-display',
+// Each keyed display state measures its own elements. AnimatePresence can re-enter an
+// exiting state without re-running refs, so one shared measurement could size a display
+// that is no longer on screen and leave the visible digits clipped with an ellipsis.
+const TimeDisplayFrame = ({
+  display,
+  value,
+  label,
+  accentColor,
+  textColor,
+  intensity,
+  flashing,
+  timerState,
+  progress,
+  clockParts,
+  clockValue,
+  isWaitingForTime,
+  isFullScreenClock,
+  isBehindSchedule,
+  hasActiveTimer,
+  showSecondaryText,
+  showPausedGlobalClock,
+  showManualItemGlobalTime,
+  showActiveSecondaryGlobalClock,
+  stateTransitionVariants,
+  stateTransitionDuration,
+  otherItemsFontFamily,
+  alignItems,
+  viewport,
+}) => {
+  const vh = (amount) => toViewportLength(viewport, 'vh', amount);
+  const vw = (amount) => toViewportLength(viewport, 'vw', amount);
+  const timerFontSizeMode = display.timerFontSizeMode || 'auto';
+  const autoFitEnabled = timerFontSizeMode !== 'manual';
+  const autoFitKey = React.useMemo(() => [
+    'time-display',
+    getTextFitShape(value),
+    getFontFitKey(display),
+    showActiveSecondaryGlobalClock ? 'active-with-clock' : 'primary',
+  ].join('|'), [display, showActiveSecondaryGlobalClock, value]);
+  const { containerRef, textRef, fontSize: autoFontSize } = useAutoFitText({
+    enabled: autoFitEnabled,
+    fitKey: autoFitKey,
   });
+  const mainFontSize = autoFitEnabled ? (autoFontSize || 220) : (Number(display.timerFontSize) || 180);
+  const otherItemsScale = Math.min(2, Math.max(0.08, Number(display.otherItemsScale ?? display.globalClockScale) || 0.1));
+  const otherItemsFontSize = Math.max(16, mainFontSize * otherItemsScale);
 
-  const publishTimeMetrics = React.useCallback(() => {
-    if (isPreviewMode || !isConnected || !isAuthenticated) return;
-    emitOutputMetrics('time', {
-      viewportWidth: window.innerWidth,
-      viewportHeight: window.innerHeight,
-      timestamp: Date.now(),
-    });
-  }, [emitOutputMetrics, isAuthenticated, isConnected, isPreviewMode]);
+  return (
+    <motion.div
+      className="absolute inset-0 flex items-center justify-center"
+      variants={stateTransitionVariants || undefined}
+      initial={stateTransitionVariants ? 'hidden' : false}
+      animate={stateTransitionVariants ? 'visible' : undefined}
+      exit={stateTransitionVariants ? 'exit' : undefined}
+      transition={{ duration: stateTransitionVariants ? stateTransitionDuration : 0, ease: [0.25, 0.46, 0.45, 0.94] }}
+    >
+      {label && (
+      <div className="absolute inset-x-0 flex justify-center" style={{ top: vh(7), paddingInline: vw(1) }}>
+        <div
+          className="font-bold leading-none text-center"
+          style={{
+            color: accentColor,
+            fontSize: `${otherItemsFontSize}px`,
+            fontFamily: otherItemsFontFamily,
+            maxWidth: '100%',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            animation: flashing ? 'timerPulse 1s infinite' : 'none',
+          }}
+        >
+          {label}
+        </div>
+      </div>
+      )}
 
-  React.useEffect(() => {
-    publishTimeMetrics();
-    if (isPreviewMode || !isConnected || !isAuthenticated) return undefined;
-    const interval = window.setInterval(publishTimeMetrics, 5000);
-    return () => window.clearInterval(interval);
-  }, [isAuthenticated, isConnected, isPreviewMode, publishTimeMetrics]);
+      <div className="w-full" style={{ paddingInline: vw(1), paddingTop: vh(3) }}>
+        <div
+          ref={containerRef}
+          className="w-full flex flex-col justify-center overflow-hidden"
+          style={{
+            alignItems,
+            height: showActiveSecondaryGlobalClock ? vh(70) : vh(86),
+            contain: 'layout paint',
+          }}
+        >
+          <div
+            ref={textRef}
+            className="leading-none whitespace-nowrap"
+            style={{
+              color: textColor,
+              fontFamily: display.timerFontFamily || display.fontFamily || 'Bebas Neue',
+              fontSize: `${mainFontSize}px`,
+              fontWeight: display.timerBold === false ? 400 : 700,
+              fontStyle: display.timerItalic ? 'italic' : 'normal',
+              textDecoration: display.timerUnderline ? 'underline' : 'none',
+              textAlign: display.timerAlign || 'center',
+              letterSpacing: 0,
+              fontVariantNumeric: 'tabular-nums',
+              fontFeatureSettings: '"tnum" 1, "lnum" 1',
+              maxWidth: '100%',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              opacity: isWaitingForTime ? 0.45 : 1,
+              animation: flashing ? 'timerPulse 1s infinite' : 'none',
+              contain: 'layout paint',
+            }}
+          >
+            {value}
+          </div>
+          {showSecondaryText && isFullScreenClock && clockParts.period && (
+            <div
+              className="font-bold leading-none text-center"
+              style={{
+                color: accentColor,
+                fontSize: `${otherItemsFontSize}px`,
+                fontFamily: otherItemsFontFamily,
+                marginTop: '0.08em',
+                maxWidth: '100%',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {clockParts.period}
+            </div>
+          )}
+        </div>
 
+        {display.showProgress !== false && hasActiveTimer && !showPausedGlobalClock && !showManualItemGlobalTime && (
+          <div
+            className="mx-auto mt-4 rounded-full overflow-hidden"
+            style={{
+              width: `min(${vw(82)}, 1400px)`,
+              height: `clamp(8px, ${vh(1.2)}, 18px)`,
+              backgroundColor: 'rgba(255,255,255,0.16)',
+            }}
+          >
+            <div
+              className="h-full rounded-full"
+              style={{
+                width: `${Math.max(0, Math.min(1, progress)) * 100}%`,
+                backgroundColor: accentColor,
+              }}
+            />
+          </div>
+        )}
+
+        {showSecondaryText && hasActiveTimer && !showPausedGlobalClock && timerState.sets?.length > 1 && (
+          <div className="mt-8 flex justify-center">
+            <div
+              className="px-5 py-2 rounded bg-white/10 text-white/80 text-sm font-sans"
+              style={{ fontFamily: otherItemsFontFamily }}
+            >
+              {timerState.phase === 'indicator'
+                ? `Next: ${timerState.sets[timerState.activeSetIndex + 1]?.label || 'Timer'}`
+                : `${timerState.activeSetIndex + 1} of ${timerState.sets.length}`}
+            </div>
+          </div>
+        )}
+        {showActiveSecondaryGlobalClock && (
+          <div
+            className="mx-auto mt-2 flex w-full items-center justify-center gap-[0.65em] text-center font-semibold leading-none"
+            style={{
+              color: 'rgba(255,255,255,0.72)',
+              fontSize: `${otherItemsFontSize}px`,
+              fontFamily: otherItemsFontFamily,
+              fontVariantNumeric: 'tabular-nums',
+              fontFeatureSettings: '"tnum" 1, "lnum" 1',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {isBehindSchedule && (
+              <>
+                <span style={{ color: display.warningColor || '#F59E0B' }}>Behind schedule</span>
+                <span aria-hidden="true" style={{ color: 'rgba(255,255,255,0.28)' }}>&middot;</span>
+              </>
+            )}
+            <span className="font-mono"><ClockValue value={clockValue} /></span>
+          </div>
+        )}
+      </div>
+    </motion.div>
+  );
+};
+
+/**
+ * Everything the Time display draws, driven by the shared timer and store. The /time window
+ * wraps it with its socket; previews render it directly and pass the screen size they draw.
+ */
+export function TimeOutputFrame({
+  viewport = null,
+  isProjectionMode = false,
+  showProjectionExitHint = false,
+  className = 'relative h-full w-full overflow-hidden flex items-center justify-center',
+}) {
   const { timerState, displayValue, intensity, now, progress } = useSharedTimer({
-    controller: false,
     renderTickIntervalMs: 1000,
   });
   const { settings: timerDisplaySettings } = useTimerDisplaySettings();
@@ -157,21 +328,6 @@ const TimeDisplay = () => {
   const textColor = intensity === 'critical'
     ? (display.criticalColor || '#EF4444')
     : (display.textColor || '#FFFFFF');
-  const timerFontSizeMode = display.timerFontSizeMode || 'auto';
-  const autoFitEnabled = timerFontSizeMode !== 'manual';
-  const autoFitKey = React.useMemo(() => [
-    'time-display',
-    getTextFitShape(value),
-    getFontFitKey(display),
-    showActiveSecondaryGlobalClock ? 'active-with-clock' : 'primary',
-  ].join('|'), [display, showActiveSecondaryGlobalClock, value]);
-  const { containerRef, textRef, fontSize: autoFontSize } = useAutoFitText({
-    enabled: autoFitEnabled,
-    fitKey: autoFitKey,
-  });
-  const mainFontSize = autoFitEnabled ? (autoFontSize || 220) : (Number(display.timerFontSize) || 180);
-  const otherItemsScale = Math.min(2, Math.max(0.08, Number(display.otherItemsScale ?? display.globalClockScale) || 0.1));
-  const otherItemsFontSize = Math.max(16, mainFontSize * otherItemsScale);
   const otherItemsFontFamily = display.fontFamily || 'Bebas Neue';
   const alignItems = display.timerAlign === 'left'
     ? 'flex-start'
@@ -181,7 +337,7 @@ const TimeDisplay = () => {
 
   return (
     <div
-      className="relative w-screen h-screen overflow-hidden flex items-center justify-center"
+      className={className}
       style={{
         background: paintToCss(display.backgroundPaint, display.backgroundColor || '#000000'),
         fontFamily: otherItemsFontFamily,
@@ -191,144 +347,33 @@ const TimeDisplay = () => {
     >
       <ProjectionExitHint visible={isProjectionMode && showProjectionExitHint} />
       <AnimatePresence initial={false} mode="sync">
-        <motion.div
+        <TimeDisplayFrame
           key={displayModeKey}
-          className="absolute inset-0 flex items-center justify-center"
-          variants={stateTransitionVariants || undefined}
-          initial={stateTransitionVariants ? 'hidden' : false}
-          animate={stateTransitionVariants ? 'visible' : undefined}
-          exit={stateTransitionVariants ? 'exit' : undefined}
-          transition={{ duration: stateTransitionVariants ? stateTransitionDuration : 0, ease: [0.25, 0.46, 0.45, 0.94] }}
-        >
-      {label && (
-      <div className="absolute inset-x-0 top-[7vh] flex justify-center px-[1vw]">
-        <div
-          className="font-bold leading-none text-center"
-          style={{
-            color: accentColor,
-            fontSize: `${otherItemsFontSize}px`,
-            fontFamily: otherItemsFontFamily,
-            maxWidth: '100%',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            animation: intensity === 'critical' && timerState.running ? 'timerPulse 1s infinite' : 'none',
-          }}
-        >
-          {label}
-        </div>
-      </div>
-      )}
-
-      <div className="w-full px-[1vw] pt-[3vh]">
-        <div
-          ref={containerRef}
-          className="w-full flex flex-col justify-center overflow-hidden"
-          style={{
-            alignItems,
-            height: showActiveSecondaryGlobalClock ? '70vh' : '86vh',
-            contain: 'layout paint',
-          }}
-        >
-          <div
-            ref={textRef}
-            className="leading-none whitespace-nowrap"
-            style={{
-              color: textColor,
-              fontFamily: display.timerFontFamily || display.fontFamily || 'Bebas Neue',
-              fontSize: `${mainFontSize}px`,
-              fontWeight: display.timerBold === false ? 400 : 700,
-              fontStyle: display.timerItalic ? 'italic' : 'normal',
-              textDecoration: display.timerUnderline ? 'underline' : 'none',
-              textAlign: display.timerAlign || 'center',
-              letterSpacing: 0,
-              fontVariantNumeric: 'tabular-nums',
-              fontFeatureSettings: '"tnum" 1, "lnum" 1',
-              maxWidth: '100%',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              opacity: isWaitingForTime ? 0.45 : 1,
-              animation: intensity === 'critical' && timerState.running ? 'timerPulse 1s infinite' : 'none',
-              contain: 'layout paint',
-            }}
-          >
-            {value}
-          </div>
-          {showSecondaryText && isFullScreenClock && clockParts.period && (
-            <div
-              className="font-bold leading-none text-center"
-              style={{
-                color: accentColor,
-                fontSize: `${otherItemsFontSize}px`,
-                fontFamily: otherItemsFontFamily,
-                marginTop: '0.08em',
-                maxWidth: '100%',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {clockParts.period}
-            </div>
-          )}
-        </div>
-
-        {display.showProgress !== false && hasActiveTimer && !showPausedGlobalClock && !showManualItemGlobalTime && (
-          <div
-            className="mx-auto mt-4 rounded-full overflow-hidden"
-            style={{
-              width: 'min(82vw, 1400px)',
-              height: 'clamp(8px, 1.2vh, 18px)',
-              backgroundColor: 'rgba(255,255,255,0.16)',
-            }}
-          >
-            <div
-              className="h-full rounded-full"
-              style={{
-                width: `${Math.max(0, Math.min(1, progress)) * 100}%`,
-                backgroundColor: accentColor,
-              }}
-            />
-          </div>
-        )}
-
-        {showSecondaryText && hasActiveTimer && !showPausedGlobalClock && timerState.sets?.length > 1 && (
-          <div className="mt-8 flex justify-center">
-            <div
-              className="px-5 py-2 rounded bg-white/10 text-white/80 text-sm font-sans"
-              style={{ fontFamily: otherItemsFontFamily }}
-            >
-              {timerState.phase === 'indicator'
-                ? `Next: ${timerState.sets[timerState.activeSetIndex + 1]?.label || 'Timer'}`
-                : `${timerState.activeSetIndex + 1} of ${timerState.sets.length}`}
-            </div>
-          </div>
-        )}
-        {showActiveSecondaryGlobalClock && (
-          <div
-            className="mx-auto mt-2 flex w-full items-center justify-center gap-[0.65em] text-center font-semibold leading-none"
-            style={{
-              color: 'rgba(255,255,255,0.72)',
-              fontSize: `${otherItemsFontSize}px`,
-              fontFamily: otherItemsFontFamily,
-              fontVariantNumeric: 'tabular-nums',
-              fontFeatureSettings: '"tnum" 1, "lnum" 1',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {isBehindSchedule && (
-              <>
-                <span style={{ color: display.warningColor || '#F59E0B' }}>Behind schedule</span>
-                <span aria-hidden="true" style={{ color: 'rgba(255,255,255,0.28)' }}>&middot;</span>
-              </>
-            )}
-            <span className="font-mono"><ClockValue value={clockValue} /></span>
-          </div>
-        )}
-      </div>
-        </motion.div>
+          display={display}
+          value={value}
+          label={label}
+          accentColor={accentColor}
+          textColor={textColor}
+          intensity={intensity}
+          flashing={shouldFlashTimerDisplay(timerState, display, now)}
+          timerState={timerState}
+          progress={progress}
+          clockParts={clockParts}
+          clockValue={clockValue}
+          isWaitingForTime={isWaitingForTime}
+          isFullScreenClock={isFullScreenClock}
+          isBehindSchedule={isBehindSchedule}
+          hasActiveTimer={hasActiveTimer}
+          showSecondaryText={showSecondaryText}
+          showPausedGlobalClock={showPausedGlobalClock}
+          showManualItemGlobalTime={showManualItemGlobalTime}
+          showActiveSecondaryGlobalClock={showActiveSecondaryGlobalClock}
+          stateTransitionVariants={stateTransitionVariants}
+          stateTransitionDuration={stateTransitionDuration}
+          otherItemsFontFamily={otherItemsFontFamily}
+          alignItems={alignItems}
+          viewport={viewport}
+        />
       </AnimatePresence>
 
       <style>{`
@@ -338,6 +383,43 @@ const TimeDisplay = () => {
         }
       `}</style>
     </div>
+  );
+}
+
+const TimeDisplay = () => {
+  const location = useLocation();
+  const searchParams = new URLSearchParams(location.search);
+  const isPreviewMode = searchParams.get('preview') === 'true';
+  const isProjectionMode = ['1', 'true'].includes((searchParams.get('projection') || '').toLowerCase());
+  const showProjectionExitHint = ['1', 'true'].includes((searchParams.get('escapeHint') || '').toLowerCase());
+
+  const { isConnected, isAuthenticated, emitOutputMetrics } = useSocket('stage', {
+    preview: isPreviewMode,
+    purpose: 'time-display',
+  });
+
+  const publishTimeMetrics = React.useCallback(() => {
+    if (isPreviewMode || !isConnected || !isAuthenticated) return;
+    emitOutputMetrics('time', {
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      timestamp: Date.now(),
+    });
+  }, [emitOutputMetrics, isAuthenticated, isConnected, isPreviewMode]);
+
+  React.useEffect(() => {
+    publishTimeMetrics();
+    if (isPreviewMode || !isConnected || !isAuthenticated) return undefined;
+    const interval = window.setInterval(publishTimeMetrics, 5000);
+    return () => window.clearInterval(interval);
+  }, [isAuthenticated, isConnected, isPreviewMode, publishTimeMetrics]);
+
+  return (
+    <TimeOutputFrame
+      isProjectionMode={isProjectionMode}
+      showProjectionExitHint={showProjectionExitHint}
+      className="relative w-screen h-screen overflow-hidden flex items-center justify-center"
+    />
   );
 };
 

@@ -3,6 +3,10 @@ import Database from 'better-sqlite3';
 import { promises as fs } from 'fs';
 import { createRequire } from 'module';
 import path from 'path';
+import { createLdsongFromImportedText } from '../shared/documentTextExtraction.js';
+import { buildLyricsParsingOptions } from '../shared/lyricsParsing/preferenceOptions.js';
+import { splitSongCredits } from '../shared/lyricsParsing/songMetadata.js';
+import { getParsingConfig } from './userPreferences.js';
 
 const require = createRequire(import.meta.url);
 const SONGS_DB_FILENAME = 'songs.db';
@@ -446,6 +450,7 @@ function readSongsFromSqliteDatabase(resolvedPath) {
         const authorColumn = resolveColumnName(songTableColumns, ['author', 'writer', 'artist']);
         const copyrightColumn = resolveColumnName(songTableColumns, ['copyright']);
         const administratorColumn = resolveColumnName(songTableColumns, ['administrator']);
+        const ccliColumn = resolveColumnName(songTableColumns, ['ccli_number', 'ccli_song_number', 'ccli_no', 'ccli']);
         const inlineLyricsColumn = resolveColumnName(songTableColumns, ['words', 'lyrics', 'text', 'content']);
 
         const selectableColumns = ['rowid'];
@@ -455,6 +460,7 @@ function readSongsFromSqliteDatabase(resolvedPath) {
         if (authorColumn) selectableColumns.push(`${quoteIdentifier(authorColumn)} AS author`);
         if (copyrightColumn) selectableColumns.push(`${quoteIdentifier(copyrightColumn)} AS copyright`);
         if (administratorColumn) selectableColumns.push(`${quoteIdentifier(administratorColumn)} AS administrator`);
+        if (ccliColumn) selectableColumns.push(`${quoteIdentifier(ccliColumn)} AS ccli_number`);
         if (inlineLyricsColumn) selectableColumns.push(`${quoteIdentifier(inlineLyricsColumn)} AS inline_lyrics`);
 
         const songRows = songsDb.prepare(`
@@ -524,6 +530,7 @@ function readSongsFromSqliteDatabase(resolvedPath) {
                 author: row.author || '',
                 copyright: row.copyright || '',
                 administrator: row.administrator || '',
+                ccliNumber: row.ccli_number ? String(row.ccli_number) : '',
                 rtfContent
             });
         }
@@ -917,7 +924,7 @@ function sanitizeFilename(filename) {
  * @returns {Promise<{filename: string, skipped: boolean}>}
  */
 async function getUniqueFilename(destPath, baseName, handling) {
-    const filename = `${baseName}.txt`;
+    const filename = `${baseName}.ldsong`;
     const fullPath = path.join(destPath, filename);
 
     try {
@@ -936,7 +943,7 @@ async function getUniqueFilename(destPath, baseName, handling) {
         let newPath;
 
         do {
-            newFilename = `${baseName} (${counter}).txt`;
+            newFilename = `${baseName} (${counter}).ldsong`;
             newPath = path.join(destPath, newFilename);
             counter++;
 
@@ -985,23 +992,19 @@ export async function importSong({ song, destinationPath, duplicateHandling }) {
             return { success: true, skipped: true, filePath: path.join(destinationPath, filename) };
         }
 
-        let fileContent = '';
-
-        if (song.title) {
-            fileContent += `# Title: ${song.title}\n`;
-        }
-        if (song.author) {
-            fileContent += `# Author: ${song.author}\n`;
-        }
-        if (song.copyright) {
-            fileContent += `# Copyright: ${song.copyright}\n`;
-        }
-        if (song.administrator) {
-            fileContent += `# Administrator: ${song.administrator}\n`;
-        }
-
-        fileContent += `# Imported from EasyWorship: ${new Date().toISOString().split('T')[0]}\n\n`;
-        fileContent += plainText;
+        // Songs are saved as structured .ldsong files: the layout is worked out once here,
+        // with the user's parsing settings, and stored explicitly from then on.
+        const fileContent = createLdsongFromImportedText(plainText, {
+            songMetadata: {
+                title: song.title || '',
+                artists: splitSongCredits(song.author || ''),
+                copyright: song.copyright || '',
+                administrator: song.administrator || '',
+                ccliSongNumber: String(song.ccliNumber || '').match(/\d{1,12}/)?.[0] || '',
+            },
+            provenance: { key: 'Imported from EasyWorship', value: new Date().toISOString().split('T')[0] },
+            parsingOptions: buildLyricsParsingOptions(getParsingConfig()),
+        });
 
         const fullPath = path.join(destinationPath, filename);
         await fs.writeFile(fullPath, fileContent, 'utf8');

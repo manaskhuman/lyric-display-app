@@ -6,6 +6,7 @@ import {
   createLatestElementRef,
   doesTextElementFit,
   getTextFitShape,
+  getWorstCaseFitText,
 } from '../src/hooks/useAutoFitText.js';
 import {
   MAX_TIMER_SETS,
@@ -18,6 +19,7 @@ import {
   resetActiveTimerRuntime,
   shouldShowGlobalClockDuringPause,
   shouldShowGlobalTimeForManualScheduleItem,
+  shouldFlashTimerDisplay,
 } from '../src/utils/timerUtils.js';
 
 function createTimerStoreHarness() {
@@ -71,6 +73,33 @@ test('timer autofit keeps the entering display refs when the previous display ex
 
   releaseEnteringElement();
   assert.equal(currentElement, null);
+});
+
+test('timer autofit sizes digits against the widest glyph so later same-shape values cannot overflow', () => {
+  const digitWidths = { 0: 10, 1: 4, 2: 9, 3: 9, 4: 10, 5: 9, 6: 10, 7: 8, 8: 11, 9: 10 };
+  const measureDigit = (digit) => digitWidths[digit];
+
+  assert.equal(getWorstCaseFitText('1:11', measureDigit), '8:88');
+  assert.equal(getWorstCaseFitText('10:42 PM', measureDigit), '88:88 PM');
+  assert.equal(getWorstCaseFitText('Waiting for time...', measureDigit), 'Waiting for time...');
+  assert.equal(getWorstCaseFitText('', measureDigit), '');
+});
+
+test('time display fits each keyed display state separately during state transitions', async () => {
+  const timeDisplaySource = await readFile(
+    new URL('../src/pages/TimeDisplay.jsx', import.meta.url),
+    'utf8',
+  );
+  const frameStart = timeDisplaySource.indexOf('const TimeDisplayFrame');
+  // The output frame holds the keyed states; the /time page and previews both render it.
+  const pageStart = timeDisplaySource.indexOf('export function TimeOutputFrame');
+
+  // AnimatePresence can re-enter an exiting display without re-running refs, so a single
+  // page-level measurement can end up sizing a display that is no longer on screen.
+  assert.notEqual(frameStart, -1);
+  assert.match(timeDisplaySource.slice(frameStart, pageStart), /useAutoFitText\(/);
+  assert.doesNotMatch(timeDisplaySource.slice(pageStart), /useAutoFitText\(/);
+  assert.match(timeDisplaySource.slice(pageStart), /<AnimatePresence[\s\S]*<TimeDisplayFrame[\s\S]*key=\{displayModeKey\}/);
 });
 
 test('timer-control preview auto-fits hour-long timer values to its own bounds', async () => {
@@ -443,4 +472,51 @@ test('active timer runtime is reset when hydrating a new app session', () => {
   assert.equal(state.remaining, null);
   assert.equal(state.durationMs, 0);
   assert.equal(state.display.label, 'Service Timer');
+});
+
+test('timer flash modes: off, critical only (default), critical and after zero, and always', () => {
+  const startTime = 1_000_000;
+  const durationMs = 120_000;
+  const running = {
+    status: 'running',
+    running: true,
+    paused: false,
+    mode: 'countdown',
+    phase: 'timer',
+    durationMs,
+    startTime,
+    endTime: startTime + durationMs,
+    warningMs: 60_000,
+    criticalMs: 30_000,
+    sets: [],
+  };
+  const early = startTime + 10_000;
+  const critical = startTime + durationMs - 10_000;
+  const pastZero = startTime + durationMs + 5_000;
+  const finished = { ...running, status: 'finished', running: false, finished: true };
+  const idle = { ...running, status: 'idle', running: false, endTime: null, startTime: null };
+  const flash = (state, now, flashMode) => shouldFlashTimerDisplay(state, { flashMode }, now);
+
+  assert.equal(normalizeTimerDisplaySettings({}).flashMode, 'critical');
+  assert.equal(normalizeTimerDisplaySettings({ flashMode: 'sometimes' }).flashMode, 'critical');
+  assert.equal(normalizeTimerDisplaySettings({ flashMode: 'afterZero' }).flashMode, 'afterZero');
+
+  for (const now of [early, critical, pastZero]) assert.equal(flash(running, now, 'off'), false);
+
+  assert.equal(flash(running, early, undefined), false);
+  assert.equal(flash(running, critical, undefined), true);
+  assert.equal(flash(running, pastZero, 'critical'), false);
+  assert.equal(flash(finished, pastZero, 'critical'), false);
+
+  assert.equal(flash(running, early, 'afterZero'), false);
+  assert.equal(flash(running, critical, 'afterZero'), true);
+  assert.equal(flash(running, pastZero, 'afterZero'), true);
+  assert.equal(flash({ ...running, overrunMode: true }, pastZero, 'afterZero'), true);
+  assert.equal(flash(finished, pastZero, 'afterZero'), true);
+  assert.equal(flash(idle, pastZero, 'afterZero'), false);
+
+  assert.equal(flash(running, early, 'always'), true);
+  assert.equal(flash({ ...running, mode: 'countup', endTime: null }, early, 'always'), true);
+  assert.equal(flash({ ...running, paused: true, status: 'paused', pausedRemainingMs: 60_000 }, early, 'always'), false);
+  assert.equal(flash(idle, early, 'always'), false);
 });

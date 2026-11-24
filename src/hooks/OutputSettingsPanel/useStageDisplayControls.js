@@ -7,7 +7,7 @@ import {
   normalizeStageMessages,
   normalizeStageMessageText,
   MAX_STAGE_MESSAGES
-} from '../../utils/stageMessages';
+} from '../../../shared/stageMessages.js';
 import {
   TIMER_STORAGE_KEY,
   formatDuration,
@@ -338,6 +338,8 @@ const useStageDisplayControls = ({ settings, applySettings, update, showModal })
     const normalized = normalizeStageMessages(messages);
     setCustomMessages(normalized);
     sessionStorage.setItem(STORAGE_KEYS.customMessages, JSON.stringify(normalized));
+    // Stage previews in this window listen for the same event the stage window receives.
+    window.dispatchEvent(new CustomEvent('stage-messages-update', { detail: normalized }));
     if (emitStageMessagesUpdate) {
       emitStageMessagesUpdate(normalized);
     }

@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { isAutoplayKeyboardShortcut, SHORTCUTS } from '../src/constants/shortcuts.js';
+import { readFileSync } from 'node:fs';
+import {
+  getLiveNavigationKeyAction,
+  getSectionJumpHotkey,
+  isAutoplayKeyboardShortcut,
+  SHORTCUTS,
+} from '../src/constants/shortcuts.js';
 
 const entries = SHORTCUTS.flatMap(({ category, items }) => (
   items.map(({ label, combo }) => ({ category, label, combo }))
@@ -72,4 +78,84 @@ test('project output shortcut does not also trigger autoplay', () => {
   assert.equal(isAutoplayKeyboardShortcut({ ctrlKey: true, altKey: true, key: 'p' }), false);
   assert.equal(isAutoplayKeyboardShortcut({ ctrlKey: true, key: 'p' }), true);
   assert.equal(isAutoplayKeyboardShortcut({ metaKey: true, shiftKey: true, key: 'P' }), true);
+});
+
+test('presentation clicker keys drive lyric navigation and blanking', () => {
+  const key = (value, modifiers = {}) => ({ key: value, ...modifiers });
+
+  assert.equal(getLiveNavigationKeyAction(key('PageDown')), 'next');
+  assert.equal(getLiveNavigationKeyAction(key('ArrowRight')), 'next');
+  assert.equal(getLiveNavigationKeyAction(key('ArrowDown')), 'next');
+  assert.equal(getLiveNavigationKeyAction(key('PageUp')), 'previous');
+  assert.equal(getLiveNavigationKeyAction(key('ArrowLeft')), 'previous');
+  assert.equal(getLiveNavigationKeyAction(key('ArrowUp')), 'previous');
+  assert.equal(getLiveNavigationKeyAction(key('Home')), 'first');
+  assert.equal(getLiveNavigationKeyAction(key('End')), 'last');
+  assert.equal(getLiveNavigationKeyAction(key('b')), 'toggle-output');
+  assert.equal(getLiveNavigationKeyAction(key('.')), 'toggle-output');
+  assert.equal(getLiveNavigationKeyAction(key(' ')), 'toggle-output');
+
+  assert.equal(getLiveNavigationKeyAction(key('ArrowRight', { ctrlKey: true, shiftKey: true })), null);
+  assert.equal(getLiveNavigationKeyAction(key('PageDown', { altKey: true })), null);
+  assert.equal(getLiveNavigationKeyAction(key('B', { shiftKey: true })), null);
+  assert.equal(getLiveNavigationKeyAction(key('x')), null);
+});
+
+test('section jump hotkeys require Shift so typing never cues lyrics', () => {
+  assert.equal(getSectionJumpHotkey({ key: 'C', code: 'KeyC', shiftKey: true }), 'C');
+  assert.equal(getSectionJumpHotkey({ key: 'B', code: 'KeyB', shiftKey: true }), 'B');
+  assert.equal(getSectionJumpHotkey({ key: 'c', code: 'KeyC', shiftKey: false }), null);
+  assert.equal(getSectionJumpHotkey({ key: 'C', code: 'KeyC', shiftKey: true, ctrlKey: true }), null);
+  assert.equal(getSectionJumpHotkey({ key: 'ArrowUp', code: 'ArrowUp', shiftKey: true }), null);
+});
+
+test('keyboard shortcut catalog documents clicker and section controls', () => {
+  for (const [label, combo] of [
+    ['Previous / next lyric line (presentation clickers)', 'Page Up / Page Down'],
+    ['Previous / next lyric line', '← / →'],
+    ['Blank output (presentation clicker blank button)', 'B / .'],
+    ['Jump to next Chorus / Verse / Bridge / Pre-Chorus', 'Shift + C / V / B / P'],
+  ]) {
+    assert.equal(hasEntry(label, combo), true, `${label}: ${combo}`);
+  }
+});
+
+test('desktop shortcuts never run underneath the browser controller', () => {
+  const appSource = readFileSync(new URL('../src/components/LyricDisplayApp.jsx', import.meta.url), 'utf8');
+  const menuSource = readFileSync(new URL('../src/hooks/LyricDisplayApp/useMenuShortcuts.js', import.meta.url), 'utf8');
+
+  // The browser controller renders its own layout without mounting the desktop panel's hooks,
+  // so Ctrl+I, Ctrl+O, and similar desktop commands are not bound there.
+  assert.match(appSource, /const LyricDisplayApp = \(\) => \(useIsDesktopApp\(\) \? <DesktopControlPanel \/> : <MobileLayout \/>\);/);
+  const desktopPanel = appSource.slice(appSource.indexOf('const DesktopControlPanel = () =>'), appSource.indexOf('const LyricDisplayApp = () =>'));
+  assert.match(desktopPanel, /useMenuShortcuts\(/);
+  assert.match(desktopPanel, /useKeyboardShortcuts\(/);
+  assert.doesNotMatch(desktopPanel, /<MobileLayout/);
+
+  // Window-menu keys (reload, DevTools, zoom, full screen) belong to the browser outside the app.
+  assert.match(menuSource, /if \(!window\.electronAPI\) return;\s*const handleKeyDown = \(event\) =>/);
+});
+
+test('the LyricDisplay Dock shares the control panel keyboard shortcuts and lists them in the catalog', () => {
+  const dockSource = readFileSync(new URL('../src/components/ObsDockLayout.jsx', import.meta.url), 'utf8');
+
+  assert.match(dockSource, /import \{ useKeyboardShortcuts \} from '\.\.\/hooks\/LyricDisplayApp\/useKeyboardShortcuts';/);
+  assert.match(dockSource, /useKeyboardShortcuts\(\{[\s\S]*handleLineSelect,[\s\S]*handleToggle: handleToggleOutput,[\s\S]*handleNavigateSetlistNext: whenDockFocused\(handleNavigateSetlistNext\),/);
+  // Shortcuts pause while a dock overlay (editor, setlist, output settings) owns the keyboard.
+  assert.match(dockSource, /const dockOverlayOpen = Boolean\(editorState\) \|\| setlistOpen \|\| settingsOpen;/);
+
+  for (const [label, combo] of [
+    ['Previous / next lyric line', '↑ / ↓ or ← / →'],
+    ['Toggle output visibility', 'Space'],
+    ['Clear output outside text fields', 'Ctrl/Cmd + C'],
+    ['Jump to next Chorus / Verse / Bridge / Pre-Chorus', 'Shift + C / V / B / P'],
+    ['Previous / next setlist song', 'Ctrl/Cmd + Shift + ← / →'],
+    ['Open setlist', 'Ctrl/Cmd + Shift + S'],
+  ]) {
+    assert.equal(
+      entries.some((entry) => entry.category === 'LyricDisplay Dock' && entry.label === label && entry.combo === combo),
+      true,
+      `${label}: ${combo}`,
+    );
+  }
 });

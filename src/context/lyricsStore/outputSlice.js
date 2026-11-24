@@ -5,6 +5,7 @@ import {
   normalizeCustomOutputRouteIds,
 } from '../../../shared/outputRegistry.js';
 import { DEFAULT_APPEARANCE_TRANSITIONS } from '../../../shared/transitionSettings.js';
+import { DEFAULT_KINETIC_SETTINGS } from '../../../shared/kineticTypography.js';
 import {
   DEFAULT_LYRIC_VIDEO_VISUALIZER,
   LYRIC_VIDEO_BACKGROUND_SOURCES,
@@ -60,6 +61,17 @@ const hasOutputRuntimeState = (settings = {}) => (
 const clearOutputRuntimeState = (settings) => ({
   ...settings,
   ...OUTPUT_RUNTIME_DEFAULTS,
+});
+
+// CCLI-style song credits footer. Off by default so existing looks are unchanged.
+export const SONG_CREDITS_MODES = ['off', 'first', 'last', 'first-last', 'always'];
+export const SONG_CREDITS_POSITIONS = ['bottom-left', 'bottom-center', 'bottom-right', 'top-left', 'top-center', 'top-right'];
+export const DEFAULT_SONG_CREDITS_SETTINGS = Object.freeze({
+  songCreditsMode: 'off',
+  songCreditsPosition: 'bottom-left',
+  songCreditsFontSize: 22,
+  songCreditsColor: '#FFFFFF',
+  songCreditsOpacity: 85,
 });
 
 export const defaultOutput1Settings = {
@@ -149,6 +161,8 @@ export const defaultOutput1Settings = {
   transitionSpeed: 150,
   outputVisibilityTransitionAnimation: DEFAULT_APPEARANCE_TRANSITIONS.outputVisibilityTransitionAnimation,
   outputVisibilityTransitionDuration: DEFAULT_APPEARANCE_TRANSITIONS.outputVisibilityTransitionDuration,
+  ...DEFAULT_SONG_CREDITS_SETTINGS,
+  ...DEFAULT_KINETIC_SETTINGS,
 };
 
 /** Default settings factory for any new output */
@@ -239,6 +253,8 @@ export const createDefaultOutputSettings = (overrides = {}) => ({
   transitionSpeed: 150,
   outputVisibilityTransitionAnimation: DEFAULT_APPEARANCE_TRANSITIONS.outputVisibilityTransitionAnimation,
   outputVisibilityTransitionDuration: DEFAULT_APPEARANCE_TRANSITIONS.outputVisibilityTransitionDuration,
+  ...DEFAULT_SONG_CREDITS_SETTINGS,
+  ...DEFAULT_KINETIC_SETTINGS,
   ...overrides,
 });
 
@@ -329,6 +345,8 @@ export const defaultOutput2Settings = {
   transitionSpeed: 150,
   outputVisibilityTransitionAnimation: DEFAULT_APPEARANCE_TRANSITIONS.outputVisibilityTransitionAnimation,
   outputVisibilityTransitionDuration: DEFAULT_APPEARANCE_TRANSITIONS.outputVisibilityTransitionDuration,
+  ...DEFAULT_SONG_CREDITS_SETTINGS,
+  ...DEFAULT_KINETIC_SETTINGS,
 };
 
 export const createOutputSlice = (set, get, normalizePaintSettingUpdates) => ({

@@ -7,6 +7,8 @@ import {
   buildLyricsParsingOptions,
   normalizeLyricsParsingOptions,
 } from '../shared/lyricsParsing/preferenceOptions.js';
+import { expandRepeatableSectionReferences } from '../shared/lyricsParsing/repeatableSections.js';
+import { applySongMetadataHeader, formatSongCreditLines } from '../shared/lyricsParsing/songMetadata.js';
 import { isStructureTag } from '../shared/lyricsParsing/structureTags.js';
 import {
   extractExplicitGroupingDirective,
@@ -18,10 +20,11 @@ import {
   buildEnhancedTimestampPlaceholder,
   buildStandardTimestampInsertion,
 } from '../src/hooks/NewSongCanvas/useTimestampOperations.js';
-import { formatLyrics, formatLyricsWithStats, reconstructEditableText } from '../src/utils/lyricsFormat.js';
+import { formatLyrics, formatLyricsWithStats, formatPastedLyrics, reconstructEditableText } from '../src/utils/lyricsFormat.js';
 import {
   getLineOutputText,
   isStageOnlyLine,
+  shouldShowSongCredits,
   stripStageOnlyPrefix,
   toggleStageOnlyPrefix,
 } from '../src/utils/parseLyrics.js';
@@ -288,6 +291,143 @@ test('LRC parsing sorts timestamps, strips metadata, and deduplicates repeated t
   assert.equal(parsed.rawText, 'First line\nSecond line\nUntimed refrain');
 });
 
+test('imported metadata headers become song metadata instead of lyric lines', () => {
+  const easyWorshipExport = [
+    '# Title: Amazing Grace',
+    '# Author: John Newton, Edwin Excell',
+    '# Copyright: Public Domain',
+    '# Administrator: Example Music',
+    '# CCLI Song Number: 22025',
+    '# Imported from EasyWorship: 2026-10-01',
+    '',
+    'Amazing grace how sweet the sound',
+    'That saved a wretch like me',
+  ].join('\n');
+
+  const parsed = parseTxtContent(easyWorshipExport);
+  const visibleText = parsed.processedLines
+    .map((line) => (typeof line === 'string' ? line : (line.lines || [line.mainLine]).join('\n')))
+    .join('\n');
+
+  assert.equal(visibleText.includes('#'), false);
+  assert.match(visibleText, /^Amazing grace how sweet the sound/);
+  assert.deepEqual(parsed.songMetadata, {
+    title: 'Amazing Grace',
+    artists: ['John Newton', 'Edwin Excell'],
+    copyright: 'Public Domain',
+    administrator: 'Example Music',
+    ccliSongNumber: '22025',
+  });
+  assert.match(parsed.rawText, /^# Title: Amazing Grace\n/);
+
+  const powerPointExport = parseTxtContent([
+    '# Title: Opening Slides',
+    '# Source File: service.pptx',
+    '# Imported from PowerPoint (.pptx): 2026-10-01',
+    '',
+    'Welcome everyone',
+  ].join('\n'));
+  assert.deepEqual(powerPointExport.processedLines, ['Welcome everyone']);
+  assert.deepEqual(powerPointExport.songMetadata, { title: 'Opening Slides' });
+});
+
+test('hash lines inside lyrics are not treated as metadata headers', () => {
+  const parsed = parseTxtContent([
+    'First lyric line',
+    '# Title: not a header here',
+  ].join('\n'));
+
+  assert.equal(parsed.songMetadata, null);
+  assert.equal(JSON.stringify(parsed.processedLines).includes('# Title: not a header here'), true);
+
+  const unknownKey = parseTxtContent('# Mood: joyful\nLyric line');
+  assert.equal(unknownKey.songMetadata, null);
+  assert.equal(JSON.stringify(unknownKey.processedLines).includes('# Mood: joyful'), true);
+});
+
+test('LRC metadata tags populate song metadata', () => {
+  const parsed = parseLrcContent([
+    '[ti:Example Title]',
+    '[ar:First Artist & Second Artist]',
+    '[al:Example Album]',
+    '[00:01.00]Line',
+  ].join('\n'), { enableSplitting: false });
+
+  assert.deepEqual(parsed.songMetadata, {
+    title: 'Example Title',
+    artists: ['First Artist', 'Second Artist'],
+    album: 'Example Album',
+  });
+});
+
+test('song metadata headers fill in base metadata without discarding provided values', () => {
+  const header = { title: 'Header Title', artists: ['Header Writer'], copyright: '© 2020 Example' };
+
+  assert.deepEqual(
+    applySongMetadataHeader({ title: 'file-name', artists: [], album: null }, header, { override: true }),
+    { title: 'Header Title', artists: ['Header Writer'], album: null, copyright: '© 2020 Example' }
+  );
+  assert.deepEqual(
+    applySongMetadataHeader({ title: 'Provider Title', artists: ['Provider Artist'] }, header),
+    { title: 'Provider Title', artists: ['Provider Artist'], copyright: '© 2020 Example' }
+  );
+  assert.deepEqual(applySongMetadataHeader({ title: 'Same' }, null), { title: 'Same' });
+});
+
+test('bare section markers repeat earlier bridges, tags, and verses', () => {
+  const expanded = expandRepeatableSectionReferences([
+    '[Verse 1]',
+    'Verse one line',
+    '',
+    '[Bridge]',
+    'Bridge line',
+    '',
+    '[Verse 2]',
+    'Verse two line',
+    '',
+    '[Bridge]',
+    '',
+    '[Tag]',
+    'Tag line',
+    '',
+    '[Tag]',
+    '',
+    '[Verse 1]',
+  ].join('\n'));
+
+  assert.equal(expanded.match(/Bridge line/g).length, 2);
+  assert.equal(expanded.match(/Tag line/g).length, 2);
+  assert.equal(expanded.match(/Verse one line/g).length, 2);
+  assert.equal(expanded.match(/Verse two line/g).length, 1);
+});
+
+test('numbered section definitions do not overwrite the unnumbered section', () => {
+  const expanded = expandRepeatableSectionReferences([
+    '[Chorus]',
+    'First chorus',
+    '',
+    '[Chorus 2]',
+    'Second chorus',
+    '',
+    '[Chorus]',
+    '',
+    '[Chorus 2]',
+  ].join('\n')).split('\n');
+
+  const thirdMarker = expanded.lastIndexOf('[Chorus]');
+  assert.equal(expanded[thirdMarker + 1], 'First chorus');
+  const lastMarker = expanded.lastIndexOf('[Chorus 2]');
+  assert.equal(expanded[lastMarker + 1], 'Second chorus');
+});
+
+test('undefined numbered verses are not filled from another verse, but choruses still are', () => {
+  const verses = expandRepeatableSectionReferences('[Verse 1]\nOnly verse\n\n[Verse 3]');
+  assert.equal(verses.match(/Only verse/g).length, 1);
+
+  const choruses = expandRepeatableSectionReferences('[Chorus]\nThe chorus\n\n[Chorus 2]');
+  assert.equal(choruses.match(/The chorus/g).length, 2);
+});
+
 test('LRC parsing preserves blank timestamped lines without visible placeholders', () => {
   const parsed = parseLrcContent([
     '[00:01.00]',
@@ -470,6 +610,149 @@ test('legacy TXT files retain cross-blank auto-grouping without the explicit dir
   assert.deepEqual(parsed.processedLines[0].lines, ['First line', 'Second line']);
 });
 
+test('invisible blank-placeholder lines separate stanzas instead of grouping with lyric lines', () => {
+  const placeholders = ['⠀', 'ㅤ', '‎', ' ​  '];
+
+  placeholders.forEach((placeholder) => {
+    const parsed = parseTxtContent(
+      `First line\nSecond line\n${placeholder}\nThird line\nFourth line`,
+      { enableSplitting: false },
+    );
+
+    assert.deepEqual(
+      parsed.processedLines.map((line) => line.lines || line),
+      [['First line', 'Second line'], ['Third line', 'Fourth line']],
+      `placeholder U+${placeholder.trim().codePointAt(0)?.toString(16) || '0020'} should act as a blank line`,
+    );
+  });
+
+  const lrc = parseLrcContent('[00:01.00]First line\n[00:01.00]⠀\n[00:01.00]Second line', {
+    enableSplitting: false,
+  });
+  assert.deepEqual(lrc.processedLines, ['First line', '', 'Second line']);
+
+  assert.equal(isManualNormalGroupCandidate('⠀'), false);
+  assert.equal(isManualNormalGroupCandidate('ㅤ‎'), false);
+});
+
+test('cross-blank grouping never pulls a stanza line into the next stanza', () => {
+  const leftover = parseTxtContent('First line\nSecond line\nThird line\n\nFourth line', {
+    enableSplitting: false,
+  });
+  assert.deepEqual(
+    leftover.processedLines.map((line) => line.lines || line),
+    [['First line', 'Second line'], 'Third line', 'Fourth line'],
+  );
+
+  const between = parseTxtContent('A one\nB two\n\nC three\nD four\nE five\n\nF six', {
+    enableSplitting: false,
+  });
+  assert.deepEqual(
+    between.processedLines.map((line) => line.lines || line),
+    [['A one', 'B two'], ['C three', 'D four'], 'E five', 'F six'],
+  );
+
+  const singleLineStanzas = parseTxtContent('[Verse]\nFirst line\n\nSecond line\n\nThird line\n\nFourth line', {
+    enableSplitting: false,
+  });
+  assert.deepEqual(
+    singleLineStanzas.processedLines.map((line) => line.lines || line),
+    ['[Verse]', ['First line', 'Second line'], ['Third line', 'Fourth line']],
+  );
+});
+
+test('cleanup leaves at most one blank line after pruning empty sections', () => {
+  const { text } = formatLyricsWithStats([
+    '[Verse 1]',
+    'amazing grace how sweet the sound',
+    'that saved a wretch like me',
+    '',
+    '[Chorus]',
+    '',
+    '[Verse 2]',
+    'twas grace that taught my heart',
+    '',
+    '[Bridge]',
+    '',
+  ].join('\n'), { enableSplitting: true });
+
+  assert.equal(text, [
+    '[Verse 1]',
+    'Amazing grace how sweet the sound',
+    'That saved a wretch like me',
+    '',
+    '[Verse 2]',
+    'Twas grace that taught my heart',
+  ].join('\n'));
+
+  assert.equal(formatLyricsWithStats('[Verse]\n\n[Chorus]\nhello there').text, '[Chorus]\nHello there');
+});
+
+test('cleanup keeps chorus repeat calls and repeat instructions', () => {
+  const source = [
+    '[Chorus]',
+    'Sing it loud',
+    '',
+    '[Verse]',
+    'Hello there',
+    '',
+    '[Chorus]',
+    '',
+    'Repeat Chorus',
+    '',
+    'Chorus x2',
+  ].join('\n');
+  const { text, stats } = formatLyricsWithStats(source, { enableSplitting: true });
+
+  assert.equal(text, [
+    '[Chorus]',
+    'Sing it loud',
+    '',
+    '[Verse]',
+    'Hello there',
+    '',
+    '[Chorus]',
+    '',
+    'Repeat Chorus',
+    '',
+    'Chorus x2',
+  ].join('\n'));
+  assert.equal(stats.emptySectionsRemoved, 0);
+});
+
+test('cleanup starts a stanza at each section tag and attaches the tag to its lyrics', () => {
+  const options = { enableSplitting: false, capitalizeReligious: false };
+
+  assert.equal(
+    formatLyrics('Verse 1:\nline one here\nline two here\nChorus\nsing it now', options),
+    'Verse 1:\nLine one here\nLine two here\n\nChorus\nSing it now',
+  );
+  assert.equal(
+    formatLyrics('[Verse 1]\n\n\namazing grace\nhow sweet the sound', options),
+    '[Verse 1]\nAmazing grace\nHow sweet the sound',
+  );
+});
+
+test('cleanup treats invisible placeholder lines as blank and never emits consecutive blanks', () => {
+  [true, false].forEach((enableSplitting) => {
+    const options = { enableSplitting, capitalizeReligious: false };
+
+    assert.equal(formatLyrics('Hello there\n⠀\nWorld here', options), 'Hello there\n\nWorld here');
+    assert.equal(formatLyrics('Hello there\n​\nㅤ\nWorld here', options), 'Hello there\n\nWorld here');
+    assert.equal(formatLyrics('Hello there\n...\n\nWorld here', options), 'Hello there\n\nWorld here');
+    assert.equal(formatLyrics('Hello there\r\n\r\n \t\r\n\r\nWorld here', options), 'Hello there\n\nWorld here');
+    assert.equal(formatLyrics('\n\n⠀\nHello there\n\n\n', options), 'Hello there');
+  });
+});
+
+test('cleanup reports collapsed blank lines and counts typographic characters individually', () => {
+  const { text, stats } = formatLyricsWithStats('“hello” there… friend\n\n\n\nnext line here');
+
+  assert.equal(text, '"Hello" there... friend\n\nNext line here');
+  assert.equal(stats.typographicCharsNormalized, 3);
+  assert.equal(stats.excessBlanksRemoved, 2);
+});
+
 test('formatter splits long lines without inserting blank separators between split segments', () => {
   const formatted = formatLyrics(
     'this is a very long lyric line that should split into multiple display lines without becoming separate lyric blocks',
@@ -583,4 +866,104 @@ test('plain text parser recognizes section descriptors separated by en dash', ()
   assert.equal(parsed.processedLines[0], '[Chorus \u2013 Leader]');
   assert.equal(parsed.sections.length, 1);
   assert.equal(parsed.sections[0].label, 'Chorus \u2013 Leader');
+});
+
+test('song credits format into a compact two-line CCLI footer', () => {
+  assert.deepEqual(formatSongCreditLines({
+    title: 'Amazing Grace',
+    artists: ['John Newton', 'Edwin Excell'],
+    copyright: '2004 Example Music',
+    ccliSongNumber: '22025',
+    ccliLicenseNumber: '7654321',
+  }), [
+    'Amazing Grace · John Newton, Edwin Excell',
+    '© 2004 Example Music · CCLI Song # 22025 · CCLI License # 7654321',
+  ]);
+
+  assert.deepEqual(formatSongCreditLines({ title: 'Hymn', artists: [], copyright: 'Public Domain' }), [
+    'Hymn',
+    'Public Domain',
+  ]);
+  assert.deepEqual(formatSongCreditLines({ title: 'Song', copyright: '© 2010 Label' })[1], '© 2010 Label');
+  assert.deepEqual(formatSongCreditLines({ title: 'Song', copyright: 'Copyright 2010 Label' })[1], 'Copyright 2010 Label');
+  assert.deepEqual(formatSongCreditLines({ title: '', artists: [] }), []);
+  assert.deepEqual(formatSongCreditLines(null), []);
+});
+
+test('song credits show on the first and last lyric lines according to the output mode', () => {
+  const lyrics = ['[Verse 1]', 'First line', 'Middle line', '[Chorus]', 'Last line', ''];
+
+  assert.equal(shouldShowSongCredits({ mode: 'off', lyrics, selectedLine: 1 }), false);
+  assert.equal(shouldShowSongCredits({ mode: 'always', lyrics, selectedLine: 2 }), true);
+  assert.equal(shouldShowSongCredits({ mode: 'first', lyrics, selectedLine: 1 }), true);
+  assert.equal(shouldShowSongCredits({ mode: 'first', lyrics, selectedLine: 2 }), false);
+  assert.equal(shouldShowSongCredits({ mode: 'last', lyrics, selectedLine: 4 }), true);
+  assert.equal(shouldShowSongCredits({ mode: 'last', lyrics, selectedLine: 1 }), false);
+  assert.equal(shouldShowSongCredits({ mode: 'first-last', lyrics, selectedLine: 1 }), true);
+  assert.equal(shouldShowSongCredits({ mode: 'first-last', lyrics, selectedLine: 4 }), true);
+  assert.equal(shouldShowSongCredits({ mode: 'first-last', lyrics, selectedLine: 2 }), false);
+  assert.equal(shouldShowSongCredits({ mode: 'always', lyrics, selectedLine: null }), false);
+  assert.equal(shouldShowSongCredits({ mode: 'always', lyrics, selectedLine: 5 }), false);
+});
+
+test('classic canvas pastes from hymnals keep verses and refrain repeats in plain text', () => {
+  const hymnary = [
+    "1 When upon life's billows you are tempest tossed,",
+    'When you are discouraged, thinking all is lost,',
+    'Refrain:',
+    'Count your blessings, name them one by one;',
+    '2 Are you ever burdened with a load of care?',
+    'And you will be singing as the days go by. [Refrain]',
+    '3 When you look at others with their lands and gold,',
+    'Your reward in heaven, nor your home on high. [Refrain]',
+  ].join('\r\n');
+  // Lines longer than the grouping limit get their own stanza; this limit fits the hymn's lines.
+  const pasted = formatPastedLyrics(hymnary, { groupingConfig: { maxLineLength: 60 } });
+  assert.equal(pasted, [
+    '[Verse 1]',
+    "When upon life's billows you are tempest tossed,",
+    'When you are discouraged, thinking all is lost,',
+    '',
+    'Refrain:',
+    'Count your blessings, name them one by one;',
+    '',
+    '[Verse 2]',
+    'Are you ever burdened with a load of care?',
+    'And you will be singing as the days go by.',
+    '',
+    '[Refrain]',
+    '',
+    '[Verse 3]',
+    'When you look at others with their lands and gold,',
+    'Your reward in heaven, nor your home on high.',
+    '',
+    '[Refrain]',
+  ].join('\n'));
+
+  // The classic parser plays each bare [Refrain] as the one written earlier.
+  const { processedLines } = parseTxtContent(pasted, { enableSplitting: false, groupingConfig: { enableAutoLineGrouping: false } });
+  assert.equal(processedLines.filter((line) => line === 'Count your blessings, name them one by one;').length, 3);
+});
+
+test('classic canvas pastes drop chord lines, and keep song credits only as a header for an empty canvas', () => {
+  const songSelect = [
+    'Verse 1',
+    'G           C/G        G',
+    'Amazing grace how sweet the sound',
+    '',
+    'CCLI Song # 4768151',
+    'Chris Tomlin | Louie Giglio',
+    '© 2006 sixsteps Music',
+    'CCLI License # 123456',
+  ].join('\n');
+
+  assert.equal(formatPastedLyrics(songSelect, {}, { includeCredits: true }), [
+    '# Author: Chris Tomlin, Louie Giglio',
+    '# Copyright: 2006 sixsteps Music',
+    '# CCLI Song Number: 4768151',
+    '',
+    'Verse 1',
+    'Amazing grace how sweet the sound',
+  ].join('\n'));
+  assert.equal(formatPastedLyrics(songSelect, {}), 'Verse 1\nAmazing grace how sweet the sound');
 });

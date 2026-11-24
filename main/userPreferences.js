@@ -16,6 +16,7 @@ import {
 } from './preferenceMigrations.js';
 import { toStorageWriteFailure } from '../shared/storageErrors.js';
 import { DEFAULT_BACKEND_PORT, normalizeBackendPort } from '../shared/backendPort.js';
+import { normalizeCcliNumber } from '../shared/lyricsParsing/songMetadata.js';
 
 const preferenceWriteFailure = (error) => toStorageWriteFailure(error, {
   subject: 'preferences',
@@ -32,7 +33,9 @@ const preferencesStore = new Store({
       liveSafetyMode: false,
       previewLines: false,
       toastSoundsMuted: false,
+      toastSoundDeviceId: '',
       skipSectionTitlesOnKeyboard: true,
+      ccliLicenseNumber: '',
       startMinimized: false,
       minimizeToTray: false,
     },
@@ -51,6 +54,7 @@ const preferencesStore = new Store({
     // Lyrics Formatting Settings
     formatting: {
       enableCleanupOnPaste: true,
+      pasteLinesPerSlide: 2,
       capitalizeFirstLetter: true,
       capitalizeReligiousTerms: true,
       capitalizedWords: [...DEFAULT_CAPITALIZED_WORDS],
@@ -101,7 +105,7 @@ const preferencesStore = new Store({
 
     // Appearance Settings
     appearance: {
-      themeMode: 'light', // 'light', 'dark', 'system'
+      themeMode: 'dark', // 'light', 'dark', 'system'
       showTooltips: true,
       showTutorialPopovers: true,
       showCanvasFloatingToolbar: true,
@@ -282,6 +286,12 @@ export function resetAllToDefaults() {
  * Get parsing configuration for use in lyrics parser
  * @returns {object} Parsing configuration
  */
+export function getSongCreditsConfig() {
+  return {
+    ccliLicenseNumber: normalizeCcliNumber(getPreference('general.ccliLicenseNumber')),
+  };
+}
+
 export function getParsingConfig() {
   try {
     const parsing = preferencesStore.get('parsing');

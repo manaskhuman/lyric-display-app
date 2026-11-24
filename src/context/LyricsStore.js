@@ -7,6 +7,7 @@ import { normalizeAppearanceTransitions } from '../../shared/transitionSettings.
 import { normalizePreviewSettings } from '../../shared/previewSettings.js';
 import { normalizeTimerControlSettings, normalizeTimerDisplaySettings } from '../utils/timerUtils';
 import { createSolidPaint } from '../utils/paint';
+import { setToastSoundOutputDevice } from '../utils/toastSounds';
 import { createAppShellSlice } from './lyricsStore/appShellSlice.js';
 import { createAutoplaySlice } from './lyricsStore/autoplaySlice.js';
 import { createLyricsSessionSlice } from './lyricsStore/lyricsSessionSlice.js';
@@ -128,6 +129,13 @@ export async function loadPreferencesIntoStore(store) {
     }
 
     if (window.electronAPI?.preferences?.get) {
+      const result = await window.electronAPI.preferences.get('general.toastSoundDeviceId');
+      if (result.success) {
+        setToastSoundOutputDevice(typeof result.value === 'string' ? result.value : '');
+      }
+    }
+
+    if (window.electronAPI?.preferences?.get) {
       const result = await window.electronAPI.preferences.get('general.skipSectionTitlesOnKeyboard');
       if (result.success && typeof result.value === 'boolean') {
         store.getState().setSkipSectionTitlesOnKeyboard(result.value);
@@ -146,6 +154,12 @@ export async function loadPreferencesIntoStore(store) {
       const result = await window.electronAPI.preferences.get('formatting.enableCleanupOnPaste');
       if (result.success && typeof result.value === 'boolean') {
         store.getState().setCanvasCleanupOnPaste(result.value);
+      }
+    }
+    if (window.electronAPI?.preferences?.get) {
+      const result = await window.electronAPI.preferences.get('formatting.pasteLinesPerSlide');
+      if (result.success && result.value != null) {
+        store.getState().setPasteLinesPerSlide(result.value);
       }
     }
     if (window.electronAPI?.preferences?.get) {

@@ -1,6 +1,6 @@
 {
   "name": "lyric-display-app",
-  "version": "6.8.7",
+  "version": "7.0.2",
   "description": "Real-time lyric display app with control panel and multiple output displays",
   "license": "GPL-3.0-or-later",
   "author": {
@@ -42,9 +42,9 @@
     "butterchurn": "3.0.0-beta.5",
     "butterchurn-presets": "3.0.0-beta.4",
     "cors": "^2.8.5",
-    "dotenv": "^17.2.1",
-    "electron-store": "^11.0.2",
-    "electron-updater": "^6.8.9",
+    "dotenv": "^18.0.9",
+    "electron-store": "^12.0.0",
+    "electron-updater": "^6.8.11",
     "express": "^5.2.1",
     "express-rate-limit": "^8.5.2",
     "font-list": "^2.0.1",
@@ -53,9 +53,9 @@
     "jszip": "^3.10.1",
     "keytar": "^7.9.0",
     "mammoth": "^1.12.0",
-    "multer": "^2.1.1",
+    "multer": "^2.5.0",
     "paradox-reader": "^1.3.0",
-    "pdfkit": "^0.19.1",
+    "pdfkit": "^0.20.2",
     "socket.io": "^4.8.3",
     "unzipper": "^0.12.5"
   },
@@ -73,32 +73,32 @@
     "@radix-ui/react-tabs": "^1.1.17",
     "@tailwindcss/postcss": "^4.3.2",
     "@vitejs/plugin-react": "^6.0.3",
-    "autoprefixer": "^10.5.2",
+    "autoprefixer": "^10.6.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "concurrently": "^10.0.3",
     "dompurify": "^3.4.12",
-    "electron": "^43.1.0",
-    "electron-builder": "^26.15.6",
-    "framer-motion": "^13.1.0",
+    "electron": "^45.1.0",
+    "electron-builder": "^26.18.0",
+    "framer-motion": "^14.7.1",
     "husky": "^9.1.7",
-    "lucide-react": "^1.24.0",
-    "postcss": "^8.5.18",
+    "lucide-react": "^1.62.0",
+    "postcss": "^8.5.32",
     "prompts": "^2.4.2",
     "qrcode": "^1.5.4",
     "react": "^19.2.7",
     "react-colorful": "^5.7.0",
     "react-dom": "^19.2.7",
     "react-router-dom": "^7.18.1",
-    "react-window": "^2.2.7",
+    "react-window": "^2.5.1",
     "socket.io-client": "^4.8.3",
     "tailwind-merge": "^3.6.0",
     "tailwindcss": "^4.3.2",
     "tailwindcss-animate": "^1.0.7",
     "use-sync-external-store": "^1.6.0",
-    "vite": "^8.1.4",
+    "vite": "^8.3.5",
     "wait-on": "^9.0.10",
-    "zustand": "^5.0.14"
+    "zustand": "^5.0.16"
   },
   "build": {
     "appId": "com.lyricdisplay",
@@ -165,6 +165,13 @@
         }
       ],
       "fileAssociations": [
+        {
+          "ext": "ldsong",
+          "name": "LyricDisplay Song",
+          "description": "LyricDisplay structured song file",
+          "icon": "public/favicon.ico",
+          "role": "Editor"
+        },
         {
           "ext": "lrc",
           "name": "LRC Lyric File",
@@ -255,6 +262,7 @@
     },
     "mac": {
       "category": "public.app-category.music",
+      "minimumSystemVersion": "13.0",
       "target": [
         {
           "target": "dmg",
@@ -275,6 +283,12 @@
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
       "fileAssociations": [
+        {
+          "ext": "ldsong",
+          "name": "LyricDisplay Song",
+          "description": "LyricDisplay structured song file",
+          "role": "Editor"
+        },
         {
           "ext": "lrc",
           "name": "LRC Lyric File",
@@ -355,6 +369,12 @@
       "maintainer": "Peter Alakembi <alakembipeter30@gmail.com>",
       "fileAssociations": [
         {
+          "ext": "ldsong",
+          "name": "LyricDisplay Song",
+          "description": "LyricDisplay structured song file",
+          "mimeType": "application/x-ldsong"
+        },
+        {
           "ext": "lrc",
           "name": "LRC Lyric File",
           "description": "Lyric file with timestamps",
@@ -418,5 +438,10 @@
         "releaseType": "release"
       }
     ]
+  },
+  "overrides": {
+    "mammoth": {
+      "argparse": "^2.0.1"
+    }
   }
 }

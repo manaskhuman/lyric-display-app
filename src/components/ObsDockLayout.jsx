@@ -16,7 +16,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { useAllOutputIds, useLyricsState, useOutputState, useSetlistState } from '../hooks/useStoreSelectors';
+import { useAllOutputIds, useKeyboardNavigationPreferences, useLyricsState, useOutputState, useSetlistState } from '../hooks/useStoreSelectors';
 import useLyricsStore from '../context/LyricsStore';
 import { useControlSocket } from '../context/ControlSocketProvider';
 import useFileUpload from '../hooks/useFileUpload';
@@ -25,12 +25,15 @@ import useSearch from '../hooks/useSearch';
 import useToast from '../hooks/useToast';
 import { useLyricsLoader } from '../hooks/LyricDisplayApp/useLyricsLoader';
 import { useQuickParserControls } from '../hooks/LyricDisplayApp/useQuickParserControls';
+import { useKeyboardShortcuts } from '../hooks/LyricDisplayApp/useKeyboardShortcuts';
+import { useSetlistNavigation } from '../hooks/LyricDisplayApp/useSetlistNavigation';
 import LyricsList from './LyricsList';
 import SearchBar from './SearchBar';
 import OutputSettingsPanel from './OutputSettingsPanel';
 import QuickParserPopover from './LyricDisplayApp/QuickParserPopover';
 import { Tooltip } from '@/components/ui/tooltip';
 import { resolveBackendUrl } from '../utils/network';
+import { prepareLyricTextImport } from '../../shared/documentTextExtraction.js';
 import {
   getLyricFormatLabel,
   getLyricImportFormatForType,
@@ -160,8 +163,8 @@ function DockSongEditor({
     titleInputRef.current?.focus();
   }, []);
 
+  const lyricsParsingOptions = useLyricsStore((state) => state.lyricsParsingOptions);
   const canSave = title.trim().length > 0 && content.trim().length > 0;
-  const extension = hasLrcTimestamps(content) ? 'lrc' : 'txt';
 
   const downloadFile = React.useCallback(() => {
     if (!canSave) {
@@ -170,8 +173,14 @@ function DockSongEditor({
     }
 
     const baseName = sanitizeSongTitle(title) || 'lyrics';
+    // Songs are saved structured (.ldsong); timed lyrics stay LRC to keep their timing.
+    const prepared = hasLrcTimestamps(content)
+      ? { content, fileType: 'lrc' }
+      : prepareLyricTextImport({ title: title.trim(), content }, { parsingOptions: lyricsParsingOptions });
+    const extension = prepared.fileType;
+    const fileContent = prepared.content;
     const fileName = `${baseName}.${extension}`;
-    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const blob = new Blob([fileContent], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
 
     try {
@@ -182,11 +191,11 @@ function DockSongEditor({
       link.click();
       document.body.removeChild(link);
       showToast({ title: 'File saved', message: `${fileName} downloaded.`, variant: 'success' });
-      return { fileName, baseName, extension, content };
+      return { fileName, baseName, extension, content: fileContent };
     } finally {
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
-  }, [canSave, content, extension, showToast, title]);
+  }, [canSave, content, lyricsParsingOptions, showToast, title]);
 
   const handleSave = React.useCallback(() => {
     downloadFile();
@@ -251,7 +260,7 @@ function DockSongEditor({
           type="button"
           onClick={handleSaveAndLoad}
           disabled={!canSave || saving}
-          className={`flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md bg-blue-600 text-xs font-semibold text-white ${!canSave || saving ? 'cursor-not-allowed opacity-45' : 'hover:bg-blue-700'}`}
+          className={`flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md bg-blue-500 text-xs font-semibold text-white ${!canSave || saving ? 'cursor-not-allowed opacity-45' : 'hover:bg-blue-400'}`}
         >
           <FolderOpen className="h-3.5 w-3.5" />
           <span>{saving ? 'Loading...' : 'Save & Load'}</span>
@@ -284,6 +293,7 @@ export default function ObsDockLayout() {
   const { isOutputOn, setIsOutputOn } = useOutputState();
   const { setlistFiles, setSetlistFiles, isSetlistFull, getMaxSetlistFiles } = useSetlistState();
   const allOutputIds = useAllOutputIds();
+  const { skipSectionTitlesOnKeyboard } = useKeyboardNavigationPreferences();
   const { showToast } = useToast();
   const handleFileUpload = useFileUpload();
   const handleMultipleFileUpload = useMultipleFileUpload();
@@ -334,7 +344,7 @@ export default function ObsDockLayout() {
     ? 'inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-blue-500/10 hover:text-blue-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/35'
     : 'inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/35';
   const dockIconDisabledClass = 'cursor-not-allowed opacity-45';
-  const dockPrimaryButtonClass = 'flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-full bg-linear-to-r from-blue-400 to-purple-600 px-3 text-xs font-semibold text-white transition-all duration-200 hover:from-blue-500 hover:to-purple-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40';
+  const dockPrimaryButtonClass = 'flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-full bg-blue-500 px-3 text-xs font-semibold text-white transition-all duration-200 hover:bg-blue-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40';
   const currentLineText = hasLyrics && typeof selectedLine === 'number'
     ? `${selectedLine + 1}/${lyrics.length}`
     : hasLyrics ? `${lyrics.length} lines` : 'No lyrics';
@@ -532,6 +542,49 @@ export default function ObsDockLayout() {
     setSetlistFiles(next);
     emitSetlistReorder(next.map((file) => file.id));
   }, [emitSetlistReorder, setSetlistFiles, setlistFiles]);
+
+  const handleClearOutput = React.useCallback(() => {
+    if (!canControl) return;
+    selectLine(null);
+    emitLineUpdate(null);
+  }, [canControl, emitLineUpdate, selectLine]);
+
+  const { handleNavigateSetlistPrevious, handleNavigateSetlistNext } = useSetlistNavigation({
+    emitSetlistLoad,
+    hasLyrics,
+    lyricsFileName,
+    setlistItemId: lyricsSource?.setlistItemId || null,
+    setlistFiles,
+    showToast,
+  });
+
+  // Same keys as the desktop control panel. Dock overlays (editor, setlist, output
+  // settings) own the keyboard while open, so shortcuts pause until they close.
+  const dockOverlayOpen = Boolean(editorState) || setlistOpen || settingsOpen;
+  const whenDockFocused = (handler) => (dockOverlayOpen ? undefined : handler);
+  useKeyboardShortcuts({
+    hasLyrics: hasLyrics && !dockOverlayOpen,
+    lyrics,
+    lyricsTimestamps,
+    selectedLine,
+    handleLineSelect,
+    handleToggle: handleToggleOutput,
+    handleClearOutput,
+    handleOutputTabSwitch: setActiveOutput,
+    searchQuery,
+    clearSearch,
+    totalMatches,
+    highlightedLineIndex,
+    handleOpenSetlist: whenDockFocused(() => setSetlistOpen(true)),
+    handleOpenFileDialog: whenDockFocused(() => fileInputRef.current?.click()),
+    handleCreateNewSong: whenDockFocused(openCreateEditor),
+    handleEditLyrics: whenDockFocused(openEditEditor),
+    handleAddToSetlist: whenDockFocused(handleAddCurrentToSetlist),
+    handleNavigateSetlistPrevious: whenDockFocused(handleNavigateSetlistPrevious),
+    handleNavigateSetlistNext: whenDockFocused(handleNavigateSetlistNext),
+    availableOutputIds: allOutputIds,
+    skipSectionTitlesOnKeyboard,
+  });
 
   return (
     <div className={`flex h-screen min-h-0 flex-col overflow-hidden font-sans ${shellClasses}`}>

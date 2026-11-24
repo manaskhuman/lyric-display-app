@@ -5,8 +5,11 @@ import {
 } from '../../shared/outputRegistry.js';
 import { DEFAULT_PREVIEW_SETTINGS, normalizePreviewSettings } from '../../shared/previewSettings.js';
 import { getLyricsParsingOptions } from './lyricsParsingConfig.js';
+import { normalizeCcliNumber, toDisplaySongCredits } from '../../shared/lyricsParsing/songMetadata.js';
 
 export const state = {
+  // Church-wide CCLI licence number from desktop preferences, shown in display song credits.
+  ccliLicenseNumber: normalizeCcliNumber(process.env.LYRICDISPLAY_CCLI_LICENSE_NUMBER),
   currentLyrics: [],
   currentLyricsTimestamps: [],
   currentLyricsEnhancedTimestamps: [],
@@ -216,6 +219,23 @@ const appendOutputState = (target, outputId) => {
   return target;
 };
 
+// The preview grid draws every output, the stage, and the time display in one window.
+const appendAllOutputState = (target) => {
+  for (const outputId of state.outputSettings.keys()) appendOutputState(target, outputId);
+  return target;
+};
+
+export const getDisplaySongCredits = (metadata = state.currentSongMetadata) => (
+  toDisplaySongCredits(metadata, { ccliLicenseNumber: state.ccliLicenseNumber })
+);
+
+// The setlist item behind the live lyrics, if it is still in the setlist.
+export const getActiveSetlistItemId = (lyricsSource = state.currentLyricsSource) => {
+  const itemId = typeof lyricsSource?.setlistItemId === 'string' ? lyricsSource.setlistItemId : '';
+  if (!itemId) return null;
+  return state.setlistFiles.some((file) => file?.id === itemId) ? itemId : null;
+};
+
 export const summarizeSetlistForDisplay = (files = []) => {
   if (!Array.isArray(files)) return [];
   return files.map((file) => ({
@@ -246,10 +266,21 @@ export function buildCurrentState(clientInfo) {
   }
 
   if (clientPurpose === 'preview') {
-    return {
+    return appendAllOutputState({
       ...baseState,
       previewSettings: normalizePreviewSettings(state.currentPreviewSettings),
-    };
+      lyrics: state.currentLyrics,
+      selectedLine: state.currentSelectedLine,
+      isOutputOn: state.currentIsOutputOn,
+      lyricsFileName: state.currentLyricsFileName || '',
+      songCredits: getDisplaySongCredits(),
+      stageSettings: state.currentStageSettings,
+      stageEnabled: state.currentStageEnabled,
+      setlistFiles: summarizeSetlistForDisplay(state.setlistFiles),
+      setlistItemId: getActiveSetlistItemId(),
+      stageTimerState: getStageTimerSnapshot(timestamp),
+      stageMessages: state.currentStageMessages,
+    });
   }
 
   if (isOutputClientType(clientType)) {
@@ -259,6 +290,7 @@ export function buildCurrentState(clientInfo) {
       selectedLine: state.currentSelectedLine,
       isOutputOn: state.currentIsOutputOn,
       lyricsFileName: state.currentLyricsFileName || '',
+      songCredits: getDisplaySongCredits(),
       stageTimerState: getStageTimerSnapshot(timestamp),
     }, clientType);
   }
@@ -272,7 +304,9 @@ export function buildCurrentState(clientInfo) {
       isOutputOn: state.currentIsOutputOn,
       stageEnabled: state.currentStageEnabled,
       setlistFiles: summarizeSetlistForDisplay(state.setlistFiles),
+      setlistItemId: getActiveSetlistItemId(),
       lyricsFileName: state.currentLyricsFileName || '',
+      songCredits: getDisplaySongCredits(),
       stageTimerState: getStageTimerSnapshot(timestamp),
       stageMessages: state.currentStageMessages,
     };
@@ -327,10 +361,14 @@ export function buildPeriodicState(clientInfo) {
   }
 
   if (clientPurpose === 'preview') {
-    return {
+    return appendAllOutputState({
       ...baseState,
       previewSettings: normalizePreviewSettings(state.currentPreviewSettings),
-    };
+      selectedLine: state.currentSelectedLine,
+      isOutputOn: state.currentIsOutputOn,
+      stageEnabled: state.currentStageEnabled,
+      stageTimerState: getStageTimerSnapshot(timestamp),
+    });
   }
 
   if (isOutputClientType(clientType)) {

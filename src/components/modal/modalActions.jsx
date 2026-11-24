@@ -61,7 +61,7 @@ export const getModalActionButtonClassName = (tone, isDark = false) => {
         shared,
         isDark
           ? 'border-blue-500 bg-blue-500 text-white hover:border-blue-400 hover:bg-blue-400 hover:text-white'
-          : 'border-blue-600 bg-blue-600 text-white hover:border-blue-700 hover:bg-blue-700 hover:text-white'
+          : 'border-blue-500 bg-blue-500 text-white hover:border-blue-400 hover:bg-blue-400 hover:text-white'
       );
   }
 };
@@ -101,7 +101,7 @@ export function ModalFooter({
       className={cn(
         'flex shrink-0 flex-wrap items-center gap-3 border-t px-6 py-4',
         alignClass,
-        darkMode ? 'border-white/5 bg-slate-950/45' : 'border-slate-900/5 bg-[#f8fafc]',
+        darkMode ? 'border-white/5 bg-slate-950/45' : 'border-slate-900/5 bg-[#fafafa]',
         className
       )}
     >

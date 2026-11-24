@@ -128,6 +128,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     createLyricsFolder: () => ipcRenderer.invoke('file-navigator:create-lyrics-folder'),
     removeRoot: (rootPath) => ipcRenderer.invoke('file-navigator:remove-root', rootPath),
     reindex: () => ipcRenderer.invoke('file-navigator:reindex'),
+    convertTextSongs: () => ipcRenderer.invoke('file-navigator:convert-text-songs'),
     search: (payload) => ipcRenderer.invoke('file-navigator:search', payload),
     browse: (directoryPath) => ipcRenderer.invoke('file-navigator:browse', directoryPath),
     prepareSave: (payload) => ipcRenderer.invoke('file-navigator:prepare-save', payload),
@@ -552,9 +553,10 @@ contextBridge.exposeInMainWorld('electronStore', {
   getDarkMode: () => {
     try {
       const store = JSON.parse(persistentStorage.getItem('lyrics-store'));
-      return store?.state?.darkMode || false;
+      const darkMode = store?.state?.darkMode;
+      return typeof darkMode === 'boolean' ? darkMode : true;
     } catch {
-      return false;
+      return true;
     }
   }
 });

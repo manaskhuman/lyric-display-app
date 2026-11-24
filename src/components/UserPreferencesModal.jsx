@@ -16,6 +16,7 @@ import { Switch } from '@/components/ui/switch';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import useToast from '../hooks/useToast';
 import useLyricsStore from '../context/LyricsStore';
+import { listToastSoundOutputDevices, setToastSoundOutputDevice } from '../utils/toastSounds';
 import useModal from '../hooks/useModal';
 import { useLiveSafetyBridge } from '../hooks/useLiveSafetyBridge';
 import {
@@ -42,6 +43,8 @@ import NdiTelemetryPreferencesPage from './UserPreferencesModal/NdiTelemetryPref
 import SectionTagPhrasesPreferencesPage from './UserPreferencesModal/SectionTagPhrasesPreferencesPage';
 import UserPreferencesLayout from './UserPreferencesModal/UserPreferencesLayout';
 import { normalizeLineSplittingConfig } from '../../shared/lyricsParsing/preferenceOptions.js';
+import { normalizeCcliNumber } from '../../shared/lyricsParsing/songMetadata.js';
+import { DEFAULT_PASTE_LINES_PER_SLIDE, MAX_PASTE_LINES_PER_SLIDE } from '../utils/songDocumentEditing.js';
 import {
   DEFAULT_CAPITALIZED_WORDS,
   normalizeCapitalizedWords,
@@ -85,6 +88,22 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
   const [ndiPage, setNdiPage] = useState('main');
   const [contentDirection, setContentDirection] = useState(0);
   const [restoringAllDefaults, setRestoringAllDefaults] = useState(false);
+  const [toastSoundDevices, setToastSoundDevices] = useState([]);
+
+  React.useEffect(() => {
+    if (activeCategory !== 'general') return undefined;
+    let cancelled = false;
+    const refresh = () => listToastSoundOutputDevices().then((devices) => {
+      if (!cancelled) setToastSoundDevices(devices);
+    });
+    refresh();
+    const mediaDevices = globalThis.navigator?.mediaDevices;
+    mediaDevices?.addEventListener?.('devicechange', refresh);
+    return () => {
+      cancelled = true;
+      mediaDevices?.removeEventListener?.('devicechange', refresh);
+    };
+  }, [activeCategory]);
   const [indexedFolderPersistence, setIndexedFolderPersistence] = useState({
     saving: false,
     saveError: false,
@@ -189,7 +208,7 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
 
   const labelClass = darkMode ? 'text-gray-300' : 'text-gray-700';
   const mutedClass = darkMode ? 'text-gray-400' : 'text-gray-500';
-  const panelBg = darkMode ? 'bg-gray-800' : 'bg-[#f8fafc]';
+  const panelBg = darkMode ? 'bg-gray-800' : 'bg-[#fafafa]';
   const activeCategoryBg = darkMode ? 'bg-gray-700' : 'bg-white';
   const preferenceFieldLabelClass = `block mb-1.5 text-sm font-medium ${labelClass}`;
   const preferenceToggleRowClass = "flex items-center justify-between gap-6 [&>button]:shrink-0";
@@ -547,6 +566,40 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
               />
             </div>
 
+            {!(preferences.general?.toastSoundsMuted ?? false) && (() => {
+              const savedDeviceId = preferences.general?.toastSoundDeviceId || '';
+              const savedDeviceAvailable = !savedDeviceId || toastSoundDevices.some((device) => device.deviceId === savedDeviceId);
+              return (
+                <div className="space-y-2">
+                  <label className={preferenceFieldLabelClass}>Toast Sound Output</label>
+                  <Select
+                    value={savedDeviceId || 'default'}
+                    onValueChange={(value) => {
+                      const deviceId = value === 'default' ? '' : value;
+                      updatePreference('general', 'toastSoundDeviceId', deviceId);
+                      setToastSoundOutputDevice(deviceId);
+                    }}
+                  >
+                    <SelectTrigger className={inputClass}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className={selectContentClass}>
+                      <SelectItem value="default">System default device</SelectItem>
+                      {toastSoundDevices.map((device) => (
+                        <SelectItem key={device.deviceId} value={device.deviceId}>{device.label}</SelectItem>
+                      ))}
+                      {!savedDeviceAvailable && (
+                        <SelectItem value={savedDeviceId}>Unavailable device (using system default)</SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+                  <p className={`text-xs ${mutedClass}`}>
+                    If your stream captures this computer's audio, send toast sounds to headphones or another device your stream does not capture.
+                  </p>
+                </div>
+              );
+            })()}
+
             <div className={preferenceToggleRowClass}>
               <div className={preferenceToggleTextClass}>
                 <label className={`text-sm font-medium ${labelClass}`}>Skip Section Titles with Arrow Keys</label>
@@ -561,6 +614,23 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
                 size="medium"
                 variant="control"
               />
+            </div>
+
+            <div className="space-y-2">
+              <label className={preferenceFieldLabelClass} htmlFor="ccli-license-number">CCLI License Number</label>
+              <Input
+                id="ccli-license-number"
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
+                placeholder="e.g. 1234567"
+                value={preferences.general?.ccliLicenseNumber ?? ''}
+                onChange={(event) => updatePreference('general', 'ccliLicenseNumber', normalizeCcliNumber(event.target.value))}
+                className={inputClass}
+              />
+              <p className={`text-xs ${mutedClass}`}>
+                Added to song credits on outputs where Song Credits is turned on (Output settings → Song Credits).
+              </p>
             </div>
           </div>
         );
@@ -841,6 +911,28 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
                 size="medium"
                 variant="control"
               />
+            </div>
+
+            <div className="space-y-2">
+              <label className={preferenceFieldLabelClass}>Lines per Slide When Pasting</label>
+              <Input
+                type="number"
+                min="1"
+                max={String(MAX_PASTE_LINES_PER_SLIDE)}
+                {...getNumberPreferenceInputProps('formatting', 'pasteLinesPerSlide', {
+                  min: 1,
+                  max: MAX_PASTE_LINES_PER_SLIDE,
+                  fallbackValue: DEFAULT_PASTE_LINES_PER_SLIDE,
+                  parse: 'int',
+                }, (value) => {
+                  updatePreference('formatting', 'pasteLinesPerSlide', value);
+                  useLyricsStore.getState().setPasteLinesPerSlide(value);
+                })}
+                className={inputClass}
+              />
+              <p className={`text-xs ${mutedClass}`}>
+                In the structured song editor, pasted lyrics fill each slide with up to this many lines. A blank line always starts a new slide.
+              </p>
             </div>
 
             <div className={preferenceToggleRowClass}>
@@ -1207,7 +1299,7 @@ const UserPreferencesModal = ({ darkMode, onClose, initialCategory }) => {
             <div className="flex items-center justify-between">
               <div>
                 <label className={`text-sm font-medium ${labelClass}`}>Start from First Line</label>
-                <p className={`text-xs ${mutedClass}`}>Begin autoplay from the first line</p>
+                <p className={`text-xs ${mutedClass}`}>Begin autoplay and intelligent autoplay from the first line instead of the selected line</p>
               </div>
               <Switch
                 checked={preferences.autoplay?.defaultStartFromFirst ?? true}

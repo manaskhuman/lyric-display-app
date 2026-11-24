@@ -2,12 +2,14 @@ import { useCallback, useEffect } from 'react';
 import { parseLyricsFileAsync } from '../../utils/asyncLyricsParser';
 import useLyricsStore from '../../context/LyricsStore.js';
 import { mergeLyricsParsingOptions } from '../../../shared/lyricsParsing/preferenceOptions.js';
+import { applySongMetadataHeader } from '../../../shared/lyricsParsing/songMetadata.js';
 import { detectArtistFromFilename } from '../../utils/artistDetection';
+import { prepareLyricTextImport } from '../../../shared/documentTextExtraction.js';
 import {
   getLyricFormatLabel,
-  getLyricImportFormatForType,
   getLyricOriginLabel,
   normalizeLyricFileType,
+  resolveLyricImportFileName,
   stripLyricImportExtension,
 } from '../../../shared/lyricImportRegistry.js';
 
@@ -47,11 +49,8 @@ export const useLyricsLoader = ({
       const providedName = sanitize(fileName);
       const fallbackName = sanitize(context.fallbackFileName);
       const baseName = providedName || fallbackName || 'Imported Lyrics';
-      const hasExtension = /\.[a-z0-9]{2,5}$/i.test(providedName);
       const finalType = normalizeLyricFileType({ fileType, fileName: providedName, fallback: 'txt' });
-      const primaryExtension = getLyricImportFormatForType(finalType)?.extensions?.[0] || 'txt';
-      const extension = `.${primaryExtension}`;
-      const finalFileName = hasExtension ? providedName : `${baseName}${extension}`;
+      const finalFileName = resolveLyricImportFileName(providedName || baseName, finalType);
 
       const hasExplicitSplitting = Object.prototype.hasOwnProperty.call(context, 'enableOnlineLyricsSplitting')
         || Object.prototype.hasOwnProperty.call(context, 'enableIntelligentSplitting')
@@ -110,14 +109,14 @@ export const useLyricsLoader = ({
 
       let metadata = context.songMetadata || null;
       if (metadata) {
-        metadata = {
+        metadata = applySongMetadataHeader({
           ...metadata,
           ...(finalType === 'txt' ? { groupingPlan: parsed.groupingPlan || null } : {}),
-        };
+        }, parsed.songMetadata);
         setSongMetadata(metadata);
       } else if (!context.providerId) {
         const detected = detectArtistFromFilename(finalBaseName);
-        metadata = {
+        metadata = applySongMetadataHeader({
           title: detected.title || finalBaseName,
           artists: detected.artist ? [detected.artist] : [],
           album: null,
@@ -126,7 +125,7 @@ export const useLyricsLoader = ({
           origin: getLyricOriginLabel(finalType),
           filePath: filePath || null,
           ...(finalType === 'txt' ? { groupingPlan: parsed.groupingPlan || null } : {}),
-        };
+        }, parsed.songMetadata, { override: true });
         setSongMetadata(metadata);
       }
 
@@ -200,8 +199,24 @@ export const useLyricsLoader = ({
     const baseNamePieces = [lyric.title || 'Untitled Song', lyric.artist || providerName || providerId];
     const fallbackFileName = baseNamePieces.filter(Boolean).join(' - ');
 
-    const hasLrcTimestamps = /^\[\d{1,2}:\d{2}(?:\.\d{1,3})?\]/.test(lyric.content.trim());
-    const fileType = hasLrcTimestamps ? 'lrc' : 'txt';
+    // Provider song text is stored as a structured song from the start (online line
+    // splitting applies once, here); timed LRC lyrics keep their timestamps as LRC.
+    let prepared;
+    try {
+      prepared = prepareLyricTextImport(lyric, {
+        providerName: providerName || providerId,
+        parsingOptions: mergeLyricsParsingOptions(lyricsParsingOptions, { enableSplitting: true }),
+      });
+    } catch (error) {
+      console.error('Failed to structure provider lyrics:', error);
+      showToast({
+        title: 'Import failed',
+        message: 'The lyrics could not be converted into a song.',
+        variant: 'error',
+      });
+      return false;
+    }
+    const { content, fileType } = prepared;
     const album = lyric.album || lyric.albumName || null;
     const metadata = {
       title: lyric.title || 'Untitled Song',
@@ -215,7 +230,7 @@ export const useLyricsLoader = ({
 
     const success = await processLoadedLyrics(
       {
-        content: lyric.content,
+        content,
         fileName: lyric.title || fallbackFileName,
         fileType,
       },
@@ -225,7 +240,6 @@ export const useLyricsLoader = ({
         toastMessage: `Loaded from ${providerName || providerId}.`,
         providerId,
         songMetadata: metadata,
-        enableOnlineLyricsSplitting: !hasLrcTimestamps,
       }
     );
 
@@ -234,7 +248,7 @@ export const useLyricsLoader = ({
     }
 
     return success;
-  }, [processLoadedLyrics, showToast, setSongMetadata]);
+  }, [lyricsParsingOptions, processLoadedLyrics, showToast, setSongMetadata]);
 
   return {
     processLoadedLyrics,

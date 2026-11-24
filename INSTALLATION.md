@@ -2,7 +2,7 @@
 
 Install LyricDisplay, connect production outputs, and resolve common setup problems.
 
-Version: 6.8.7
+Version: 7.0.2
 
 ## Contents
 
@@ -30,16 +30,16 @@ Current packages:
 | Platform | Package |
 | --- | --- |
 | Windows 10/11, x64 | NSIS setup executable |
-| macOS, Apple Silicon | ARM64 DMG |
-| macOS, Intel | x64 DMG |
+| macOS 13 Ventura or later, Apple Silicon | ARM64 DMG |
+| macOS 13 Ventura or later, Intel | x64 DMG |
 | Linux, x64 | AppImage |
 
 Direct assets for this version:
 
-- [Windows x64 installer](https://github.com/PeterAlaks/lyric-display-app/releases/download/v6.8.7/LyricDisplay-6.8.7-Windows-Setup.exe)
-- [macOS Apple Silicon DMG](https://github.com/PeterAlaks/lyric-display-app/releases/download/v6.8.7/LyricDisplay-6.8.7-macOS-arm64.dmg)
-- [macOS Intel DMG](https://github.com/PeterAlaks/lyric-display-app/releases/download/v6.8.7/LyricDisplay-6.8.7-macOS-x64.dmg)
-- [Linux x64 AppImage](https://github.com/PeterAlaks/lyric-display-app/releases/download/v6.8.7/LyricDisplay-6.8.7-Linux.AppImage)
+- [Windows x64 installer](https://github.com/PeterAlaks/lyric-display-app/releases/download/v7.0.2/LyricDisplay-7.0.2-Windows-Setup.exe)
+- [macOS Apple Silicon DMG](https://github.com/PeterAlaks/lyric-display-app/releases/download/v7.0.2/LyricDisplay-7.0.2-macOS-arm64.dmg)
+- [macOS Intel DMG](https://github.com/PeterAlaks/lyric-display-app/releases/download/v7.0.2/LyricDisplay-7.0.2-macOS-x64.dmg)
+- [Linux x64 AppImage](https://github.com/PeterAlaks/lyric-display-app/releases/download/v7.0.2/LyricDisplay-7.0.2-Linux.AppImage)
 
 For a typical production workflow, 8 GB of RAM and a 1920×1080-capable display are a practical baseline. Multiple high-resolution video backgrounds, several browser sources, lyric video export, or NDI output benefit from more memory and GPU capacity. Wired Ethernet is strongly recommended when outputs or controllers run on other devices.
 
@@ -58,9 +58,12 @@ Only bypass a platform warning after confirming that the file came from `lyricdi
 1. Download the Windows setup executable.
 2. Open it.
 3. If SmartScreen appears, select **More info**, verify the filename, then select **Run anyway**.
-4. Complete the installer wizard and launch LyricDisplay from the Start menu or desktop shortcut.
+4. Leave **Allow LyricDisplay through Windows Firewall (recommended)** checked on the **Network access** step to let remote controls and displays connect. Approve the Windows administrator prompt if one appears.
+5. Complete the installer wizard and launch LyricDisplay from the Start menu or desktop shortcut.
 
-The package requests normal user-level execution. Windows may still request approval when writing to the selected installation directory.
+The package requests normal user-level execution. Windows may still request approval when writing to the selected installation directory or configuring the firewall. The firewall option adds inbound TCP and UDP rules for the installed LyricDisplay executable on private, public, and domain networks. If you uncheck it or decline administrator approval, installation continues, but you may need to allow network access manually.
+
+Silent installs and automatic updates do not add firewall rules or request firewall approval; updates retain existing rules. Uninstall removes the rules created for that installation when administrator access is available. Existing block rules or organization policies may still prevent connections.
 
 ## Install on macOS
 
@@ -251,6 +254,7 @@ Supported lyric inputs:
 
 | Format | Extension |
 | --- | --- |
+| LyricDisplay Song (structured) | `.ldsong` |
 | Plain text | `.txt` |
 | Timestamped LRC | `.lrc` |
 | Markdown | `.md`, `.markdown` |
@@ -259,21 +263,60 @@ Supported lyric inputs:
 | LyricDisplay setlist | `.ldset` |
 | LyricDisplay schedule | `.ldsch` |
 
-Open the built-in file navigator with **File > Load Lyrics** or `Ctrl/Cmd + O`. Add one or more source folders once, then search filenames, paths, and TXT/LRC lyric contents without leaving LyricDisplay. The navigator starts on recent files, supports Up/Down and Enter, previews TXT/LRC files, and watches indexed folders for changes. Drag and drop remains available. Create a song with **File > New Lyrics File** or `Ctrl/Cmd + N`.
+Open the built-in file navigator with **File > Load Lyrics** or `Ctrl/Cmd + O`. Search filenames, paths, and LDSONG/TXT/LRC lyric contents without leaving LyricDisplay. The navigator starts on recent files, supports Up/Down and Enter, previews LDSONG/TXT/LRC files, and watches indexed folders for changes. Drag and drop remains available. Create a song with **File > New Lyrics File** or `Ctrl/Cmd + N`.
 
-Saving a song opens a smaller in-app destination picker. It lists the current indexed song folder first when available, followed by indexed lyrics folders; use Up/Down and Enter for a fast save. Choose **Save in different folder…** only when you want the operating system's Save As dialog.
+**Song library.** LyricDisplay keeps your songs in a library at `Documents\LyricDisplay\Lyrics` (`~/Documents/LyricDisplay/Lyrics` on macOS). It is created and indexed automatically on first launch, appears as **Library** in the navigator, and is the default home for new songs and for EasyWorship and PowerPoint imports. It lives in Documents so it survives **Reset app** and uninstalling, and is included in your normal Documents backups. You can still index up to 10 more folders of your own; the library does not count toward that limit and cannot be removed.
 
-Lines wrapped in `[ ]`, `( )`, `< >`, or `{ }` can be recognized as translation/alternate lines and grouped with the preceding lyric line. Parsing, cleanup, capitalization, splitting, and grouping behavior can be adjusted in Preferences.
+Saving a song opens a smaller in-app destination picker. It lists the current indexed song folder first when available, then the library and your other indexed folders; use Up/Down and Enter for a fast save. Choose **Save in different folder…** only when you want the operating system's Save As dialog.
+
+### Creating and editing songs
+
+**File > New Lyrics File** (`Ctrl/Cmd + N`) opens the **Structured** editor. Type the song section by section:
+
+- **Enter** adds a line and **Shift + Enter** starts a new slide.
+- **Ctrl/Cmd + T** adds a translation line and **Ctrl/Cmd + /** marks a stage-only note.
+- Each line's role chip (Lyric, Translation, Stage only) can be clicked to change it.
+
+To bring in lyrics copied from a website, press **Ctrl/Cmd + V** outside a field or use **Paste lyrics**. LyricDisplay lays them out once, using your parsing settings, so you can check and fix the sections, slides, and translations before saving. Pasting a few lines into a line field inserts them as written.
+
+The side panel holds the song details used by Song Credits (writers, copyright, CCLI song number). It also sets the **Play order**, so a chorus written once can play several times, and shows a preview in Output 1's font. The **Song check** panel flags slides that may not fit on screen.
+
+Structured songs are saved as **LyricDisplay Songs (.ldsong)**: plain text with the sections and slides written out, so they display identically on every computer. The format is documented in [docs/LDSONG_FORMAT.md](docs/LDSONG_FORMAT.md). Save can also export a plain `.txt`.
+
+The **Structured / Classic** switch in the editor header moves your lyrics to the **Classic** text canvas, which saves `.txt` and `.lrc` files and is needed for LRC timing. LyricDisplay remembers which editor you prefer for new songs. **Edit Lyrics** opens a `.ldsong` song in the Structured editor and other files in the Classic canvas, so saving keeps their format. Switching a text song to Structured creates a new `.ldsong` beside the original, which is left unchanged.
+
+EasyWorship and PowerPoint imports create `.ldsong` songs. EasyWorship songs keep their title, writers, copyright, administrator, and CCLI number. Each PowerPoint slide becomes one lyric slide.
+
+In text files (.txt, .md, .rtf, .docx), lines wrapped in `[ ]`, `( )`, `< >`, or `{ }` can be recognized as translation/alternate lines and grouped with the preceding lyric line. Parsing, cleanup, capitalization, splitting, and grouping behavior can be adjusted in Preferences.
+
+A song part written once can be repeated with a bare marker. After `[Chorus]`, `[Bridge]`, `[Pre-Chorus]`, `[Tag]`, `[Hook]`, or a numbered verse such as `[Verse 1]` has been written out, a later line containing only that marker repeats its words. `[Chorus 2]` and `[Chorus]` are kept separate when both are written out; a bare `[Chorus 2]` with no words of its own repeats the chorus.
+
+Files imported from EasyWorship or PowerPoint begin with `# Title:`, `# Author:`, and `# Copyright:` lines. LyricDisplay reads a header block like this at the top of any TXT file as song information rather than lyrics. Recognized keys are Title, Author/Artist/Writer, Copyright, Administrator, CCLI Song Number, Album, and Year. LRC `[ti:]`, `[ar:]`, `[au:]`, and `[al:]` tags are read the same way.
 
 For live operation:
 
-- Select a line to send it to connected outputs.
-- Use Up/Down for lyric navigation and `Ctrl/Cmd + F` for search.
-- Use **Display Output** or Spacebar to show/hide the master lyric output.
+- Select a line to send it to connected outputs. While the output is showing lyrics, the live line is marked in red with a **Live** label; when the output is off it is outlined and labelled **Cued**.
+- Use Up/Down, Left/Right, or Page Up/Page Down for lyric navigation. Presentation clickers work without setup, and their blank-screen button (B or `.`) toggles the output like Spacebar.
+- Press `Shift` with C, V, B, P, T, I, O, or E to jump to the next Chorus, Verse, Bridge, Pre-Chorus, Tag, Intro, Outro, or Ending. The section chips above the lyrics show each hotkey.
+- The bar under the lyric list shows what is live, the next line, and the time of day.
+- Use `Ctrl/Cmd + F` for search, and **Display Output** or Spacebar to show/hide the master lyric output.
 - Use **Output > Sync Outputs** when a connected display needs the full current state resent.
 - Open **Help > Keyboard Shortcuts** for the current complete shortcut list.
-- Save a `.ldset` when the running order and song collection should be reused.
+- Save a `.ldset` when the running order and song collection should be reused. A song can appear in a setlist more than once, for example as a reprise; the setlist manager numbers each entry and marks the one that is loaded. Next/previous song stops at the ends of the setlist instead of wrapping around.
 - In the Timer module, open **Schedule** to paste or import an agenda, build timed or manual items, configure transitions and an ideal end time, then save it as `.ldsch` for reuse.
+
+### Song credits and CCLI
+
+Each output can show a small song-credits footer with the title, writers, copyright, CCLI song number, and your CCLI licence number.
+
+1. Enter your licence number once in **Preferences > General > CCLI License Number**.
+2. In an output's settings, set **Song Credits** to **First line**, **Last line**, **First & last**, or **Every line**. Expand it to change the position, size, colour, and opacity.
+
+Credits come from the song's information: a header block at the top of the file, LRC tags, EasyWorship imports, or online providers. Check what a song carries with **Song Information** in the lyrics toolbar. Credits are off for every output until you turn them on.
+
+### External control (OSC)
+
+In addition to line, output, autoplay, setlist, clear, and sync addresses, `/lyricdisplay/section` with a string argument (`chorus`, `verse`, `bridge`, `pre-chorus`, `tag`, `intro`, `outro`, `ending`, or the letters C/V/B/P/T/I/O/E) jumps to the next section of that type. OSC and MIDI next/previous line now skip section-title lines when **Skip Section Titles with Arrow Keys** is on, matching the keyboard. The full address list is shown in **Preferences > External Control**.
 
 ## Troubleshooting
 

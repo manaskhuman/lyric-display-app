@@ -51,7 +51,7 @@ export const ControlPanelHelp = ({ darkMode }) => (
         <HelpSection
             icon={FolderOpen}
             title="Load Lyrics"
-            description="Search indexed folders for .txt, .lrc, Markdown, RTF, or DOCX files. TXT and LRC files support lyric-content search and previews; document formats are converted when loaded."
+            description="Search your song library (Documents/LyricDisplay/Lyrics, indexed automatically) and any folders you add for LyricDisplay Songs (.ldsong), .txt, .lrc, Markdown, RTF, or DOCX files. LDSONG, TXT, and LRC files support lyric-content search and previews; document formats are converted when loaded."
             darkMode={darkMode}
         />
 
@@ -146,9 +146,16 @@ export const OutputSettingsHelp = ({ darkMode }) => (
 export const SongCanvasHelp = ({ darkMode }) => (
     <div className="space-y-3">
         <HelpSection
+            icon={FileText}
+            title="Structured and Classic Editors"
+            description="New songs open in the Structured editor, which saves a LyricDisplay Song (.ldsong) with explicit sections, slides, translations, and stage notes, so every computer shows it the same way. The Classic canvas edits free-form text saved as .txt or .lrc. Switch between them with the Structured / Classic control in the header; your lyrics come with you, and LyricDisplay remembers which one you prefer for new songs."
+            darkMode={darkMode}
+        />
+
+        <HelpSection
             icon={Scissors}
             title="Cut, Copy & Paste"
-            description="Standard clipboard operations with automatic formatting. Paste lyrics from any source and they'll be cleaned up automatically. Works with keyboard shortcuts (Ctrl/Cmd+X, C, V) or toolbar buttons."
+            description="Standard clipboard operations with automatic formatting. Paste lyrics from any source and they'll be cleaned up automatically: hymnal verse numbers, Refrain and Chorus repeats, chord lines, and SongSelect credits are recognized. The Structured editor also lays the song out into sections and slides. Works with keyboard shortcuts (Ctrl/Cmd+X, C, V) or toolbar buttons."
             darkMode={darkMode}
         />
 
@@ -353,7 +360,7 @@ export const MobileControllerHelp = ({ darkMode }) => (
         <HelpSection
             icon={List}
             title="Control Desktop Lyrics"
-            description="Select any lyric line to display it on all connected outputs. The selected line is automatically synced to the desktop control panel and all display screens. Scroll through lyrics and tap to advance during live presentations."
+            description="Select any lyric line to display it on all connected outputs, or use the large Previous and Next buttons at the bottom of the screen. A Bluetooth presentation clicker paired with your phone or tablet also works (Page Up/Down or arrow keys; B or . blanks the output). LyricDisplay keeps the screen awake where the browser allows it; on a local network address, set your device's auto-lock to Never during the service."
             darkMode={darkMode}
         />
 
@@ -381,7 +388,7 @@ export const MobileControllerHelp = ({ darkMode }) => (
         <HelpSection
             icon={Type}
             title="Start Autoplay"
-            description="Automatically advance through lyrics at a set interval. Configure autoplay settings including interval timing, loop behavior, skip blank lines, and whether to start from the first line. Perfect for rehearsals or automated presentations."
+            description="Automatically advance through lyrics at a set interval. Configure autoplay settings including interval timing, loop behavior, skip blank lines, and whether to start from the first line or the selected line. Intelligent autoplay (for timestamped lyrics) follows the same start and skip-blank-lines settings, and re-syncs to any line you select while it is running. Perfect for rehearsals or automated presentations."
             darkMode={darkMode}
         />
 

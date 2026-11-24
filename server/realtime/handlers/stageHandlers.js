@@ -4,6 +4,7 @@ import { blockIfLiveSafety } from '../liveSafety.js';
 import { schedulePersistSessionState } from '../sessionPersistence.js';
 import { state } from '../state.js';
 import { applyAuthoritativeTimerUpdate } from '../../../shared/timerAuthority.js';
+import { normalizeStageMessages } from '../../../shared/stageMessages.js';
 import { scheduleStageTimerBoundary } from '../timerScheduler.js';
 
 export function registerStageHandlers({ io, socket, hasPermission, clientType, deviceId, sessionId }) {
@@ -28,10 +29,17 @@ export function registerStageHandlers({ io, socket, hasPermission, clientType, d
       return;
     }
 
+    // A controller dragging a slider or colour picker sends updates faster than the echoes
+    // return, so they carry a revision it already superseded itself. Only treat an old
+    // revision as a conflict when another controller or a timer boundary wrote since then.
+    const currentRevision = Math.max(0, Number(state.currentStageTimerState?.revision) || 0);
+    const writer = state.stageTimerWriter;
+    const ownRun = writer && socket.id && writer.socketId === socket.id && writer.revision === currentRevision;
     const authoritative = applyAuthoritativeTimerUpdate(
       state.currentStageTimerState,
       timerData,
-      Date.now()
+      Date.now(),
+      { ownRunBaseRevision: ownRun ? writer.baseRevision : null }
     );
     if (!authoritative.accepted) {
       socket.emit('stageTimerRejected', {
@@ -43,6 +51,11 @@ export function registerStageHandlers({ io, socket, hasPermission, clientType, d
       return;
     }
     state.currentStageTimerState = authoritative.state;
+    state.stageTimerWriter = {
+      socketId: socket.id,
+      baseRevision: ownRun ? writer.baseRevision : currentRevision,
+      revision: authoritative.state.revision,
+    };
     schedulePersistSessionState();
     scheduleStageTimerBoundary(io);
     console.log(`Stage timer updated by ${clientType} client:`, state.currentStageTimerState);
@@ -71,9 +84,9 @@ export function registerStageHandlers({ io, socket, hasPermission, clientType, d
       return;
     }
 
-    state.currentStageMessages = Array.isArray(messages) ? [...messages] : [];
+    state.currentStageMessages = normalizeStageMessages(messages);
     schedulePersistSessionState();
-    console.log(`Stage messages updated by ${clientType} client: ${messages?.length || 0} messages`);
+    console.log(`Stage messages updated by ${clientType} client: ${state.currentStageMessages.length} messages`);
     appendActionLog(io, {
       type: 'stage',
       label: 'Stage messages updated',
@@ -82,6 +95,6 @@ export function registerStageHandlers({ io, socket, hasPermission, clientType, d
       target: 'stage messages',
       metadata: { count: state.currentStageMessages.length },
     });
-    emitStageMessagesUpdate(io, messages);
+    emitStageMessagesUpdate(io, state.currentStageMessages);
   });
 }

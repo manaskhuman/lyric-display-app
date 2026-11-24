@@ -13,7 +13,7 @@ import { blurInputOnEnter, AdvancedCollapse, AdvancedToggle, FontSettingsRow, Em
 import { Slider } from '@/components/ui/slider';
 import useToast from '../hooks/useToast';
 import { sanitizeIntegerInput } from '../utils/numberInput';
-import { MAX_STAGE_MESSAGES, MAX_STAGE_MESSAGE_LENGTH } from '../utils/stageMessages';
+import { MAX_STAGE_MESSAGES, MAX_STAGE_MESSAGE_LENGTH } from '../../shared/stageMessages.js';
 
 const formatTimerValue = (remainingMs) => {
   const safeRemaining = Math.max(0, Number(remainingMs) || 0);
@@ -829,7 +829,7 @@ const StageSettingsPanel = ({ settings, applySettings, update, darkMode, showMod
                 <Button
                   size="sm"
                   onClick={handleResumeTimer}
-                  className={`${darkMode ? 'bg-blue-600 hover:bg-blue-700' : 'bg-blue-500 hover:bg-blue-600'} text-white`}
+                  className={`bg-blue-500 hover:bg-blue-400 text-white`}
                 >
                   Resume
                 </Button>

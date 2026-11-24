@@ -59,7 +59,7 @@ Windows upgrades intentionally retain electron-builder's default atomic NSIS rep
 
 ```text
 lyric-display-app/
-|-- .github/                 # Funding metadata and release/platform-build workflows
+|-- .github/                 # Funding metadata and CI, release, and platform-build workflows
 |-- build/                   # Tracked electron-builder/installer resources (not build output)
 |-- docs/                    # Architecture, API contracts, build, and recovery docs
 |-- main/                    # Electron main-process implementation
@@ -114,6 +114,7 @@ The source of truth is [`src/App.jsx`](../src/App.jsx). Custom output routes are
 | `/output3` ... `/output6` | `pages/OutputPage.jsx` | Custom socket-driven lyric outputs |
 | `/stage` | `pages/Stage.jsx` | Stage display: current/next/previous lyrics, timer, messages, upcoming song |
 | `/time` | `pages/TimeDisplay.jsx` | Dedicated timer/clock projection |
+| `/preview` | `pages/Preview.jsx` | Projected preview grid; one `output-discovery` socket with purpose `preview` receives read-only display state for every feed, which it draws with the output, stage, and time frames |
 | `/timer-control` | `components/TimerControlModule.jsx` | Dedicated authoritative timer controller |
 | `/obs-setup` | `pages/ObsSetup.jsx` | OBS WebSocket/source creation UI |
 | `/lyric-video-live-output` | `pages/LyricVideoLiveOutput.jsx` | Live visual output from the video studio state |
@@ -269,13 +270,13 @@ Supporting realtime modules:
 | --- | --- |
 | `state.js` | In-memory authoritative lyrics, selection, outputs, stage, timer, setlist, clients, drafts, registry, and safety state |
 | `broadcast.js` | Permission/client-aware broadcast helpers |
-| `sessionPersistence.js` | Debounced schema-versioned state snapshot and restore |
+| `sessionPersistence.js` | Debounced schema-versioned state snapshot and restore; a running stage timer is kept across a backend restart within the same app session and reset on a new launch |
 | `setlistValidation.js` | Size, shape, and count validation for socket setlist payloads |
 | `timerScheduler.js` | Server-side timer boundary scheduling |
 | `liveSafety.js` | Safety policy enforcement for mutating live actions |
 | `actionLog.js` | Bounded audit history |
 | `stateDiagnostics.js` | Health/diagnostic summaries without exposing sensitive state |
-| `utils.js` | Plain-object, size, permission, and normalization helpers |
+| `utils.js` | Plain-object, size, permission, and normalization helpers, plus `guardSocketHandlers`, which contains handler exceptions so one bad payload cannot terminate the backend |
 
 The backend accepts authenticated client types defined in `server/config/clientTypes.js`: desktop, web, OBS Dock, output clients, stage, and mobile. Permissions are assigned in `server/auth/permissions.js`; all mutating handlers must enforce the relevant permission and live-safety rule before changing state.
 
@@ -307,10 +308,12 @@ src/
 
 ### Components
 
-- [`components/LyricDisplayApp.jsx`](../src/components/LyricDisplayApp.jsx) is the control-panel feature coordinator. Its extracted view pieces are in `components/LyricDisplayApp/`; orchestration behavior belongs in `hooks/LyricDisplayApp/`.
+- [`components/LyricDisplayApp.jsx`](../src/components/LyricDisplayApp.jsx) is the control-panel feature coordinator. Its extracted view pieces are in `components/LyricDisplayApp/` (including `LiveStatusBar.jsx`, the live/next/clock readout under the lyric list); orchestration behavior belongs in `hooks/LyricDisplayApp/`.
 - [`components/LyricsList.jsx`](../src/components/LyricsList.jsx), `components/LyricsList/`, and `hooks/LyricsList/` own virtualized lyric rows, selection, grouping, history, context menus, and section navigation.
-- [`components/NewSongCanvas.jsx`](../src/components/NewSongCanvas.jsx), `components/NewSongCanvas/`, and `hooks/NewSongCanvas/` own authoring, clipboard/history, search, measurements, timestamps, drafts, and saving.
-- [`components/OutputSettingsPanel.jsx`](../src/components/OutputSettingsPanel.jsx), its directory, and `hooks/OutputSettingsPanel/` own output styling controls. Shared output rendering belongs in [`components/output/LyricVisualFrame.jsx`](../src/components/output/LyricVisualFrame.jsx).
+- `/new-song` hosts two editors, chosen by [`components/routes/SongEditorRoute.jsx`](../src/components/routes/SongEditorRoute.jsx): new songs follow the remembered preference, `.ldsong` songs open structured, and other files, mobile drafts, and the lyric-video flow open classic.
+- [`components/SongEditor.jsx`](../src/components/SongEditor.jsx) and `components/SongEditor/` are the structured editor; its document operations, paste layout, fit checks, and editor choice live in [`utils/songDocumentEditing.js`](../src/utils/songDocumentEditing.js).
+- [`components/NewSongCanvas.jsx`](../src/components/NewSongCanvas.jsx), `components/NewSongCanvas/`, and `hooks/NewSongCanvas/` own the classic text canvas: authoring, clipboard/history, search, measurements, timestamps, drafts, and saving. `hooks/NewSongCanvas/useFileSave.js` saves for both editors (`documentFormat: 'ldsong'` for structured songs).
+- [`components/OutputSettingsPanel.jsx`](../src/components/OutputSettingsPanel.jsx), its directory, and `hooks/OutputSettingsPanel/` own output styling controls. Shared output rendering belongs in [`components/output/LyricVisualFrame.jsx`](../src/components/output/LyricVisualFrame.jsx). `OutputFrame` in [`pages/OutputPage.jsx`](../src/pages/OutputPage.jsx) is the store-driven lyric output; output windows wrap it with their socket, while Preview Outputs renders it directly in a box scaled from the chosen resolution (the song editor and Lyric Video Studio do the same with `LyricVisualFrame`), so renderer layout must size against its frame rather than the window (no `vw`/`vh`). `StageOutputFrame` (`pages/Stage.jsx`) and `TimeOutputFrame` (`pages/TimeDisplay.jsx`) follow the same split: their window pages pass no viewport and keep real `vw`/`vh`, while previews pass the drawn resolution and `toViewportLength` in `utils/outputLabels.js` resolves the same layout in pixels.
 - `components/LyricVideoStudio/` plus the lyric-video pages/utilities own preview, transport, timeline, styling, and export UX.
 - `components/UserPreferencesModal/` and its hooks own preference editing; its indexed-folder page manages navigator sources through the file-navigator IPC, while ordinary preference persistence crosses preload IPC into `main/userPreferences.js`.
 - `components/routes/` decides which routes get the control socket provider and desktop shell.
@@ -352,16 +355,20 @@ This store is both UI state and a local persistence cache. The backend remains a
 
 | File or directory | Responsibility |
 | --- | --- |
-| `lyricsParsing/` | Text/LRC parsing, cleanup, grouping, translation, structure tags, sections, line splitting, runtime config |
+| `lyricsParsing/` | Text/LRC parsing, cleanup, grouping, translation, structure tags, sections and section hotkeys, reusable section markers, line splitting, runtime config |
+| `lyricsParsing/ldsong.js` | LyricDisplay Song (`.ldsong`) reader, canonical writer, strict runtime conversion, document-from-parse conversion, and import helpers; specified in [`LDSONG_FORMAT.md`](LDSONG_FORMAT.md) |
+| `lyricsParsing/songMetadata.js` | `# Key: value` header and LRC tag metadata, loader metadata merging, display-safe song credits, CCLI number normalization, credit footer text |
 | `documentTextExtraction.js` | Markdown/RTF/DOCX extraction and unified import parsing |
 | `lyricImportRegistry.js` | Supported extensions, parser types, labels, accept strings, dialog filters |
 | `lyricImportLimits.js` | Import and extracted-document size limits |
 | `fileNavigatorSearch.js` | Normalization, query filters, typo-tolerant relevance scoring, LRC previews, and match snippets |
 | `outputRegistry.js` | Default output IDs, custom-output count, routable IDs |
 | `setlistLimits.js` | Setlist count, payload, item, and string limits |
+| `setlistNavigation.js` | Locating the loaded setlist entry by item ID (name fallback) and non-wrapping next/previous resolution |
+| `stageMessages.js` | Stage message count/length limits and normalization used by the server, stage display, and stage settings |
 | `timerAuthority.js` | Revisioned timer validation, clock localization, boundary advancement |
 | `sessionReconciliation.js` | Desktop persisted-state vs backend-session bootstrap policy |
-| `commandSafetyPolicy.js` | Focus/live-safety policy for operator commands |
+| `commandSafetyPolicy.js` | Focus/live-safety policy for operator commands, including the Ctrl/Cmd+C copy-versus-clear rule |
 | `apiContractRegistry.js` | Audited REST/realtime names and permissions |
 | `productionReadiness.js` | Output, projection, and NDI pre-service health evaluation |
 | `data/knownArtists.json` | Artist detection data |
@@ -450,6 +457,7 @@ Desktop credentials cross from backend child to Electron over process IPC and ar
 
 | Feature | Start here | Usually inspect/update too |
 | --- | --- | --- |
+| Change the song format or editor | `shared/lyricsParsing/ldsong.js`, `src/utils/songDocumentEditing.js` | `docs/LDSONG_FORMAT.md`, `tests/ldsong-format.test.js`, structured editor components, importers in `main/easyWorship.js` and `main/presentation.js` |
 | Add an import format | `shared/lyricImportRegistry.js`, `shared/documentTextExtraction.js` | import limits, `main/ipc/files.js`, async parser, file associations in `package.json`, tests |
 | Change lyric parsing/grouping | `shared/lyricsParsing/` | worker/async parser, user parsing preferences, parsing/import tests |
 | Change lyric selection/cueing | `LyricsList` hooks/components | control emitters, `lyricsHandlers.js`, output/stage readers, command safety |
@@ -493,7 +501,7 @@ The project uses Node's built-in test runner. Test filenames generally mirror th
 | NDI/external control | NDI installer/client/settings/CLI, external-control, OSC security tests |
 | Renderer/package integration | `npm run build`; package workflows under `.github/workflows/` |
 
-[`scripts/check-static.js`](../scripts/check-static.js) checks syntax/import hygiene and invokes API contract validation. Other scripts write build metadata, update versions/docs, verify update blockmaps, register the development protocol, and drive releases. Tag-based multi-platform release behavior is defined in [`.github/workflows/build-release.yml`](../.github/workflows/build-release.yml); manual packaging verification is in `test-platform-builds.yml`.
+[`scripts/check-static.js`](../scripts/check-static.js) checks syntax/import hygiene and invokes API contract validation. Other scripts write build metadata, update versions/docs, verify update blockmaps, register the development protocol, and drive releases. Every push to `master` and every pull request runs static checks, unit tests, a renderer build, and the renderer-storage smoke test in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml). Tag-based multi-platform release behavior is defined in [`.github/workflows/build-release.yml`](../.github/workflows/build-release.yml); manual packaging verification is in `test-platform-builds.yml`.
 
 Documentation-only changes do not require starting a dev server. For behavior changes, use the narrowest relevant checks first, then the root static/unit suite and production renderer build before handoff.
 

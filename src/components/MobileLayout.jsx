@@ -1,7 +1,11 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ListMusic, RefreshCw, FileText, Play, Square, ChevronDown, Sparkles, CheckSquare, MoreHorizontal, X, HelpCircle } from 'lucide-react';
-import { useLyricsState, useOutputState, useDarkModeState, useSetlistState, useAutoplaySettings, useIntelligentAutoplayState } from '../hooks/useStoreSelectors';
+import { ListMusic, RefreshCw, FileText, Play, Square, ChevronDown, ChevronLeft, ChevronRight, Sparkles, CheckSquare, MoreHorizontal, X, HelpCircle } from 'lucide-react';
+import { useLyricsState, useOutputState, useDarkModeState, useSetlistState, useAutoplaySettings, useIntelligentAutoplayState, useKeyboardNavigationPreferences } from '../hooks/useStoreSelectors';
+import useLyricsStore from '../context/LyricsStore';
+import { findNavigableLyricLineIndex, getLineOutputText } from '../utils/parseLyrics';
+import { getLiveNavigationKeyAction } from '../constants/shortcuts';
+import { isCommandFocusProtected, isModalFocusProtected } from '../../shared/commandSafetyPolicy.js';
 import { useControlSocket } from '../context/ControlSocketProvider';
 import LyricsList from './LyricsList';
 import ConnectionBackoffBanner from './ConnectionBackoffBanner';
@@ -15,6 +19,33 @@ import useModal from '../hooks/useModal';
 import { hasValidTimestamps } from '../utils/timestampHelpers';
 import { useAutoplayManager } from '../hooks/useAutoplayManager';
 import { useSyncOutputs } from '../hooks/useSyncOutputs';
+
+// Keeps the phone awake while it is the live controller. The Wake Lock API needs a
+// secure context, so plain-HTTP LAN sessions fall back to the device's auto-lock setting.
+const useScreenWakeLock = (enabled) => {
+  React.useEffect(() => {
+    if (!enabled || typeof navigator === 'undefined' || !navigator.wakeLock?.request) return undefined;
+
+    let sentinel = null;
+    let cancelled = false;
+    const acquire = async () => {
+      if (cancelled || document.visibilityState !== 'visible' || (sentinel && !sentinel.released)) return;
+      try {
+        sentinel = await navigator.wakeLock.request('screen');
+      } catch {
+        sentinel = null;
+      }
+    };
+
+    void acquire();
+    document.addEventListener('visibilitychange', acquire);
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', acquire);
+      void sentinel?.release?.().catch(() => {});
+    };
+  }, [enabled]);
+};
 
 const MobileLayout = () => {
   const { isOutputOn, setIsOutputOn } = useOutputState();
@@ -41,6 +72,9 @@ const MobileLayout = () => {
   const selectionControlsRef = React.useRef(null);
 
   const navigate = useNavigate();
+  const { skipSectionTitlesOnKeyboard } = useKeyboardNavigationPreferences();
+  const sectionTagPhrases = useLyricsStore((state) => state.lyricsParsingOptions.groupingConfig.sectionTagPhrases);
+  useScreenWakeLock(Boolean(hasLyrics && isConnected));
 
   const {
     autoplayActive,
@@ -137,6 +171,50 @@ const MobileLayout = () => {
     emitOutputToggle(!isOutputOn);
   };
 
+  const handleStep = (direction) => {
+    if (!hasLyrics) return;
+    const current = selectedLine ?? -1;
+    const startIndex = direction > 0
+      ? Math.min(current + 1, lyrics.length - 1)
+      : Math.max(current - 1, 0);
+    const nextIndex = findNavigableLyricLineIndex(lyrics, startIndex, direction, {
+      skipSectionTitles: skipSectionTitlesOnKeyboard,
+      sectionTagPhrases,
+    });
+    if (nextIndex === null || nextIndex === selectedLine) return;
+    handleLineSelect(nextIndex);
+    window.dispatchEvent(new CustomEvent('scroll-to-lyric-line', { detail: { lineIndex: nextIndex } }));
+  };
+
+  const handleStepRef = React.useRef(handleStep);
+  handleStepRef.current = handleStep;
+  const handleToggleRef = React.useRef(handleToggle);
+  handleToggleRef.current = handleToggle;
+
+  // Bluetooth presentation clickers paired with a phone or tablet send the same keys
+  // as on the desktop.
+  React.useEffect(() => {
+    const handleKeyDown = (event) => {
+      const activeElement = document.activeElement;
+      if (isModalFocusProtected(event.target, activeElement) || isCommandFocusProtected(event.target, activeElement)) return;
+      const action = getLiveNavigationKeyAction(event);
+      if (action === 'next' || action === 'previous') {
+        event.preventDefault();
+        handleStepRef.current(action === 'next' ? 1 : -1);
+      } else if (action === 'toggle-output') {
+        event.preventDefault();
+        handleToggleRef.current();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  const liveLineText = hasLyrics && Number.isInteger(selectedLine)
+    ? getLineOutputText(lyrics[selectedLine]).replace(/\s+/g, ' ').trim()
+    : '';
+  const canStep = hasLyrics && isAuthenticated && ready;
+
   const handleOpenSetlist = () => {
     setSetlistModalOpen(true);
   };
@@ -169,18 +247,18 @@ const MobileLayout = () => {
     <>
       <ConnectionBackoffBanner darkMode={darkMode} />
       <div
-        className={`flex flex-col h-screen font-sans ${darkMode ? 'dark bg-gray-900' : 'bg-gray-50'
+        className={`flex flex-col h-dvh overflow-y-auto overscroll-contain font-sans ${darkMode ? 'dark bg-gray-900' : 'bg-gray-50'
           }`}
       >
         {/* Fixed Header */}
         <div
-          className={`border-b px-4 py-4 shrink-0 ${darkMode
+          className={`border-b px-4 py-4 short-screen:py-2.5 shrink-0 ${darkMode
             ? 'bg-gray-900 border-gray-800'
             : 'bg-white/95 border-gray-200'
             }`}
         >
           {/* Top Row - Title and Controls */}
-          <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center justify-between mb-5 short-screen:mb-3">
             <div className="flex items-center gap-3">
               <img
                 src="/LyricDisplay-icon.png"
@@ -237,12 +315,12 @@ const MobileLayout = () => {
           </div>
 
           {/* Compose New Lyrics Button and Toggle Row */}
-          <div className="mb-5 space-y-3">
+          <div className="mb-5 short-screen:mb-0 space-y-3">
             {/* Compose Button and Toggle */}
             <div className="flex items-center justify-center gap-4">
               <button
                 onClick={() => navigate('/new-song?mode=compose')}
-                className="flex h-11 min-w-0 w-full items-center justify-center gap-2 rounded-full bg-linear-to-r from-blue-400 to-purple-600 px-4 text-sm font-semibold text-white transition-all duration-200 hover:from-blue-500 hover:to-purple-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 md:max-w-md"
+                className="flex h-11 short-screen:h-10 min-w-0 w-full items-center justify-center gap-2 rounded-full bg-blue-500 px-4 text-sm font-semibold text-white transition-all duration-200 hover:bg-blue-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 md:max-w-md"
               >
                 <FileText className="h-4 w-4 shrink-0" />
                 <span className="truncate">Create Lyrics</span>
@@ -269,7 +347,7 @@ const MobileLayout = () => {
           {/* Current File Indicator */}
           {hasLyrics && (
             <div
-              className={`px-4 py-3 text-sm font-semibold border-t mt-4 ${darkMode
+              className={`truncate px-4 py-3 short-screen:py-2 text-sm font-semibold border-t mt-4 short-screen:mt-2 ${darkMode
                 ? 'text-gray-300 border-gray-800'
                 : 'text-gray-600 border-gray-200'
                 }`}
@@ -280,7 +358,7 @@ const MobileLayout = () => {
         </div>
 
         {/* Main Content Area */}
-        <div className="flex-1 p-4 flex flex-col min-h-0">
+        <div className="flex-1 p-4 short-screen:p-2 flex flex-col min-h-0 short-screen:min-h-56">
           <div
             className={`rounded-2xl border flex-1 flex flex-col overflow-hidden ${darkMode
               ? 'bg-gray-900/70 border-gray-800'
@@ -290,13 +368,13 @@ const MobileLayout = () => {
             {hasLyrics ? (
               <>
                 {/* Fixed Search Bar and Autoplay */}
-                <div className={`border-b px-3 py-3 shrink-0 ${darkMode
+                <div className={`border-b px-3 py-3 short-screen:py-2 shrink-0 ${darkMode
                   ? 'border-gray-800 bg-gray-900/70'
                   : 'border-gray-200 bg-white/80'
                   }`}>
 
                   {/* Search Bar and Autoplay Controls */}
-                  <div className="flex flex-col gap-4 md:flex-row md:items-center">
+                  <div className="flex flex-col gap-4 short-screen:gap-2 md:flex-row md:items-center">
                     {/* Search Bar */}
                     <div className="flex-1">
                       <SearchBar
@@ -494,15 +572,66 @@ const MobileLayout = () => {
           </div>
         </div>
 
-        {/* Fixed Footer */}
-        <div
-          className={`px-4 py-3 text-center text-xs border-t shrink-0 whitespace-normal wrap-break-word ${darkMode
-            ? 'text-gray-400 bg-gray-800 border-gray-700'
-            : 'text-gray-600 bg-gray-50 border-gray-200'
-            }`}
-        >
-          © {new Date().getFullYear()} LyricDisplay. Designed and developed by Peter Alakembi and David Okaliwe, among other contributors.
-        </div>
+        {/* Fixed Footer: live transport while lyrics are loaded */}
+        {hasLyrics ? (
+          <div
+            className={`sticky bottom-0 z-10 shrink-0 border-t px-3 pt-3 short-screen:pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] short-screen:pb-[max(0.5rem,env(safe-area-inset-bottom))] ${darkMode
+              ? 'bg-gray-900 border-gray-800'
+              : 'bg-white border-gray-200'
+              }`}
+          >
+            <div className="flex items-stretch gap-2">
+              <button
+                type="button"
+                onClick={() => handleStep(-1)}
+                disabled={!canStep}
+                aria-label="Previous line"
+                className={`flex h-14 short-screen:h-12 w-16 shrink-0 items-center justify-center rounded-xl border transition-colors active:scale-[0.98] disabled:opacity-40 ${darkMode
+                  ? 'border-gray-700 bg-gray-800 text-gray-100 active:bg-gray-700'
+                  : 'border-gray-200 bg-gray-50 text-gray-800 active:bg-gray-100'
+                  }`}
+              >
+                <ChevronLeft className="h-7 w-7" />
+              </button>
+              <div
+                className={`flex min-w-0 flex-1 flex-col justify-center rounded-xl border px-3 ${darkMode
+                  ? 'border-gray-800 bg-gray-950/60'
+                  : 'border-gray-200 bg-gray-50'
+                  }`}
+                aria-live="polite"
+              >
+                <span className={`flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] ${isOutputOn && liveLineText
+                  ? 'text-red-500'
+                  : darkMode ? 'text-gray-500' : 'text-gray-400'
+                  }`}>
+                  <span className={`h-1.5 w-1.5 rounded-full ${isOutputOn && liveLineText ? 'bg-red-500' : darkMode ? 'bg-gray-600' : 'bg-gray-300'}`} />
+                  {isOutputOn ? (liveLineText ? 'Live' : 'Ready') : 'Output off'}
+                </span>
+                <span className={`truncate text-sm font-medium ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>
+                  {liveLineText || 'Tap Next to start'}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleStep(1)}
+                disabled={!canStep}
+                aria-label="Next line"
+                className="flex h-14 short-screen:h-12 w-20 shrink-0 items-center justify-center rounded-xl bg-blue-500 text-white transition-colors active:scale-[0.98] active:bg-blue-600 disabled:opacity-40"
+              >
+                <ChevronRight className="h-8 w-8" />
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div
+            className={`px-4 py-3 text-center text-xs border-t shrink-0 whitespace-normal wrap-break-word ${darkMode
+              ? 'text-gray-400 bg-gray-800 border-gray-700'
+              : 'text-gray-600 bg-gray-50 border-gray-200'
+              }`}
+          >
+            © {new Date().getFullYear()} LyricDisplay. Designed and developed by Peter Alakembi and David Okaliwe, among other contributors.
+          </div>
+        )}
 
         {/* Setlist Modal */}
         <SetlistModal />

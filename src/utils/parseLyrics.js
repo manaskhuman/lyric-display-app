@@ -2,6 +2,11 @@
 // File: src/utils/parseLyrics.js
 
 import { isStructureTag } from '../../shared/lyricsParsing/structureTags.js';
+import {
+  isStageOnlyLine,
+  STAGE_ONLY_PREFIX_REGEX,
+  stripStageOnlyPrefix,
+} from '../../shared/lyricsParsing/lineClassification.js';
 import { parseTxtContent } from '../../shared/lyricsParsing/txtParser.js';
 import { processRawTextToLines } from '../../shared/lyricsParsing/txtProcessor.js';
 
@@ -35,17 +40,7 @@ export const parseLyrics = (file, options = {}) => {
 
 export { processRawTextToLines, parseTxtContent };
 
-const STAGE_ONLY_LINE_REGEX = /^\s*\/\//;
-const STAGE_ONLY_PREFIX_REGEX = /^(\s*)\/\/\s*/;
-
-export const isStageOnlyLine = (lineText) => (
-  typeof lineText === 'string' && STAGE_ONLY_LINE_REGEX.test(lineText)
-);
-
-export const stripStageOnlyPrefix = (lineText) => {
-  if (typeof lineText !== 'string') return '';
-  return lineText.replace(STAGE_ONLY_PREFIX_REGEX, '');
-};
+export { isStageOnlyLine, stripStageOnlyPrefix };
 
 export const toggleStageOnlyPrefix = (lineText) => {
   if (typeof lineText !== 'string') return '';
@@ -163,4 +158,25 @@ export const findNavigableLyricLineIndex = (
   }
 
   return null;
+};
+
+const isCreditBearingLine = (line, sectionTagPhrases) => (
+  !isStructureTagLyricLine(line, sectionTagPhrases) && Boolean(getLineOutputText(line).trim())
+);
+
+/**
+ * Whether an output's song-credit footer should accompany the selected line.
+ * @param {{ mode: 'off'|'first'|'last'|'first-last'|'always', lyrics: Array, selectedLine: number|null }} options
+ */
+export const shouldShowSongCredits = ({ mode = 'off', lyrics, selectedLine, sectionTagPhrases } = {}) => {
+  if (!mode || mode === 'off' || !Array.isArray(lyrics) || !Number.isInteger(selectedLine)) return false;
+  if (!isCreditBearingLine(lyrics[selectedLine], sectionTagPhrases)) return false;
+  if (mode === 'always') return true;
+
+  const firstLine = lyrics.findIndex((line) => isCreditBearingLine(line, sectionTagPhrases));
+  const lastLine = lyrics.findLastIndex((line) => isCreditBearingLine(line, sectionTagPhrases));
+  if (mode === 'first') return selectedLine === firstLine;
+  if (mode === 'last') return selectedLine === lastLine;
+  if (mode === 'first-last') return selectedLine === firstLine || selectedLine === lastLine;
+  return false;
 };

@@ -51,7 +51,7 @@ import LyricsWorkspace from './LyricDisplayApp/LyricsWorkspace';
 import ConnectedOutputsStrip from './LyricDisplayApp/ConnectedOutputsStrip';
 import useLyricsStore from '../context/LyricsStore';
 
-const LyricDisplayApp = () => {
+const DesktopControlPanel = () => {
   const navigate = useNavigate();
 
   const { isOutputOn, setIsOutputOn } = useOutputState();
@@ -66,6 +66,8 @@ const LyricDisplayApp = () => {
   const { settings: autoplaySettings, setSettings: setAutoplaySettings } = useAutoplaySettings();
   const { hasSeenIntelligentAutoplayInfo, setHasSeenIntelligentAutoplayInfo } = useIntelligentAutoplayState();
   const { skipSectionTitlesOnKeyboard } = useKeyboardNavigationPreferences();
+  const lyricsSections = useLyricsStore((state) => state.lyricsSections);
+  const sectionTagPhrases = useLyricsStore((state) => state.lyricsParsingOptions.groupingConfig.sectionTagPhrases);
 
   useDarkModeSync(darkMode, setDarkMode);
 
@@ -355,6 +357,7 @@ const LyricDisplayApp = () => {
     emitSetlistLoad,
     hasLyrics,
     lyricsFileName,
+    setlistItemId: lyricsSource?.setlistItemId || null,
     setlistFiles,
     showToast,
   });
@@ -419,6 +422,9 @@ const LyricDisplayApp = () => {
 
   useExternalControl({
     lyrics,
+    lyricsSections,
+    skipSectionTitles: skipSectionTitlesOnKeyboard,
+    sectionTagPhrases,
     selectedLine,
     isOutputOn,
     autoplayActive,
@@ -453,10 +459,6 @@ const LyricDisplayApp = () => {
     return `${base} ${darkMode ? 'bg-transparent text-gray-300 hover:bg-blue-500/10 hover:text-blue-300 focus-visible:bg-blue-500/10 focus-visible:text-blue-300' : 'bg-transparent text-gray-600 hover:bg-blue-50 hover:text-blue-600 focus-visible:bg-blue-50 focus-visible:text-blue-600'}`;
   };
 
-  if (!isDesktopApp) {
-    return <MobileLayout />;
-  }
-
   return (
     <>
       <ConnectionBackoffBanner darkMode={darkMode} />
@@ -485,23 +487,25 @@ const LyricDisplayApp = () => {
             />
 
             {/* Load and Create Buttons */}
+            {/* Load and Create Buttons */}
             <div data-tour="load-lyrics" className={`flex gap-3 ${hasLyrics ? 'mb-3' : 'mb-6'}`}>
               <Tooltip content={<span>Search indexed lyric folders - <strong>Ctrl+O</strong></span>} side="right">
                 <button
-                  className="control-squircle flex-1 py-3 px-4 bg-linear-to-r from-blue-400 to-purple-600 text-white rounded-2xl text-sm font-medium hover:from-blue-500 hover:to-purple-700 transition-all duration-200 flex items-center justify-center gap-2"
+                  className="control-squircle flex-1 py-3 px-4 bg-blue-500 text-white rounded-2xl text-sm font-medium hover:bg-blue-400 transition-all duration-200 flex items-center justify-center gap-2"
                   onClick={openFileDialog}
                 >
                   <FolderOpen className="w-4 h-4" />
                   Load lyrics
                 </button>
               </Tooltip>
-              <Tooltip content={<span>Open the song canvas to create new lyrics from scratch - <strong>Ctrl+N</strong></span>} side="right">
+              <Tooltip content={<span>Open the song editor to create a new song - <strong>Ctrl+N</strong></span>} side="right">
                 <button
                   className={`control-squircle h-13 w-13 rounded-2xl text-sm font-medium transition-all duration-200 flex items-center justify-center ${darkMode
                     ? 'bg-gray-700 hover:bg-blue-500/10 hover:text-blue-300 text-gray-200'
                     : 'bg-muted hover:bg-blue-50 hover:text-blue-600 text-gray-700'
                     }`}
                   onClick={handleCreateNewSong}
+                  aria-label="Create a new song"
                 >
                   <FilePlusCorner className="w-4 h-4" />
                 </button>
@@ -533,18 +537,20 @@ const LyricDisplayApp = () => {
                   size="large"
                   variant="control"
                 />
-                <span className={`inline-flex items-center gap-2 text-[13px] font-semibold ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
-                  <span className="inline-block w-37 shrink-0">{isOutputOn ? 'Output Display is ON' : 'Output Display is OFF'}</span>
-                  <span className="relative inline-flex h-5 w-5 shrink-0 items-center justify-center" aria-hidden="true">
-                    <span className={`absolute h-2 w-2 origin-center rounded-full opacity-20 transition-all duration-500 ease-out motion-reduce:transition-none ${isOutputOn
-                      ? 'scale-[2.6] bg-green-500 dark:bg-green-400'
-                      : `scale-100 ${darkMode ? 'bg-gray-500' : 'bg-gray-400'}`
-                      }`} />
-                    <span className={`relative h-2 w-2 rounded-full ${isOutputOn
-                      ? 'bg-green-500 dark:bg-green-400'
-                      : darkMode ? 'bg-gray-500' : 'bg-gray-400'
+                <span className="inline-flex" aria-live="polite">
+                  <span
+                    className={`inline-flex w-fit items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] font-bold uppercase tracking-[0.14em] transition-colors ${isOutputOn
+                      ? 'bg-red-600 text-white shadow-sm shadow-red-950/30'
+                      : darkMode ? 'bg-gray-700 text-gray-300' : 'bg-gray-200 text-gray-600'
                       }`}
-                    />
+                  >
+                    <span className="relative inline-flex h-2 w-2 items-center justify-center" aria-hidden="true">
+                      {isOutputOn && (
+                        <span className="absolute h-2 w-2 animate-ping rounded-full bg-white/70 motion-reduce:animate-none" />
+                      )}
+                      <span className={`relative h-1.5 w-1.5 rounded-full ${isOutputOn ? 'bg-white' : darkMode ? 'bg-gray-400' : 'bg-gray-500'}`} />
+                    </span>
+                    {isOutputOn ? 'Live' : 'Off air'}
                   </span>
                 </span>
               </div>
@@ -585,7 +591,7 @@ const LyricDisplayApp = () => {
               <TabsList
                 data-tour="output-settings"
                 indicatorClassName={darkMode ? 'bg-white shadow' : 'bg-black shadow'}
-                className={`w-full p-1 h-11 mb-8 gap-1 ${darkMode ? 'bg-[#2b3544] text-gray-300' : 'bg-muted'}`}
+                className={`w-full p-1 h-11 mb-8 gap-1 ${darkMode ? 'bg-[#2e2e33] text-gray-300' : 'bg-muted'}`}
               >
                 {allOutputIds.map((id) => {
                   const num = id.replace('output', '');
@@ -713,5 +719,9 @@ const LyricDisplayApp = () => {
     </>
   );
 };
+
+// The browser controller has its own layout. The desktop panel's shortcuts, file handling, and
+// Electron listeners must never run underneath it, so it is only mounted in the desktop app.
+const LyricDisplayApp = () => (useIsDesktopApp() ? <DesktopControlPanel /> : <MobileLayout />);
 
 export default LyricDisplayApp;

@@ -6,6 +6,7 @@ import useToast from './useToast';
 import { detectArtistFromFilename } from '../utils/artistDetection';
 import useLyricsStore from '../context/LyricsStore';
 import { mergeLyricsParsingOptions } from '../../shared/lyricsParsing/preferenceOptions.js';
+import { applySongMetadataHeader } from '../../shared/lyricsParsing/songMetadata.js';
 import {
   getLyricFormatLabel,
   getLyricOriginLabel,
@@ -53,7 +54,7 @@ const useFileUpload = () => {
       let sourceContent = typeof additionalOptions.rawText === 'string'
         ? additionalOptions.rawText
         : (parsed.rawText || '');
-      if ((isLrc || fileType === 'txt') && typeof additionalOptions.rawText !== 'string' && file && typeof file.text === 'function') {
+      if ((isLrc || fileType === 'txt' || fileType === 'ldsong') && typeof additionalOptions.rawText !== 'string' && file && typeof file.text === 'function') {
         try {
           sourceContent = await file.text();
         } catch {
@@ -85,14 +86,14 @@ const useFileUpload = () => {
         ? additionalOptions.songMetadata
         : null;
       const metadata = providedMetadata
-        ? {
+        ? applySongMetadataHeader({
           ...providedMetadata,
           title: providedMetadata.title || detected.title || baseName,
           lyricLines: parsed.processedLines.length,
           filePath,
           ...(fileType === 'txt' ? { groupingPlan: parsed.groupingPlan || null } : {}),
-        }
-        : {
+        }, parsed.songMetadata)
+        : applySongMetadataHeader({
           title: detected.title || baseName,
           artists: detected.artist ? [detected.artist] : [],
           album: null,
@@ -101,7 +102,7 @@ const useFileUpload = () => {
           origin: getLyricOriginLabel(fileType),
           filePath,
           ...(fileType === 'txt' ? { groupingPlan: parsed.groupingPlan || null } : {}),
-        };
+        }, parsed.songMetadata, { override: true });
       setSongMetadata(metadata);
 
       emitLyricsLoad({

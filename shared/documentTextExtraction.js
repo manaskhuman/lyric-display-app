@@ -1,5 +1,11 @@
 import { parseLrcContent } from './lyricsParsing/lrcParser.js';
 import { parseTxtContent } from './lyricsParsing/txtParser.js';
+import {
+  documentFromProcessedLines,
+  isLdsongContent,
+  parseLdsongContent,
+  serializeLdsongDocument,
+} from './lyricsParsing/ldsong.js';
 import { getLyricParserType, normalizeLyricFileType } from './lyricImportRegistry.js';
 import {
   MAX_DOCX_ARCHIVE_ENTRIES,
@@ -341,7 +347,65 @@ export async function parseLyricImportContent({
     readFile,
   });
 
-  return getLyricParserType(normalizedType) === 'lrc'
+  const parserType = getLyricParserType(normalizedType);
+  // Structured songs never go through the guessing parsers (parseTxtContent also detects them).
+  if (parserType === 'ldsong') {
+    return parseLdsongContent(extractedText);
+  }
+  return parserType === 'lrc'
     ? parseLrcContent(extractedText, parsingOptions)
     : parseTxtContent(extractedText, parsingOptions);
+}
+
+/**
+ * Convert imported song text (for example EasyWorship lyrics) into .ldsong text. The
+ * structure is guessed once with the user's parsing settings, then stored explicitly.
+ */
+export function createLdsongFromImportedText(text, { songMetadata = null, provenance = null, parsingOptions = {} } = {}) {
+  // Section tags are the structure being stored, so they are always isolated here, even
+  // when the user strips or keeps tags for plain-text display.
+  const parsed = parseTxtContent(String(text ?? ''), {
+    ...parsingOptions,
+    groupingConfig: { ...(parsingOptions?.groupingConfig || {}), structureTagMode: 'isolate' },
+  });
+  const document = documentFromProcessedLines(parsed.processedLines, {
+    songMetadata: { ...(parsed.songMetadata || {}), ...(songMetadata || {}) },
+    sectionTagPhrases: parsingOptions?.groupingConfig?.sectionTagPhrases,
+  });
+  if (provenance?.key && provenance?.value) document.extraHeaders.push(provenance);
+  return serializeLdsongDocument(document);
+}
+
+const TIMED_LRC_REGEX = /^\[\d{1,2}:\d{2}(?:\.\d{1,3})?\]/;
+
+/**
+ * Prepare lyrics returned by an online provider for loading. Song text is converted into
+ * .ldsong once, so the layout is stored explicitly; timed LRC lyrics stay LRC because
+ * .ldsong cannot hold timestamps.
+ * @returns {{ content: string, fileType: 'ldsong' | 'lrc' }}
+ */
+export function prepareLyricTextImport(lyric = {}, { providerName = '', parsingOptions = {}, importedOn = null } = {}) {
+  const content = String(lyric?.content ?? '');
+  const trimmed = content.trim();
+  if (TIMED_LRC_REGEX.test(trimmed)) return { content, fileType: 'lrc' };
+  if (isLdsongContent(content)) return { content, fileType: 'ldsong' };
+
+  const year = lyric?.year ?? lyric?.metadata?.year;
+  const album = lyric?.album || lyric?.albumName;
+  const source = String(providerName || lyric?.provider || '').trim();
+  return {
+    content: createLdsongFromImportedText(content, {
+      songMetadata: {
+        ...(lyric?.title ? { title: String(lyric.title) } : {}),
+        ...(lyric?.artist ? { artists: [String(lyric.artist)] } : {}),
+        ...(album ? { album: String(album) } : {}),
+        ...(year ? { year: String(year) } : {}),
+      },
+      provenance: source
+        ? { key: `Imported from ${source}`, value: importedOn || new Date().toISOString().split('T')[0] }
+        : null,
+      parsingOptions,
+    }),
+    fileType: 'ldsong',
+  };
 }

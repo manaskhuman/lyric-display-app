@@ -1,3 +1,6 @@
+const DISPLAY_REMOVED_TOAST_DURATION_MS = 10_000;
+let recentDisplayRemovals = [];
+
 /**
  * Show display detection modal for one or more displays
  * @param {Object|Array} displayOrDisplays - Single display object or array of display objects
@@ -74,8 +77,9 @@ export async function showDisplayDetectionModal(displayOrDisplays, isStartupChec
  * @param {string} changeType - Type of change ('added' or 'removed')
  * @param {Object} display - Display object
  * @param {Function} requestRendererModal - Modal request function
+ * @param {{ now?: number }} [options]
  */
-export async function handleDisplayChange(changeType, display, requestRendererModal) {
+export async function handleDisplayChange(changeType, display, requestRendererModal, options = {}) {
   if (changeType === 'added') {
     console.log('[DisplayDetection] New display detected via listener:', display.id);
 
@@ -94,39 +98,54 @@ export async function handleDisplayChange(changeType, display, requestRendererMo
   }
 
   if (changeType === 'removed') {
+    const now = Number.isFinite(options.now) ? options.now : Date.now();
     const outputKey = display?.removedAssignment?.outputKey || null;
     const displayName = display?.label || `Display ${display?.id ?? ''}`.trim();
-    const assignmentText = outputKey
-      ? ` It was assigned to ${outputKey.replace(/^output/i, 'Output ')}.`
-      : '';
+    const summary = outputKey
+      ? `${displayName} (${outputKey.replace(/^output/i, 'Output ')})`
+      : displayName;
 
-    const result = await requestRendererModal({
-      title: 'Display disconnected',
-      description: `${displayName} is no longer available.${assignmentText} Verify the remaining projection windows before continuing.`,
+    // Removals that land while the previous toast is still visible update that one toast.
+    recentDisplayRemovals = recentDisplayRemovals.filter((entry) => (
+      now - entry.at < DISPLAY_REMOVED_TOAST_DURATION_MS && entry.id !== display?.id
+    ));
+    recentDisplayRemovals.push({ id: display?.id, summary, at: now });
+
+    const summaries = recentDisplayRemovals.map((entry) => entry.summary);
+    const hiddenCount = summaries.length - 2;
+    const message = hiddenCount > 0
+      ? `${summaries.slice(0, 2).join(', ')} and ${hiddenCount} more`
+      : summaries.join(', ');
+
+    await requestRendererModal({
+      presentation: 'toast',
+      title: summaries.length > 1 ? `${summaries.length} displays disconnected` : 'Display disconnected',
+      message,
       variant: 'warning',
-      size: 'sm',
-      dedupeKey: `display-removed:${display?.id ?? 'unknown'}`,
-      dismissible: true,
+      duration: DISPLAY_REMOVED_TOAST_DURATION_MS,
+      dedupeKey: 'display-removed',
       actions: [
-        { label: 'Dismiss', value: 'dismiss', variant: 'outline' },
-        { label: 'Review Output Routing', value: 'review', variant: 'default', autoFocus: true },
+        {
+          label: 'Review routing',
+          modal: {
+            title: 'Project Output',
+            component: 'ProjectOutput',
+            dedupeKey: 'component:ProjectOutput',
+            size: 'lg',
+            className: 'max-w-4xl',
+            dismissible: true,
+            actions: [],
+            customLayout: true,
+            triggerSource: 'manual',
+          },
+        },
       ],
     }, {
-      timeout: false,
       fallback: () => ({ dismissed: true }),
     }).catch((error) => {
       console.error('[DisplayDetection] Failed to show removal alert:', error);
       return null;
     });
-
-    if (result?.data !== 'review') return;
-
-    try {
-      const { getAllDisplays } = await import('./displayManager.js');
-      await showDisplayDetectionModal(getAllDisplays(), false, requestRendererModal, true);
-    } catch (error) {
-      console.error('[DisplayDetection] Failed to open output routing after removal:', error);
-    }
   }
 }
 

@@ -10,6 +10,7 @@ import {
   createNavigatorPreview,
   parseFileNavigatorQuery,
   prepareNavigatorSearchRecord,
+  hasNavigatorTextContent,
   scoreNavigatorSearchRecord,
 } from '../shared/fileNavigatorSearch.js';
 import { validateNavigatorSaveName } from '../shared/fileNavigatorSave.js';
@@ -18,12 +19,13 @@ import {
   getFileNavigatorRootLimitError,
 } from '../shared/fileNavigatorLimits.js';
 import {
+  convertTextSongFileToLdsong,
   getActiveLyricImportByteLimit,
   grantLyricWritePath,
   normalizeLyricPath,
 } from './lyricFiles.js';
 import { getRecents } from './recents.js';
-import { ensureNavigatorDirectory } from './fileNavigatorDirectories.js';
+import { arrangeRootsWithLibrary, countUserRoots, ensureNavigatorDirectory } from './fileNavigatorDirectories.js';
 import {
   APP_NAME,
   EASYWORSHIP_IMPORT_FOLDER_NAME,
@@ -45,6 +47,8 @@ const IGNORED_DIRECTORIES = new Set([
 ]);
 
 let initializedPromise = null;
+// The song library: Documents/LyricDisplay/Lyrics, always indexed and the default save home.
+let libraryPath = null;
 let roots = [];
 let records = new Map();
 let database = null;
@@ -218,6 +222,31 @@ async function folderContainsSupportedLyrics(rootPath) {
   return false;
 }
 
+export function getSongLibraryFolderPath() {
+  return path.join(app.getPath('documents'), APP_NAME, 'Lyrics');
+}
+
+const isLibraryRoot = (rootPath) => Boolean(libraryPath)
+  && normalizeComparisonPath(rootPath) === normalizeComparisonPath(libraryPath);
+
+async function ensureSongLibraryRoot() {
+  try {
+    const target = getSongLibraryFolderPath();
+    await ensureNavigatorDirectory(path.dirname(target), 'The LyricDisplay Documents folder');
+    await ensureNavigatorDirectory(target, 'The song library');
+    libraryPath = await fs.realpath(target);
+  } catch (error) {
+    libraryPath = null;
+    status = { ...status, error: `The song library could not be set up. ${error?.message || ''}`.trim() };
+    return;
+  }
+  const arranged = arrangeRootsWithLibrary(roots, libraryPath);
+  if (arranged.length !== roots.length || arranged.some((root, index) => root !== roots[index])) {
+    roots = arranged;
+    await persistConfig();
+  }
+}
+
 async function addAutomaticImportRoots() {
   const importRoot = path.join(app.getPath('documents'), APP_NAME);
   const candidates = [EASYWORSHIP_IMPORT_FOLDER_NAME, PRESENTATION_IMPORT_FOLDER_NAME]
@@ -236,7 +265,7 @@ async function addAutomaticImportRoots() {
       const retainedRoots = roots.filter((entry) => (
         !isWithinPath(normalizeComparisonPath(entry), realRootKey)
       ));
-      if (retainedRoots.length >= FILE_NAVIGATOR_LIMITS.maxRoots) continue;
+      if (countUserRoots(retainedRoots, libraryPath) >= FILE_NAVIGATOR_LIMITS.maxRoots) continue;
       roots = [...retainedRoots, realRoot];
       changed = true;
     } catch { }
@@ -484,7 +513,7 @@ async function createRecord(
 
   let contentText = '';
   if (
-    (format.fileType === 'txt' || format.fileType === 'lrc')
+    hasNavigatorTextContent(format.fileType)
     && fileStat.size <= contentByteLimit
     && reserveContentBytes(contentBudget, candidate.rootPath, fileStat.size)
   ) {
@@ -693,6 +722,7 @@ async function queueRebuild() {
 
 async function initialize() {
   await loadConfig();
+  await ensureSongLibraryRoot();
   await addAutomaticImportRoots();
   await openDatabase();
   loadCachedRecords();
@@ -715,7 +745,7 @@ function publicRecord(record, { query = '', matchedField = null } = {}) {
     parentPath: record.parentPath,
     size: record.size,
     modifiedMs: record.modifiedMs,
-    previewAvailable: record.fileType === 'txt' || record.fileType === 'lrc',
+    previewAvailable: hasNavigatorTextContent(record.fileType),
     matchedField,
     matchSnippet: matchedField === 'content'
       ? createNavigatorMatchSnippet(record.contentText, query, record.fileType)
@@ -726,9 +756,11 @@ function publicRecord(record, { query = '', matchedField = null } = {}) {
 async function describeRoots() {
   return Promise.all(roots.map(async (rootPath) => {
     const issue = rootIssues.get(normalizeComparisonPath(rootPath)) || null;
+    const library = isLibraryRoot(rootPath);
     return {
       path: rootPath,
-      name: path.basename(rootPath) || rootPath,
+      name: library ? 'Library' : (path.basename(rootPath) || rootPath),
+      library,
       available: await pathIsDirectory(rootPath),
       indexable: !issue,
       issue,
@@ -759,7 +791,7 @@ async function recentEntries() {
         parentPath: path.dirname(normalized),
         size: fileStat.size,
         modifiedMs: fileStat.mtimeMs,
-        previewAvailable: format.fileType === 'txt' || format.fileType === 'lrc',
+        previewAvailable: hasNavigatorTextContent(format.fileType),
         recent: true,
         missing: false,
       };
@@ -818,7 +850,7 @@ export async function getFileNavigatorSaveDestinations(preferredDirectory = null
     seen.add(key);
     destinations.push({
       ...root,
-      detail: 'Indexed lyrics folder',
+      detail: root.library ? 'LyricDisplay song library' : 'Indexed lyrics folder',
       preferred: false,
     });
   }
@@ -893,7 +925,7 @@ async function addFileNavigatorRootsUnlocked(rootPaths) {
       const retainedRoots = nextRoots.filter((entry) => (
         !isWithinPath(normalizeComparisonPath(entry), selection.key)
       ));
-      if (retainedRoots.length >= FILE_NAVIGATOR_LIMITS.maxRoots) {
+      if (countUserRoots(retainedRoots, libraryPath) >= FILE_NAVIGATOR_LIMITS.maxRoots) {
         skipped.push({
           path: selection.path,
           name: path.basename(selection.path) || selection.path,
@@ -917,7 +949,7 @@ async function addFileNavigatorRootsUnlocked(rootPaths) {
     }
 
     if (addedPaths.length > 0) {
-      roots = nextRoots;
+      roots = arrangeRootsWithLibrary(nextRoots, libraryPath);
       for (const addedPath of addedPaths) {
         rootIssues.delete(normalizeComparisonPath(addedPath));
       }
@@ -993,7 +1025,14 @@ export async function removeFileNavigatorRoot(rootPath) {
   return withRootMutationLock(async () => {
     try {
       const normalized = normalizeComparisonPath(normalizeLyricPath(rootPath));
-      roots = roots.filter((entry) => normalizeComparisonPath(entry) !== normalized);
+      if (isLibraryRoot(rootPath)) {
+        throw new Error('The LyricDisplay song library is always indexed and cannot be removed.');
+      }
+      // Removing a folder that contained the library hands indexing back to the library itself.
+      roots = arrangeRootsWithLibrary(
+        roots.filter((entry) => normalizeComparisonPath(entry) !== normalized),
+        libraryPath,
+      );
       rootIssues.delete(normalized);
       records = new Map([...records.entries()].filter(([, record]) => rootForPath(record.filePath)));
       await persistConfig();
@@ -1013,13 +1052,56 @@ export async function rebuildFileNavigatorIndex() {
   return getFileNavigatorState();
 }
 
+/**
+ * Write a structured .ldsong beside every indexed .txt song. Originals stay in place,
+ * existing .ldsong files are never overwritten, and .lrc files are left alone because
+ * .ldsong cannot hold their timestamps.
+ */
+export async function convertLibraryTextSongsToLdsong() {
+  await ensureInitialized();
+  if (rebuildPromise) await rebuildPromise.catch(() => { });
+
+  const [{ getParsingConfig }, { buildLyricsParsingOptions }, { getRememberedLyricsGrouping }] = await Promise.all([
+    import('./userPreferences.js'),
+    import('../shared/lyricsParsing/preferenceOptions.js'),
+    import('./lyricsGroupingMetadata.js'),
+  ]);
+  const parsingOptions = buildLyricsParsingOptions(getParsingConfig());
+  const convertedOn = new Date().toISOString().split('T')[0];
+  const sourcePaths = [...records.values()]
+    .filter((record) => record.fileType === 'txt' && rootForPath(record.filePath))
+    .map((record) => record.filePath)
+    .sort((a, b) => naturalCollator.compare(a, b));
+
+  const summary = { total: sourcePaths.length, converted: 0, skipped: 0, failed: 0, failures: [] };
+  for (const sourcePath of sourcePaths) {
+    try {
+      let groupingPlan = null;
+      try {
+        groupingPlan = getRememberedLyricsGrouping(sourcePath, await fs.readFile(sourcePath, 'utf8'));
+      } catch { }
+      const result = await convertTextSongFileToLdsong(sourcePath, { parsingOptions, groupingPlan, convertedOn });
+      if (result.status === 'converted') summary.converted += 1;
+      else summary.skipped += 1;
+    } catch (error) {
+      summary.failed += 1;
+      if (summary.failures.length < 20) {
+        summary.failures.push({ fileName: path.basename(sourcePath), error: error?.message || 'Conversion failed' });
+      }
+    }
+  }
+
+  if (summary.converted > 0) await queueRebuild();
+  return summary;
+}
+
 export async function searchFileNavigator({ query = '', fileTypes = [], limit = 80 } = {}) {
   await ensureInitialized();
   const parsed = parseFileNavigatorQuery(query);
   const queryHadTypeFilters = parsed.fileTypes.length > 0;
   const requestedTypes = [...new Set((Array.isArray(fileTypes) ? fileTypes : [])
     .map((value) => String(value || '').toLowerCase())
-    .filter((value) => ['txt', 'lrc', 'md', 'rtf', 'docx'].includes(value)))];
+    .filter((value) => ['ldsong', 'txt', 'lrc', 'md', 'rtf', 'docx'].includes(value)))];
   if (requestedTypes.length > 0) {
     parsed.fileTypes = parsed.fileTypes.length > 0
       ? parsed.fileTypes.filter((value) => requestedTypes.includes(value))
@@ -1194,7 +1276,7 @@ export async function getFileNavigatorPreview(filePath) {
   await ensureInitialized();
   const resolved = await resolveFileWithinRoots(filePath);
   const format = getLyricImportFormatForName(resolved);
-  if (!format || (format.fileType !== 'txt' && format.fileType !== 'lrc')) {
+  if (!format || !hasNavigatorTextContent(format.fileType)) {
     return { available: false, content: '' };
   }
   const fileStat = await fs.stat(resolved);

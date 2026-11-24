@@ -26,6 +26,15 @@ import {
   sanitizePersistedStageTimerState,
 } from '../server/realtime/sessionPersistence.js';
 import { buildCurrentState, buildPeriodicState, state } from '../server/realtime/state.js';
+import {
+  emitIndividualOutputEvent,
+  emitLyricsLoad,
+  emitSetlistUpdate,
+  emitStageMessagesUpdate,
+  emitStageTimerUpdate,
+  setCcliLicenseNumber,
+} from '../server/realtime/broadcast.js';
+import { findActiveSetlistIndex, getAdjacentSetlistItem } from '../shared/setlistNavigation.js';
 import { getSocketConnectionScope } from '../server/realtime/utils.js';
 import {
   OUTPUT_PRESENCE_STALE_MS,
@@ -319,7 +328,13 @@ test('lyricsLoad fanout sends render-only payloads to displays and skips timer c
       fileName: 'Service Song',
       rawLyricsContent: 'Raw source that displays should not receive',
       lyricsSource: { content: 'Raw source that displays should not receive', fileType: 'txt', fileName: 'Service Song.txt' },
-      songMetadata: { title: 'Service Song', artists: ['Artist'] },
+      songMetadata: {
+        title: 'Service Song',
+        artists: ['Artist'],
+        copyright: '© 2024 Example Music',
+        ccliSongNumber: '1234567',
+        filePath: 'C:/Users/operator/Private/Service Song.txt',
+      },
       lyricsTimestamps: [1000, 2000],
       sections: [{ id: 'verse-1', label: 'Verse 1', startIndex: 0 }],
       lineToSection: { 0: 'verse-1' },
@@ -334,10 +349,21 @@ test('lyricsLoad fanout sends render-only payloads to displays and skips timer c
 
     const outputLoad = output.events.find((event) => event.eventName === 'lyricsLoad')?.payload;
     assert.deepEqual(outputLoad.lyrics, ['First line', 'Second line']);
+    const expectedSongCredits = {
+      title: 'Service Song',
+      artists: ['Artist'],
+      copyright: '© 2024 Example Music',
+      administrator: '',
+      ccliSongNumber: '1234567',
+      ccliLicenseNumber: '',
+    };
     assert.deepEqual(outputLoad, {
       lyrics: ['First line', 'Second line'],
       fileName: 'Service Song',
+      songCredits: expectedSongCredits,
+      setlistItemId: null,
     });
+    assert.equal(JSON.stringify(outputLoad).includes('Private'), false);
     assert.equal(Object.hasOwn(outputLoad, 'rawLyricsContent'), false);
     assert.equal(Object.hasOwn(outputLoad, 'lyricsSource'), false);
     assert.equal(Object.hasOwn(outputLoad, 'songMetadata'), false);
@@ -346,6 +372,8 @@ test('lyricsLoad fanout sends render-only payloads to displays and skips timer c
     assert.deepEqual(stageLoad, {
       lyrics: ['First line', 'Second line'],
       fileName: 'Service Song',
+      songCredits: expectedSongCredits,
+      setlistItemId: null,
     });
 
     assert.equal(timerControl.events.some((event) => event.eventName === 'lyricsLoad'), false);
@@ -734,15 +762,15 @@ test('setlist replacement validates the complete batch before mutating live stat
     let invalidResult = null;
     handlers.get('setlistReplace')?.({
       files: [
-        { name: 'Duplicate.txt', content: 'First' },
-        { name: 'Duplicate.lrc', content: 'Second' },
+        { name: 'Valid Song.txt', content: 'First' },
+        { name: 'Second Song.txt', content: '' },
       ],
     }, (result) => {
       invalidResult = result;
     });
 
     assert.equal(invalidResult.success, false);
-    assert.match(invalidResult.error, /already exists/i);
+    assert.match(invalidResult.error, /missing content/i);
     assert.equal(state.setlistFiles.length, 1);
     assert.equal(state.setlistFiles[0].id, 'existing-song');
 
@@ -818,6 +846,42 @@ test('setlist recovery is limited to the current Electron app session', () => {
     assert.deepEqual(state.setlistFiles, []);
   } finally {
     Object.assign(state, previousState);
+  }
+});
+
+test('a running stage timer survives a backend restart within the same app session', () => {
+  const previousTimerState = state.currentStageTimerState;
+  const runningTimer = {
+    status: 'running',
+    running: true,
+    paused: false,
+    durationMs: 600_000,
+    startTime: 1_000_000,
+    endTime: 1_600_000,
+    revision: 7,
+    display: { label: 'Sermon' },
+  };
+  state.currentStageTimerState = runningTimer;
+
+  try {
+    const snapshot = createSessionSnapshot({ appSessionId: 'app-session-a' });
+    assert.equal(snapshot.currentStageTimerState.running, true);
+
+    state.currentStageTimerState = null;
+    assert.equal(applySessionSnapshot(snapshot, { appSessionId: 'app-session-a' }), true);
+    assert.equal(state.currentStageTimerState.status, 'running');
+    assert.equal(state.currentStageTimerState.endTime, 1_600_000);
+    assert.equal(state.currentStageTimerState.revision, 7);
+
+    assert.equal(applySessionSnapshot(snapshot, { appSessionId: 'app-session-b' }), true);
+    assert.equal(state.currentStageTimerState.status, 'idle');
+    assert.equal(state.currentStageTimerState.running, false);
+    assert.deepEqual(state.currentStageTimerState.display, { label: 'Sermon' });
+
+    const sessionlessSnapshot = createSessionSnapshot({ appSessionId: null });
+    assert.equal(sessionlessSnapshot.currentStageTimerState.running, false);
+  } finally {
+    state.currentStageTimerState = previousTimerState;
   }
 });
 
@@ -1584,7 +1648,6 @@ test('Preview layout settings reach browser Preview clients and hydrate reconnec
       permissions: ['lyrics:read', 'settings:read'],
     });
     assert.deepEqual(reconnectState.previewSettings, nextSettings);
-    assert.equal(Object.hasOwn(reconnectState, 'lyrics'), false);
 
     const periodicState = buildPeriodicState({
       type: 'output-discovery',
@@ -1742,8 +1805,8 @@ test('current state is trimmed for timer, time display, and output clients', () 
   state.currentLyricsTimestamps = [1000, 2000];
   state.currentLyricsFileName = 'Service Song';
   state.currentRawLyricsContent = 'raw source that should stay off passive display clients';
-  state.currentLyricsSource = { content: state.currentRawLyricsContent, fileType: 'txt', fileName: 'Service Song.txt' };
-  state.currentSongMetadata = { title: 'Service Song', artists: ['Artist'] };
+  state.currentLyricsSource = { content: state.currentRawLyricsContent, fileType: 'txt', fileName: 'Service Song.txt', setlistItemId: 'next-song' };
+  state.currentSongMetadata = { title: 'Service Song', artists: ['Artist'], filePath: 'C:/private/Service Song.txt' };
   state.currentLyricsSections = [{ id: 'verse-1', label: 'Verse 1', startIndex: 0 }];
   state.currentLineToSection = { 0: 'verse-1' };
   state.currentSelectedLine = 1;
@@ -1793,6 +1856,14 @@ test('current state is trimmed for timer, time display, and output clients', () 
     assert.equal(Object.hasOwn(outputState, 'lyricsSource'), false);
     assert.equal(Object.hasOwn(outputState, 'songMetadata'), false);
     assert.equal(Object.hasOwn(outputState, 'setlistFiles'), false);
+    assert.deepEqual(outputState.songCredits, {
+      title: 'Service Song',
+      artists: ['Artist'],
+      copyright: '',
+      administrator: '',
+      ccliSongNumber: '',
+      ccliLicenseNumber: '',
+    });
 
     const stageState = buildCurrentState({ type: 'stage', purpose: 'stage-display', permissions: ['lyrics:read'] });
     assert.deepEqual(stageState.lyrics, ['Line one', 'Line two']);
@@ -1807,6 +1878,9 @@ test('current state is trimmed for timer, time display, and output clients', () 
     assert.equal(Object.hasOwn(stageState, 'lineToSection'), false);
     assert.equal(Object.hasOwn(stageState, 'rawLyricsContent'), false);
     assert.equal(Object.hasOwn(stageState, 'lyricsSource'), false);
+    assert.equal(stageState.setlistItemId, 'next-song');
+    assert.equal(stageState.songCredits.title, 'Service Song');
+    assert.equal(JSON.stringify(stageState).includes('private'), false);
 
     const periodicOutputState = buildPeriodicState({ type: 'output1', purpose: 'output1', permissions: ['lyrics:read'] });
     assert.deepEqual(periodicOutputState.output1Settings, { fontSize: 72 });
@@ -1871,4 +1945,245 @@ test('persisted active stage timer runtime is reset for a new app session', () =
   assert.equal(sanitized.endTime, null);
   assert.equal(sanitized.remaining, null);
   assert.deepEqual(sanitized.display, { label: 'Service Timer' });
+});
+
+test('setlist navigation follows the loaded item even when a song appears twice', () => {
+  const files = [
+    { id: 'item-1', displayName: 'Opening Song' },
+    { id: 'item-2', displayName: 'Middle Song' },
+    { id: 'item-3', displayName: 'Opening Song' },
+    { id: 'item-4', displayName: 'Closing Song' },
+  ];
+
+  assert.equal(findActiveSetlistIndex(files, { setlistItemId: 'item-3', lyricsFileName: 'Opening Song' }), 2);
+  assert.equal(getAdjacentSetlistItem(files, { setlistItemId: 'item-3' }, 1).item.id, 'item-4');
+  assert.equal(getAdjacentSetlistItem(files, { setlistItemId: 'item-3' }, -1).item.id, 'item-2');
+
+  assert.equal(findActiveSetlistIndex(files, { setlistItemId: 'removed-item', lyricsFileName: 'Middle Song' }), 1);
+  assert.equal(findActiveSetlistIndex(files, { lyricsFileName: 'Opening Song' }), 0);
+  assert.equal(findActiveSetlistIndex(files, { lyricsFileName: 'Unknown' }), -1);
+  assert.equal(findActiveSetlistIndex([], { setlistItemId: 'item-1' }), -1);
+});
+
+test('setlist navigation stops at the ends instead of wrapping around', () => {
+  const files = [
+    { id: 'item-1', displayName: 'First' },
+    { id: 'item-2', displayName: 'Last' },
+  ];
+
+  assert.deepEqual(getAdjacentSetlistItem(files, { setlistItemId: 'item-2' }, 1), {
+    currentIndex: 1,
+    index: -1,
+    item: null,
+    atBoundary: true,
+  });
+  assert.equal(getAdjacentSetlistItem(files, { setlistItemId: 'item-1' }, -1).atBoundary, true);
+  assert.deepEqual(getAdjacentSetlistItem(files, { lyricsFileName: 'Missing' }, 1), {
+    currentIndex: -1,
+    index: -1,
+    item: null,
+    atBoundary: false,
+  });
+});
+
+test('setlist adds allow the same song more than once', () => {
+  const previousSetlistFiles = state.setlistFiles;
+  const previousLiveSafety = state.liveSafety;
+  state.setlistFiles = [];
+  state.liveSafety = { enabled: false };
+
+  try {
+    const { handlers, io, socket, socketEvents } = createSocketHarness();
+    registerSetlistHandlers({
+      io,
+      socket,
+      hasPermission: () => true,
+      clientType: 'desktop',
+      deviceId: 'device-test',
+      sessionId: 'session-test',
+    });
+
+    const song = { name: 'Reprise.txt', content: 'Line one', lastModified: 1 };
+    handlers.get('setlistAdd')?.([song]);
+    handlers.get('setlistAdd')?.([song]);
+
+    assert.equal(state.setlistFiles.length, 2);
+    assert.notEqual(state.setlistFiles[0].id, state.setlistFiles[1].id);
+    assert.equal(socketEvents.some((event) => event.eventName === 'setlistError'), false);
+  } finally {
+    state.setlistFiles = previousSetlistFiles;
+    state.liveSafety = previousLiveSafety;
+  }
+});
+
+test('the CCLI licence number reaches displays with song credits and updates live', () => {
+  const previousConnectedClients = state.connectedClients;
+  const previousLicence = state.ccliLicenseNumber;
+  const previousMetadata = state.currentSongMetadata;
+  state.connectedClients = new Map();
+  state.currentSongMetadata = { title: 'Licensed Song', artists: ['Writer'], ccliSongNumber: '111' };
+
+  try {
+    const desktop = createTrackedClient('socket-desktop', { type: 'desktop', purpose: 'control', permissions: ['admin:full'] });
+    const output = createTrackedClient('socket-output', { type: 'output1', purpose: 'output1' });
+    const stage = createTrackedClient('socket-stage', { type: 'stage', purpose: 'stage-display' });
+
+    setCcliLicenseNumber({ emit() {} }, 'License #7654321');
+
+    assert.equal(state.ccliLicenseNumber, '7654321');
+    const outputUpdate = output.events.find((event) => event.eventName === 'songCreditsUpdate')?.payload;
+    assert.equal(outputUpdate.ccliLicenseNumber, '7654321');
+    assert.equal(outputUpdate.title, 'Licensed Song');
+    assert.equal(stage.events.some((event) => event.eventName === 'songCreditsUpdate'), true);
+    assert.equal(desktop.events.some((event) => event.eventName === 'songCreditsUpdate'), false);
+
+    const outputState = buildCurrentState({ type: 'output1', purpose: 'output1', permissions: ['lyrics:read'] });
+    assert.equal(outputState.songCredits.ccliLicenseNumber, '7654321');
+  } finally {
+    state.connectedClients = previousConnectedClients;
+    state.ccliLicenseNumber = previousLicence;
+    state.currentSongMetadata = previousMetadata;
+  }
+});
+
+test('setlist loads of .ldsong songs use the strict song format and its credits', () => {
+  const previous = {
+    connectedClients: state.connectedClients,
+    setlistFiles: state.setlistFiles,
+    currentLyrics: state.currentLyrics,
+    currentLyricsSource: state.currentLyricsSource,
+    currentRawLyricsContent: state.currentRawLyricsContent,
+    currentLyricsTimestamps: state.currentLyricsTimestamps,
+    currentLyricsEnhancedTimestamps: state.currentLyricsEnhancedTimestamps,
+    currentLyricsFileName: state.currentLyricsFileName,
+    currentSongMetadata: state.currentSongMetadata,
+    currentSelectedLine: state.currentSelectedLine,
+    currentLyricsSections: state.currentLyricsSections,
+    currentLineToSection: state.currentLineToSection,
+    liveSafety: state.liveSafety,
+  };
+  state.connectedClients = new Map();
+  state.liveSafety = { enabled: false };
+  state.setlistFiles = [
+    {
+      id: 'structured-song',
+      displayName: 'Structured Song',
+      originalName: 'Structured Song.ldsong',
+      fileType: 'ldsong',
+      content: '#LDSONG 1\n# Title: Structured Song\n# CCLI Song Number: 98765\n# Arrangement: Chorus, Chorus\n\n[Chorus]\nShort line one\nShort line two',
+      metadata: null,
+    },
+    {
+      id: 'headerless-song',
+      displayName: 'Headerless',
+      originalName: 'Headerless.ldsong',
+      fileType: 'ldsong',
+      content: 'A very long line that the text parser would happily split into two separate slides for you',
+      metadata: null,
+    },
+  ];
+
+  try {
+    const { handlers, io, socket } = createSocketHarness();
+    registerSetlistHandlers({
+      io,
+      socket,
+      hasPermission: () => true,
+      clientType: 'desktop',
+      deviceId: 'device-test',
+      sessionId: 'session-test',
+    });
+
+    handlers.get('setlistLoad')?.('structured-song');
+    assert.deepEqual(state.currentLyrics.map((line) => (typeof line === 'string' ? line : line.lines)), [
+      '[Chorus]',
+      ['Short line one', 'Short line two'],
+      '[Chorus]',
+      ['Short line one', 'Short line two'],
+    ]);
+    assert.equal(state.currentSongMetadata.ccliSongNumber, '98765');
+    assert.equal(state.currentLyricsSource.fileType, 'ldsong');
+    assert.equal(state.currentLyricsSections.length, 2);
+
+    handlers.get('setlistLoad')?.('headerless-song');
+    assert.equal(state.currentLyrics.length, 1);
+  } finally {
+    Object.assign(state, previous);
+  }
+});
+
+test('the preview grid receives display state for every feed it draws, and nothing controller-only', () => {
+  const saved = {
+    connectedClients: state.connectedClients,
+    lyrics: state.currentLyrics,
+    selectedLine: state.currentSelectedLine,
+    rawLyricsContent: state.currentRawLyricsContent,
+    lyricsSource: state.currentLyricsSource,
+    outputSettings: state.outputSettings,
+    outputEnabled: state.outputEnabled,
+    stageSettings: state.currentStageSettings,
+    stageMessages: state.currentStageMessages,
+    setlistFiles: state.setlistFiles,
+  };
+  state.connectedClients = new Map();
+  state.currentLyrics = ['Line one', 'Line two'];
+  state.currentSelectedLine = 1;
+  state.currentRawLyricsContent = 'private raw text';
+  state.currentLyricsSource = { filePath: 'C:/private/song.txt' };
+  state.outputSettings = new Map([['output1', { fontSize: 72 }], ['output3', { fontSize: 40 }]]);
+  state.outputEnabled = new Map([['output1', true], ['output3', false]]);
+  state.currentStageSettings = { liveFontSize: 120 };
+  state.currentStageMessages = [{ text: 'Welcome' }];
+  state.setlistFiles = [{ id: 'next', displayName: 'Next', originalName: 'Next.txt', content: 'private' }];
+
+  try {
+    const previewInfo = { type: 'output-discovery', purpose: 'preview', permissions: ['lyrics:read'] };
+    const current = buildCurrentState(previewInfo);
+    assert.deepEqual(current.lyrics, ['Line one', 'Line two']);
+    assert.equal(current.selectedLine, 1);
+    assert.deepEqual(current.output1Settings, { fontSize: 72 });
+    assert.deepEqual(current.output3Settings, { fontSize: 40 });
+    assert.equal(current.output3Enabled, false);
+    assert.deepEqual(current.stageSettings, { liveFontSize: 120 });
+    assert.deepEqual(current.stageMessages, [{ text: 'Welcome' }]);
+    assert.ok(current.stageTimerState);
+    assert.ok(current.previewSettings);
+    assert.equal(Object.hasOwn(current, 'rawLyricsContent'), false);
+    assert.equal(Object.hasOwn(current, 'lyricsSource'), false);
+    assert.equal(Object.hasOwn(current, 'lyricsSections'), false);
+    assert.equal(JSON.stringify(current).includes('private'), false);
+
+    const periodic = buildPeriodicState(previewInfo);
+    assert.equal(periodic.selectedLine, 1);
+    assert.deepEqual(periodic.output3Settings, { fontSize: 40 });
+    assert.ok(periodic.stageTimerState);
+    assert.ok(periodic.previewSettings);
+    assert.equal(Object.hasOwn(periodic, 'lyrics'), false);
+
+    const preview = createTrackedClient('socket-preview-grid', { type: 'output-discovery', purpose: 'preview' });
+    const discovery = createTrackedClient('socket-plain-discovery', { type: 'output-discovery', purpose: 'output-discovery' });
+
+    emitLyricsLoad(null, { lyrics: ['A'], fileName: 'Song', rawLyricsContent: 'private raw text' });
+    emitIndividualOutputEvent(null, 'styleUpdate', { output: 'output2', settings: { fontSize: 60 } });
+    emitIndividualOutputEvent(null, 'styleUpdate', { output: 'stage', settings: { liveFontSize: 90 } });
+    emitStageTimerUpdate(null, { running: false });
+    emitStageMessagesUpdate(null, [{ text: 'Hello' }]);
+    emitSetlistUpdate(null, state.setlistFiles);
+
+    const received = preview.events.map((event) => event.eventName);
+    assert.deepEqual(received, ['lyricsLoad', 'styleUpdate', 'styleUpdate', 'stageTimerUpdate', 'stageMessagesUpdate', 'setlistUpdate']);
+    assert.equal(JSON.stringify(preview.events).includes('private'), false);
+    assert.equal(discovery.events.length, 0);
+  } finally {
+    state.connectedClients = saved.connectedClients;
+    state.currentLyrics = saved.lyrics;
+    state.currentSelectedLine = saved.selectedLine;
+    state.currentRawLyricsContent = saved.rawLyricsContent;
+    state.currentLyricsSource = saved.lyricsSource;
+    state.outputSettings = saved.outputSettings;
+    state.outputEnabled = saved.outputEnabled;
+    state.currentStageSettings = saved.stageSettings;
+    state.currentStageMessages = saved.stageMessages;
+    state.setlistFiles = saved.setlistFiles;
+  }
 });
